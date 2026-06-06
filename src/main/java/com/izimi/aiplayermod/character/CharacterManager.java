@@ -72,6 +72,21 @@ public class CharacterManager {
         return pref != null && pref.valence >= threshold && pref.reinforcementCount >= config.preferenceEvolutionThreshold;
     }
 
+    public void triggerStressEvolution() {
+        if (preferences.isEmpty()) return;
+
+        Random random = new Random();
+        int changeCount = random.nextInt(3) + 1;
+        for (int i = 0; i < changeCount && i < preferences.size(); i++) {
+            Preference pref = preferences.get(random.nextInt(preferences.size()));
+            double delta = (random.nextDouble() * 0.2) - 0.05;
+            pref.valence = Math.max(-1.0, Math.min(1.0, pref.valence + delta));
+            pref.reinforcementCount++;
+            AIPlayerMod.LOGGER.info("[CharacterManager] 压力触发偏好修改: {} -> {}", pref.target, String.format("%.2f", pref.valence));
+        }
+        save();
+    }
+
     private void load() {
         var container = JsonUtil.readFromFileSafe(FileUtil.getPreferencesPath(), PreferenceContainer.class);
         if (container != null && container.preferences != null) {

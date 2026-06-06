@@ -1,9 +1,11 @@
 package com.izimi.aiplayermod;
 
+import com.izimi.aiplayermod.api.*;
 import com.izimi.aiplayermod.bot.BotSpawner;
 import com.izimi.aiplayermod.bot.BotController;
 import com.izimi.aiplayermod.character.CharacterManager;
 import com.izimi.aiplayermod.character.BehaviorObserver;
+import com.izimi.aiplayermod.character.PersonalityStress;
 import com.izimi.aiplayermod.command.AICommand;
 import com.izimi.aiplayermod.config.ModConfig;
 import com.izimi.aiplayermod.memory.MemoryManager;
@@ -19,6 +21,8 @@ import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerWorldEvents;
+import net.fabricmc.fabric.api.message.v1.ServerMessageEvents;
+import net.minecraft.text.Text;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -27,7 +31,6 @@ public class AIPlayerMod implements ModInitializer {
     public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
 
     private static ModConfig config;
-    private static FileUtil fileUtil;
     private static TaskManager taskManager;
     private static TaskExecutor taskExecutor;
     private static MemoryManager memoryManager;
@@ -40,6 +43,11 @@ public class AIPlayerMod implements ModInitializer {
     private static CharacterManager characterManager;
     private static BehaviorObserver behaviorObserver;
     private static ExecutionLogger executionLogger;
+    private static PersonalityStress personalityStress;
+    private static AIClient aiClient;
+    private static AITaskPlanner aiTaskPlanner;
+    private static AIChatHandler aiChatHandler;
+    private static AIMemoryGenerator aiMemoryGenerator;
 
     @Override
     public void onInitialize() {
@@ -55,6 +63,18 @@ public class AIPlayerMod implements ModInitializer {
         config = ModConfig.load();
         LOGGER.info("[AI Player] 配置已加载");
 
+        aiClient = new DeepSeekClient();
+        AIConfig.load();
+        LOGGER.info("[AI Player] AI客户端已初始化 (模式: {})",
+                aiClient.isConfigured() ? "AI" : "规则引擎");
+
+        aiTaskPlanner = new AITaskPlanner(aiClient);
+        aiChatHandler = new AIChatHandler(aiClient);
+        aiMemoryGenerator = new AIMemoryGenerator(aiClient);
+
+        personalityStress = new PersonalityStress(config);
+        LOGGER.info("[AI Player] 性格压力系统已初始化");
+
         botSpawner = new BotSpawner();
         stateManager = new StateManager();
         memoryManager = new MemoryManager(config);
@@ -65,8 +85,9 @@ public class AIPlayerMod implements ModInitializer {
         conditionedReflex = new ConditionedReflex(skillManager, config);
         taskExecutor = new TaskExecutor(taskManager, skillManager, stateManager, executionLogger);
         characterManager = new CharacterManager(config);
-        behaviorObserver = new BehaviorObserver(characterManager, config);
-        botController = new BotController(botSpawner, taskManager, taskExecutor, stateManager, conditionedReflex);
+        behaviorObserver = new BehaviorObserver(characterManager, config, personalityStress);
+        botController = new BotController(botSpawner, taskManager, taskExecutor, stateManager,
+                conditionedReflex, aiTaskPlanner, aiChatHandler, aiClient);
 
         CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> {
             AICommand.register(dispatcher);
@@ -81,9 +102,28 @@ public class AIPlayerMod implements ModInitializer {
             if (botController != null) {
                 botController.onTick(server);
             }
+            if (personalityStress != null) {
+                personalityStress.onTick();
+            }
         });
 
         behaviorObserver.register();
+
+        ServerMessageEvents.CHAT_MESSAGE.register((message, sender, params) -> {
+            if (sender != null && aiChatHandler != null && aiClient.isConfigured()) {
+                String content = message.getSignedContent();
+                if (content != null && !content.startsWith("/")) {
+                    var state = stateManager.loadState();
+                    var task = taskManager.getActiveTask();
+                    var mems = memoryManager.getRecentMemories();
+                    var prefs = characterManager.getPreferenceMap();
+
+                    personalityStress.onPlayerInteraction(0.5);
+
+                    aiChatHandler.handleChat(content, state, task, mems, prefs, personalityStress);
+                }
+            }
+        });
 
         LOGGER.info("[AI Player] 初始化完成");
     }
@@ -99,4 +139,9 @@ public class AIPlayerMod implements ModInitializer {
     public static BotController getBotController() { return botController; }
     public static ConditionedReflex getConditionedReflex() { return conditionedReflex; }
     public static MemoryQuery getMemoryQuery() { return memoryQuery; }
+    public static AIClient getAIClient() { return aiClient; }
+    public static AITaskPlanner getAiTaskPlanner() { return aiTaskPlanner; }
+    public static AIChatHandler getAiChatHandler() { return aiChatHandler; }
+    public static AIMemoryGenerator getAiMemoryGenerator() { return aiMemoryGenerator; }
+    public static PersonalityStress getPersonalityStress() { return personalityStress; }
 }

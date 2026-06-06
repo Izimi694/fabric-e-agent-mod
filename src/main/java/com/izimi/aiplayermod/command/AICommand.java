@@ -31,6 +31,13 @@ public class AICommand {
                             return forgetMemory(ctx.getSource(), id);
                         }))
                 )
+                .then(literal("setkey")
+                        .then(argument("key", StringArgumentType.greedyString()).executes(ctx -> {
+                            String key = StringArgumentType.greedyString().getString(ctx, "key");
+                            return setApiKey(ctx.getSource(), key);
+                        }))
+                )
+                .then(literal("apikey").executes(ctx -> showApiKeyStatus(ctx.getSource())))
                 .then(argument("goal", StringArgumentType.greedyString()).executes(ctx -> {
                     String goal = StringArgumentType.greedyString().getString(ctx, "goal");
                     return createTask(ctx.getSource(), goal);
@@ -50,6 +57,8 @@ public class AICommand {
         source.sendFeedback(() -> Text.literal("§e/ai despawn §7- 移除AI玩家"), false);
         source.sendFeedback(() -> Text.literal("§e/ai personality §7- 查看AI个性偏好"), false);
         source.sendFeedback(() -> Text.literal("§e/ai forget <id> §7- 删除指定记忆"), false);
+        source.sendFeedback(() -> Text.literal("§e/ai setkey <key> §7- 设置AI API密钥"), false);
+        source.sendFeedback(() -> Text.literal("§e/ai apikey §7- 查看API密钥状态"), false);
         return 1;
     }
 
@@ -208,6 +217,52 @@ public class AICommand {
             }
         } catch (Exception e) {
             source.sendFeedback(() -> Text.literal("§c[AI Player] 删除失败: " + e.getMessage()), false);
+        }
+        return 1;
+    }
+
+    private static int setApiKey(ServerCommandSource source, String key) {
+        try {
+            var aiClient = AIPlayerMod.getAIClient();
+            if (aiClient == null) {
+                source.sendFeedback(() -> Text.literal("§7[AI Player] AI客户端未初始化"), false);
+                return 0;
+            }
+            if ("clear".equalsIgnoreCase(key.trim())) {
+                aiClient.setApiKey("");
+                source.sendFeedback(() -> Text.literal("§a[AI Player] API密钥已清除，退回规则引擎模式"), false);
+            } else {
+                aiClient.setApiKey(key.trim());
+                source.sendFeedback(() -> Text.literal("§a[AI Player] API密钥已设置，正在测试连接..."), false);
+                boolean ok = aiClient.testConnection();
+                if (ok) {
+                    source.sendFeedback(() -> Text.literal("§a[AI Player] 连接成功! AI模式已激活"), false);
+                } else {
+                    source.sendFeedback(() -> Text.literal("§c[AI Player] 连接失败，请检查密钥是否正确"), false);
+                }
+            }
+        } catch (Exception e) {
+            source.sendFeedback(() -> Text.literal("§c[AI Player] 设置失败: " + e.getMessage()), false);
+        }
+        return 1;
+    }
+
+    private static int showApiKeyStatus(ServerCommandSource source) {
+        try {
+            var aiClient = AIPlayerMod.getAIClient();
+            if (aiClient == null) {
+                source.sendFeedback(() -> Text.literal("§7[AI Player] AI客户端未初始化"), false);
+                return 0;
+            }
+            if (aiClient.isConfigured()) {
+                source.sendFeedback(() -> Text.literal("§a[AI Player] AI模式已激活 (DeepSeek)"), false);
+                source.sendFeedback(() -> Text.literal("§7  使用 /ai setkey clear 可清除密钥，退回规则引擎"), false);
+            } else {
+                source.sendFeedback(() -> Text.literal("§7[AI Player] 规则引擎模式"), false);
+                source.sendFeedback(() -> Text.literal("§7  使用 /ai setkey <key> 设置API密钥启用AI"), false);
+            }
+        } catch (Exception e) {
+            source.sendFeedback(() -> Text.literal("§c[AI Player] 查询失败: " + e.getMessage()), false);
         }
         return 1;
     }

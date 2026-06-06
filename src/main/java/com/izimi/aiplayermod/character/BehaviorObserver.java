@@ -17,6 +17,7 @@ import java.util.*;
 public class BehaviorObserver {
     private final CharacterManager characterManager;
     private final ModConfig config;
+    private final PersonalityStress personalityStress;
 
     private final Map<String, Integer> blockBreakCounts = new HashMap<>();
     private final Map<String, Integer> entityAttackCounts = new HashMap<>();
@@ -26,9 +27,10 @@ public class BehaviorObserver {
     private int observationCount = 0;
     private static final int EVOLVE_THRESHOLD = 10;
 
-    public BehaviorObserver(CharacterManager characterManager, ModConfig config) {
+    public BehaviorObserver(CharacterManager characterManager, ModConfig config, PersonalityStress personalityStress) {
         this.characterManager = characterManager;
         this.config = config;
+        this.personalityStress = personalityStress;
     }
 
     public void register() {
@@ -57,6 +59,7 @@ public class BehaviorObserver {
         blockBreakCounts.merge(blockId, 1, Integer::sum);
         pendingBehaviorUpdates.merge(blockId, 0.05, Double::sum);
         observationCount++;
+        if (personalityStress != null) personalityStress.onPlayerInteraction(0.2);
         checkEvolution();
     }
 
@@ -65,6 +68,7 @@ public class BehaviorObserver {
         entityAttackCounts.merge(entityType, 1, Integer::sum);
         pendingBehaviorUpdates.merge(entityType, -0.03, Double::sum);
         observationCount++;
+        if (personalityStress != null) personalityStress.onPlayerInteraction(0.3);
         checkEvolution();
     }
 
@@ -86,6 +90,7 @@ public class BehaviorObserver {
             pendingChatUpdates.merge(keyword, delta, Double::sum);
         }
         observationCount++;
+        if (personalityStress != null) personalityStress.onPlayerInteraction(0.5);
         checkEvolution();
     }
 
@@ -130,6 +135,12 @@ public class BehaviorObserver {
 
         pendingBehaviorUpdates.clear();
         pendingChatUpdates.clear();
+
+        if (personalityStress != null && personalityStress.checkAndTrigger()) {
+            characterManager.triggerStressEvolution();
+            AIPlayerMod.LOGGER.info("[BehaviorObserver] 压力触发性格修改!");
+        }
+
         AIPlayerMod.LOGGER.info("[BehaviorObserver] 性格演化已触发");
     }
 

@@ -67,6 +67,11 @@ public class ConditionedReflex {
                 ConditionedSkill newSkill = new ConditionedSkill("reflex_" + skillId, "条件反射_" + skillId);
                 skillManager.registerConditionedSkill(newSkill);
                 AIPlayerMod.LOGGER.info("[ConditionedReflex] 生成条件反射: {}", skillId);
+
+                var stress = AIPlayerMod.getPersonalityStress();
+                if (stress != null) {
+                    stress.onReflexChange();
+                }
             }
         }
         actionHistory.clear();
