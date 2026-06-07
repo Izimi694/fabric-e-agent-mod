@@ -184,35 +184,29 @@ public class AICommand {
 
     private static int showPersonality(ServerCommandSource source) {
         try {
-            var characterManager = AIPlayerMod.getCharacterManager();
-            if (characterManager == null) {
-                source.sendFeedback(() -> Text.literal("§7[AI Player] 性格系统未初始化"), false);
+            var condReflex = AIPlayerMod.getConditionedReflex();
+            if (condReflex == null) {
+                source.sendFeedback(() -> Text.literal("§7[AI Player] 反射系统未初始化"), false);
                 return 0;
             }
 
-            source.sendFeedback(() -> Text.literal("§6===== AI 个性标签 ====="), false);
-            var evaluationCycle = AIPlayerMod.getEvaluationCycle();
-            if (evaluationCycle != null) {
-                var tags = evaluationCycle.getPersonalityTags();
-                if (tags != null && !tags.isEmpty()) {
-                    source.sendFeedback(() -> Text.literal("§e" + tags.format()), false);
-                } else {
-                    source.sendFeedback(() -> Text.literal("§7暂无性格标签，完成5个任务后自动分析"), false);
-                }
-            }
+            var botParams = com.izimi.aiplayermod.amygdala.BotParams.load();
+            source.sendFeedback(() -> Text.literal("§6===== AI 参数 ====="), false);
+            source.sendFeedback(() -> Text.literal("§e学习速率(α): §f" + String.format("%.3f", botParams.getAlpha()) + " §7(0.1~0.6)"), false);
+            source.sendFeedback(() -> Text.literal("§e固执程度(β): §f" + String.format("%.4f", botParams.getBeta()) + " §7(0.002~0.03)"), false);
 
-            var prefs = characterManager.getPreferences();
-            if (prefs == null || prefs.isEmpty()) {
-                source.sendFeedback(() -> Text.literal("§7暂无偏好数据"), false);
-            } else {
-                source.sendFeedback(() -> Text.literal("§6===== AI 偏好 ====="), false);
-                for (var pref : prefs) {
-                    String icon = pref.valence >= 0.5 ? "§a❤" : pref.valence <= -0.5 ? "§c✖" : "§7●";
-                    source.sendFeedback(() -> Text.literal(icon + " §f" + pref.target + " §7(" + String.format("%.2f", pref.valence) + ")"), false);
+            var botSpawner = AIPlayerMod.getBotSpawner();
+            if (botSpawner != null && botSpawner.isSpawned()) {
+                var skillManager = AIPlayerMod.getSkillManager();
+                if (skillManager != null) {
+                    var skills = skillManager.getSkills();
+                    long conditionedCount = skills.values().stream()
+                            .filter(s -> "conditioned".equals(s.getType())).count();
+                    source.sendFeedback(() -> Text.literal("§e已学习反射: §f" + conditionedCount + "个"), false);
                 }
             }
         } catch (Exception e) {
-            source.sendFeedback(() -> Text.literal("§c[AI Player] 获取偏好失败: " + e.getMessage()), false);
+            source.sendFeedback(() -> Text.literal("§c[AI Player] 获取参数失败: " + e.getMessage()), false);
         }
         return 1;
     }

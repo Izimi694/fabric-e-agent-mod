@@ -59,8 +59,7 @@ public class PlanManager {
                 AIPlayerMod.getStateManager() != null ? AIPlayerMod.getStateManager().loadState() : null,
                 null,
                 AIPlayerMod.getMemoryManager() != null ? AIPlayerMod.getMemoryManager().getRecentMemories() : null,
-                AIPlayerMod.getCharacterManager() != null ? AIPlayerMod.getCharacterManager().getPreferenceMap() : null,
-                AIPlayerMod.getPersonalityStress());
+                null);
 
         AIPlayerMod.LOGGER.info("[PlanManager] 已请求API计划富化: {}", goal);
     }

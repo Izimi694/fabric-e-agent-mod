@@ -98,11 +98,6 @@ public class TaskManager {
             memoryManager.generateMemory(activeTask);
         }
 
-        var evaluationCycle = AIPlayerMod.getEvaluationCycle();
-        if (evaluationCycle != null) {
-            evaluationCycle.onTaskCompleted();
-        }
-
         lastTask = null;
         saveLastTask();
         deleteActiveTask();

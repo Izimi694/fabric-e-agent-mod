@@ -1,6 +1,5 @@
 package com.izimi.aiplayermod.amygdala;
 
-import com.izimi.aiplayermod.amygdala.character.ThresholdConfig;
 import com.izimi.aiplayermod.amygdala.learning.BehaviorEvent;
 
 import java.util.*;
@@ -64,9 +63,8 @@ public class NaiveBayesClassifier {
         }
 
         double confidence = bestScore / totalWeight;
-        double effectiveThreshold = thresholdConfig.getEffectiveThreshold();
         boolean meets = contributingPlayers >= thresholdConfig.minObservations
-                && confidence >= effectiveThreshold;
+                && confidence >= thresholdConfig.minConfidence;
 
         return new Classification(bestAction, confidence, meets);
     }

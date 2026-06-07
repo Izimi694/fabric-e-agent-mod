@@ -237,12 +237,11 @@ public class BotController {
                     }
                 }
                 if (response.personalityDelta != null && !response.personalityDelta.isEmpty()) {
-                    var charMgr = AIPlayerMod.getCharacterManager();
-                    if (charMgr != null) {
-                        charMgr.evolvePreferences(
-                                new java.util.HashMap<>(),
-                                new java.util.HashMap<>(),
-                                response.personalityDelta);
+                    var condReflex = AIPlayerMod.getConditionedReflex();
+                    if (condReflex != null) {
+                        for (var entry : response.personalityDelta.entrySet()) {
+                            condReflex.reinforce(entry.getKey(), entry.getValue());
+                        }
                     }
                 }
             }

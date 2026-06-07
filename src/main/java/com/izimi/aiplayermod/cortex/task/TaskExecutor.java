@@ -127,11 +127,6 @@ public class TaskExecutor {
     }
 
     private int getMaxRetries() {
-        var stress = AIPlayerMod.getPersonalityStress();
-        if (stress == null) return 3;
-        double s = stress.getCurrentStress();
-        if (s > 0.7) return 1;
-        if (s > 0.3) return 3;
-        return 5;
+        return 3;
     }
 }

@@ -1,6 +1,5 @@
 package com.izimi.aiplayermod.amygdala.character;
 
-import com.izimi.aiplayermod.AIPlayerMod;
 import com.izimi.aiplayermod.amygdala.learning.BehaviorEvent;
 import net.fabricmc.fabric.api.event.player.AttackEntityCallback;
 import net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents;
@@ -17,6 +16,7 @@ import net.minecraft.util.Hand;
 import net.minecraft.util.TypedActionResult;
 import net.minecraft.world.World;
 
+import com.izimi.aiplayermod.AIPlayerMod;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -25,12 +25,10 @@ import java.util.function.Consumer;
 public class BehaviorEventHandler {
 
     private final BehaviorStats stats;
-    private final BehaviorAnalyzer analyzer;
     private final List<Consumer<BehaviorEvent>> learningListeners = new ArrayList<>();
 
-    public BehaviorEventHandler(BehaviorStats stats, BehaviorAnalyzer analyzer) {
+    public BehaviorEventHandler(BehaviorStats stats) {
         this.stats = stats;
-        this.analyzer = analyzer;
     }
 
     public void addLearningListener(Consumer<BehaviorEvent> listener) {
@@ -42,7 +40,6 @@ public class BehaviorEventHandler {
             if (player instanceof ServerPlayerEntity sp) {
                 String blockId = Registries.BLOCK.getId(state.getBlock()).toString();
                 stats.recordBlockBreak(blockId);
-                analyzer.recordEvent(blockId, 0.05, 0, 0.2);
 
                 String heldItem = getHeldItemName(sp);
                 String timeOfDay = getTimeOfDay(world);
@@ -55,7 +52,6 @@ public class BehaviorEventHandler {
             if (player instanceof ServerPlayerEntity sp && entity instanceof LivingEntity le) {
                 String entityType = le.getType().getName().getString();
                 stats.recordEntityAttack(entityType);
-                analyzer.recordEvent(entityType, -0.03, 0, 0.3);
 
                 String heldItem = getHeldItemName(sp);
                 String timeOfDay = getTimeOfDay(world);
@@ -70,7 +66,6 @@ public class BehaviorEventHandler {
                 ItemStack stack = sp.getStackInHand(hand);
                 String itemId = Registries.ITEM.getId(stack.getItem()).toString();
                 stats.recordItemUse(itemId);
-                analyzer.recordEvent(itemId, 0.03, 0, 0.1);
 
                 String timeOfDay = getTimeOfDay(world);
                 notifyLearning(new BehaviorEvent(sp.getName().getString(), "use_item",
@@ -85,7 +80,6 @@ public class BehaviorEventHandler {
                 BlockState state = world.getBlockState(pos);
                 String blockId = Registries.BLOCK.getId(state.getBlock()).toString();
                 stats.recordBlockPlace(blockId);
-                analyzer.recordEvent(blockId, 0.04, 0, 0.15);
 
                 ItemStack stack = sp.getStackInHand(hand);
                 String heldItem = Registries.ITEM.getId(stack.getItem()).toString();
@@ -109,20 +103,14 @@ public class BehaviorEventHandler {
         List<String> keywords = extractItemKeywords(lower);
         stats.recordChatKeywords(keywords);
 
-        for (String keyword : keywords) {
-            double delta = 0.03;
-            if (lower.contains("喜欢") || lower.contains("想要") || lower.contains("优先") || lower.contains("like")
-                    || lower.contains("want") || lower.contains("love")) {
-                delta = 0.07;
-            } else if (lower.contains("讨厌") || lower.contains("烦") || lower.contains("hate")
-                    || lower.contains("dislike")) {
-                delta = -0.07;
-            }
-            analyzer.recordEvent(keyword, 0, delta, 0.5);
-        }
-
         if (keywords.isEmpty()) {
-            analyzer.recordEvent("chat", 0, 0, 0.5);
+            notifyLearning(new BehaviorEvent("chat", "chat",
+                    "generic", System.currentTimeMillis(), "chat", "any"));
+        } else {
+            for (String keyword : keywords) {
+                notifyLearning(new BehaviorEvent("chat", "chat",
+                        keyword, System.currentTimeMillis(), "chat", "any"));
+            }
         }
     }
 

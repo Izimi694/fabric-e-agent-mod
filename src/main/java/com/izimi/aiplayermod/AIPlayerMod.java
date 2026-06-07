@@ -11,13 +11,10 @@ import com.izimi.aiplayermod.amygdala.NaiveBayesClassifier;
 import com.izimi.aiplayermod.amygdala.SocialObserver;
 import com.izimi.aiplayermod.brainstem.bot.BotSpawner;
 import com.izimi.aiplayermod.brainstem.bot.BotController;
-import com.izimi.aiplayermod.amygdala.character.CharacterManager;
 import com.izimi.aiplayermod.amygdala.character.BehaviorEventHandler;
 import com.izimi.aiplayermod.amygdala.character.BehaviorStats;
-import com.izimi.aiplayermod.amygdala.character.BehaviorAnalyzer;
 import com.izimi.aiplayermod.amygdala.character.EvaluationCycle;
-import com.izimi.aiplayermod.amygdala.character.PersonalityStress;
-import com.izimi.aiplayermod.amygdala.character.ThresholdConfig;
+import com.izimi.aiplayermod.amygdala.ThresholdConfig;
 import com.izimi.aiplayermod.command.AICommand;
 import com.izimi.aiplayermod.config.ModConfig;
 import com.izimi.aiplayermod.hippocampus.MemoryManager;
@@ -59,12 +56,9 @@ public class AIPlayerMod implements ModInitializer {
     private static StateManager stateManager;
     private static BotSpawner botSpawner;
     private static BotController botController;
-    private static CharacterManager characterManager;
     private static BehaviorEventHandler behaviorEventHandler;
     private static BehaviorStats behaviorStats;
-    private static BehaviorAnalyzer behaviorAnalyzer;
     private static ExecutionLogger executionLogger;
-    private static PersonalityStress personalityStress;
     private static IdleBrain idleBrain;
     private static LearningSystem learningSystem;
     private static FamiliarityTracker familiarityTracker;
@@ -106,9 +100,6 @@ public class AIPlayerMod implements ModInitializer {
         aiMemoryGenerator = new AIMemoryGenerator(aiClient);
         planManager = new PlanManager(aiTaskPlanner);
 
-        personalityStress = new PersonalityStress(config);
-        LOGGER.info("[AI Player] 性格压力系统已初始化");
-
         botSpawner = new BotSpawner();
         stateManager = new StateManager();
         memoryManager = new MemoryManager(config);
@@ -128,14 +119,12 @@ public class AIPlayerMod implements ModInitializer {
         actionAdapter = new MinecraftActionAdapter();
         conditionedReflex = new ConditionedReflex(skillManager, config, actionAdapter);
         taskExecutor = new TaskExecutor(taskManager, skillManager, stateManager, executionLogger);
-        characterManager = new CharacterManager(config);
         behaviorStats = new BehaviorStats();
-        behaviorAnalyzer = new BehaviorAnalyzer(characterManager, personalityStress);
-        behaviorEventHandler = new BehaviorEventHandler(behaviorStats, behaviorAnalyzer);
+        behaviorEventHandler = new BehaviorEventHandler(behaviorStats);
         idleBrain = new IdleBrain(taskManager, skillManager);
 
         thresholdConfig = ThresholdConfig.load();
-        evaluationCycle = new EvaluationCycle(thresholdConfig, characterManager);
+        evaluationCycle = new EvaluationCycle(conditionedReflex);
         familiarityTracker = new FamiliarityTracker();
         socialObserver = new SocialObserver(familiarityTracker);
         socialClassifier = new NaiveBayesClassifier(thresholdConfig);
@@ -150,8 +139,7 @@ public class AIPlayerMod implements ModInitializer {
 
         behaviorEventHandler.addLearningListener(socialObserver::onEvent);
 
-        LOGGER.info("[AI Player] P1.5 社交镜像系统已初始化 (conformity={:.2f})",
-                thresholdConfig.conformityCoefficient);
+        LOGGER.info("[AI Player] P1.5 社交镜像系统已初始化");
 
         CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> {
             AICommand.register(dispatcher);
@@ -165,9 +153,6 @@ public class AIPlayerMod implements ModInitializer {
         ServerTickEvents.START_SERVER_TICK.register(server -> {
             if (botController != null) {
                 botController.onTick(server);
-            }
-            if (personalityStress != null) {
-                personalityStress.onTick();
             }
             if (evaluationCycle != null) {
                 evaluationCycle.onTick();
@@ -214,11 +199,7 @@ public class AIPlayerMod implements ModInitializer {
                         var state = stateManager.loadState();
                         var task = taskManager.getActiveTask();
                         var mems = memoryManager.getRecentMemories();
-                        var prefs = characterManager.getPreferenceMap();
-
-                        personalityStress.onPlayerInteraction(0.5);
-
-                        aiChatHandler.handleChat(content, state, task, mems, prefs, personalityStress);
+                        aiChatHandler.handleChat(content, state, task, mems);
                     }
                 }
             }
@@ -231,7 +212,6 @@ public class AIPlayerMod implements ModInitializer {
     public static TaskManager getTaskManager() { return taskManager; }
     public static MemoryManager getMemoryManager() { return memoryManager; }
     public static BotSpawner getBotSpawner() { return botSpawner; }
-    public static CharacterManager getCharacterManager() { return characterManager; }
     public static SkillManager getSkillManager() { return skillManager; }
     public static StateManager getStateManager() { return stateManager; }
     public static ExecutionLogger getExecutionLogger() { return executionLogger; }
@@ -242,7 +222,6 @@ public class AIPlayerMod implements ModInitializer {
     public static AITaskPlanner getAiTaskPlanner() { return aiTaskPlanner; }
     public static AIChatHandler getAiChatHandler() { return aiChatHandler; }
     public static AIMemoryGenerator getAiMemoryGenerator() { return aiMemoryGenerator; }
-    public static PersonalityStress getPersonalityStress() { return personalityStress; }
     public static IdleBrain getIdleBrain() { return idleBrain; }
     public static LearningSystem getLearningSystem() { return learningSystem; }
     public static FamiliarityTracker getFamiliarityTracker() { return familiarityTracker; }

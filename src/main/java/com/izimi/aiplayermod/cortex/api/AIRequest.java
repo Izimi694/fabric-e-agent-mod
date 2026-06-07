@@ -1,6 +1,5 @@
 package com.izimi.aiplayermod.cortex.api;
 
-import com.izimi.aiplayermod.amygdala.character.PersonalityStress;
 import com.izimi.aiplayermod.hippocampus.MemoryEntry;
 import com.izimi.aiplayermod.state.PlayerState;
 import com.izimi.aiplayermod.cortex.task.Task;
@@ -13,9 +12,9 @@ public class AIRequest {
 
     public static List<AIMessage> buildPlanningRequest(String playerMessage, PlayerState state,
                                                        Task activeTask, List<MemoryEntry> recentMemories,
-                                                       Map<String, Double> preferences, PersonalityStress stress) {
+                                                       Map<String, Double> preferences) {
         List<AIMessage> messages = new ArrayList<>();
-        messages.add(AIMessage.system(buildSystemPrompt(state, activeTask, recentMemories, preferences, stress)));
+        messages.add(AIMessage.system(buildSystemPrompt(state, activeTask, recentMemories, preferences)));
         messages.add(AIMessage.user(playerMessage));
         return messages;
     }
@@ -29,8 +28,7 @@ public class AIRequest {
 
     private static String buildSystemPrompt(PlayerState state, Task activeTask,
                                             List<MemoryEntry> recentMemories,
-                                            Map<String, Double> preferences,
-                                            PersonalityStress stress) {
+                                            Map<String, Double> preferences) {
         StringBuilder sb = new StringBuilder();
         sb.append("你是Minecraft服务器中的一个AI玩家助手。\n");
         sb.append("你的名字: AI_Assistant\n\n");
@@ -68,14 +66,8 @@ public class AIRequest {
         }
 
         if (preferences != null && !preferences.isEmpty()) {
-            sb.append("\n【性格偏好（valence越接近1越喜欢，-1越讨厌）】\n");
+            sb.append("\n【性格偏好（valences越接近1越喜欢，-1越讨厌）】\n");
             preferences.forEach((k, v) -> sb.append("- ").append(k).append(": ").append(String.format("%.2f", v)).append("\n"));
-        }
-
-        if (stress != null) {
-            sb.append("\n【性格压力值】\n");
-            sb.append("- 当前: ").append(String.format("%.2f", stress.getCurrentStress())).append("/").append(String.format("%.2f", stress.getStressThreshold())).append("\n");
-            sb.append("- 已触发次数: ").append(stress.getTotalStressEvents()).append("\n");
         }
 
         if (recentMemories != null && !recentMemories.isEmpty()) {
@@ -93,7 +85,7 @@ public class AIRequest {
         sb.append("  \"params\": {\"target\": \"目标\", \"amount\": 数量, \"position\": [x,y,z]},\n");
         sb.append("  \"message\": \"你说的话\",\n");
         sb.append("  \"memory_save\": \"记忆摘要\",\n");
-        sb.append("  \"personality_delta\": {\"target\": 0.05}\n");
+        sb.append("  \"personality_delta\": {\"reflexId\": delta}\n");
         sb.append("}\n");
         sb.append("\n如果玩家在聊天，action用chat；如果是执行指令，action用execute_task；想自由探索用explore。");
 

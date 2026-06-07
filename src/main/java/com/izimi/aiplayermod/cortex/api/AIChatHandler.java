@@ -1,7 +1,6 @@
 package com.izimi.aiplayermod.cortex.api;
 
 import com.izimi.aiplayermod.AIPlayerMod;
-import com.izimi.aiplayermod.amygdala.character.PersonalityStress;
 import com.izimi.aiplayermod.hippocampus.MemoryEntry;
 import com.izimi.aiplayermod.state.PlayerState;
 import com.izimi.aiplayermod.cortex.task.Task;
@@ -19,13 +18,12 @@ public class AIChatHandler {
     }
 
     public void handleChat(String playerMessage, PlayerState state, Task activeTask,
-                           List<MemoryEntry> recentMemories, Map<String, Double> preferences,
-                           PersonalityStress stress) {
+                           List<MemoryEntry> recentMemories) {
         if (!aiClient.isConfigured()) return;
         if (currentRequest != null && !currentRequest.isDone()) return;
 
         currentRequest = aiClient.planTask(playerMessage, state, activeTask,
-                recentMemories, preferences, stress);
+                recentMemories, Map.of());
 
         currentRequest.thenAccept(response -> {
             if (response != null) {

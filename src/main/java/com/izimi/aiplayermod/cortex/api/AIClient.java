@@ -1,6 +1,5 @@
 package com.izimi.aiplayermod.cortex.api;
 
-import com.izimi.aiplayermod.amygdala.character.PersonalityStress;
 import com.izimi.aiplayermod.hippocampus.MemoryEntry;
 import com.izimi.aiplayermod.state.PlayerState;
 import com.izimi.aiplayermod.cortex.task.Task;
@@ -15,7 +14,7 @@ public interface AIClient {
 
     CompletableFuture<AIResponse> planTask(String playerMessage, PlayerState state,
                                            Task activeTask, List<MemoryEntry> recentMemories,
-                                           Map<String, Double> preferences, PersonalityStress stress);
+                                           Map<String, Double> preferences);
 
     CompletableFuture<AIResponse> generateMemory(Task completedTask, PlayerState state);
 

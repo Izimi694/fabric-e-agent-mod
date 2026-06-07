@@ -24,17 +24,28 @@ import java.nio.file.Path;
 import java.util.*;
 
 public class ConditionedReflex {
+    private static final double SELF_REINFORCE_SUCCESS = 0.05;
+    private static final double SELF_REINFORCE_FAIL = -0.03;
+    private static final double DEFAULT_WEIGHT = 0.5;
+    private static final double WEIGHT_MIN = -1.0;
+    private static final double WEIGHT_MAX = 1.0;
+    private static final double EW_STW_RATIO = 0.7;
+    private static final double EW_LTB_RATIO = 0.3;
+
     private final SkillManager skillManager;
     private final ModConfig config;
     private final BasicActionAdapter actionAdapter;
+    private final BotParams botParams;
 
     private final Map<String, List<Double>> actionHistory = new HashMap<>();
     private int actionCount = 0;
+    private String lastExecutedReflexId;
 
     public ConditionedReflex(SkillManager skillManager, ModConfig config, BasicActionAdapter actionAdapter) {
         this.skillManager = skillManager;
         this.config = config;
         this.actionAdapter = actionAdapter;
+        this.botParams = BotParams.load();
     }
 
     public Skill match(Task task) {
@@ -59,7 +70,7 @@ public class ConditionedReflex {
     public Skill scanAndTrigger(ServerPlayerEntity bot) {
         if (bot == null) return null;
 
-        record Candidate(Skill skill, double proficiency, int atomIndex) {}
+        record Candidate(Skill skill, double score, int atomIndex) {}
         List<Candidate> candidates = new ArrayList<>();
 
         for (Map.Entry<String, Skill> entry : skillManager.getSkills().entrySet()) {
@@ -71,9 +82,9 @@ public class ConditionedReflex {
             if (data == null) continue;
 
             String status = (String) data.getOrDefault("status", "healthy");
-            if ("deprecated".equals(status)) continue;
+            if ("deprecated".equals(status) || "dormant".equals(status)) continue;
 
-            double compoundProficiency = ((Number) data.getOrDefault("proficiency", 0.0)).doubleValue();
+            double reflexWeight = effectiveWeight(data);
 
             @SuppressWarnings("unchecked")
             List<Map<String, Object>> atoms = (List<Map<String, Object>>) data.get("atoms");
@@ -89,20 +100,22 @@ public class ConditionedReflex {
 
                     double atomProficiency = ((Number) atom.getOrDefault("proficiency", 0.0)).doubleValue();
                     if (isAtomTargetNearby(bot, (String) atom.get("action"), atomTarget)) {
-                        candidates.add(new Candidate(skill, atomProficiency, i));
+                        double score = reflexWeight * atomProficiency;
+                        candidates.add(new Candidate(skill, score, i));
                     }
                 }
             } else {
                 String category = (String) data.get("category");
                 if (category != null && isTargetNearby(bot, category, data)) {
-                    candidates.add(new Candidate(skill, compoundProficiency, -1));
+                    double compoundProficiency = ((Number) data.getOrDefault("proficiency", 0.0)).doubleValue();
+                    candidates.add(new Candidate(skill, reflexWeight * compoundProficiency, -1));
                 }
             }
         }
 
         if (candidates.isEmpty()) return null;
 
-        candidates.sort((a, b) -> Double.compare(b.proficiency(), a.proficiency()));
+        candidates.sort((a, b) -> Double.compare(b.score(), a.score()));
         Candidate best = candidates.get(0);
 
         if (best.atomIndex() >= 0) {
@@ -361,6 +374,12 @@ public class ConditionedReflex {
             result = ((ConditionedSkill) reflex).execute(bot.getServerWorld(), bot, new HashMap<>());
         }
 
+        if (result != null && result.executed()) {
+            lastExecutedReflexId = skillId;
+            double delta = result.success() ? SELF_REINFORCE_SUCCESS : SELF_REINFORCE_FAIL;
+            reinforce(data, delta);
+        }
+
         updateReflexStats(skillId, result.success(), result.effectiveness());
 
         if (result.success()) {
@@ -370,7 +389,7 @@ public class ConditionedReflex {
         }
     }
 
-    public enum ReflexHealth { HEALTHY, WATCHING, DEPRECATED }
+    public enum ReflexHealth { HEALTHY, WATCHING, DORMANT }
 
     public record ReflexState(int executionCount, double successRate, ReflexHealth health) {}
 
@@ -459,14 +478,15 @@ public class ConditionedReflex {
                 return;
             }
 
-            if (!"deprecated".equals(currentStatus)) {
-                data.put("status", "deprecated");
+            if (!"dormant".equals(currentStatus)) {
+                data.put("status", "dormant");
                 JsonUtil.writeToFileSafeAtomic(path, data);
-                AIPlayerMod.LOGGER.warn("[ConditionedReflex] 标记废弃: {} (rate={:.2f}, count={})",
+                moveToArchived(skillId, data);
+                AIPlayerMod.LOGGER.warn("[ConditionedReflex] 标记休眠并归档: {} (rate={:.2f}, count={})",
                         skillId, rate, count);
                 if (bot != null) {
                     bot.sendMessage(Text.literal("§c[AI_Assistant] §7这个" +
-                            data.getOrDefault("displayName", skillId) + "好像不太对，我重新学一下..."));
+                            data.getOrDefault("displayName", skillId) + "好像不太对，我先放一放..."));
                 }
             }
         }
@@ -482,7 +502,7 @@ public class ConditionedReflex {
         String status = (String) data.getOrDefault("status", "healthy");
 
         ReflexHealth health = switch (status) {
-            case "deprecated" -> ReflexHealth.DEPRECATED;
+            case "dormant" -> ReflexHealth.DORMANT;
             case "watching" -> ReflexHealth.WATCHING;
             default -> ReflexHealth.HEALTHY;
         };
@@ -517,6 +537,8 @@ public class ConditionedReflex {
         reflexData.put("source", sequence.source());
         reflexData.put("occurrences", sequence.occurrences());
         reflexData.put("proficiency", sequence.proficiency());
+        reflexData.put("shortTermWeight", DEFAULT_WEIGHT);
+        reflexData.put("longTermBaseline", DEFAULT_WEIGHT);
         reflexData.put("executionCount", 0);
         reflexData.put("successRate", 0.0);
         reflexData.put("target", sequence.target());
@@ -582,6 +604,80 @@ public class ConditionedReflex {
         return "reflex_" + category;
     }
 
+    public void reinforce(String skillId, double delta) {
+        Path path = FileUtil.getConditionedDir().resolve(skillId + ".json");
+        Map<String, Object> data = JsonUtil.readFromFileSafe(path, Map.class);
+        if (data == null) return;
+        reinforce(data, delta);
+        JsonUtil.writeToFileSafeAtomic(path, data);
+    }
+
+    private void reinforce(Map<String, Object> data, double delta) {
+        double stw = ((Number) data.getOrDefault("shortTermWeight", DEFAULT_WEIGHT)).doubleValue();
+        double ltb = ((Number) data.getOrDefault("longTermBaseline", DEFAULT_WEIGHT)).doubleValue();
+
+        stw = stw * (1 - botParams.getAlpha()) + botParams.getAlpha() * delta;
+        ltb = ltb * (1 - botParams.getBeta()) + botParams.getBeta() * stw;
+
+        data.put("shortTermWeight", Math.max(WEIGHT_MIN, Math.min(WEIGHT_MAX, stw)));
+        data.put("longTermBaseline", Math.max(WEIGHT_MIN, Math.min(WEIGHT_MAX, ltb)));
+    }
+
+    public double effectiveWeight(Map<String, Object> data) {
+        double stw = ((Number) data.getOrDefault("shortTermWeight", DEFAULT_WEIGHT)).doubleValue();
+        double ltb = ((Number) data.getOrDefault("longTermBaseline", DEFAULT_WEIGHT)).doubleValue();
+        return Math.max(0, stw * EW_STW_RATIO + ltb * EW_LTB_RATIO);
+    }
+
+    public String getLastExecutedReflexId() {
+        return lastExecutedReflexId;
+    }
+
+    public void moveToArchived(String skillId, Map<String, Object> data) {
+        Path src = FileUtil.getConditionedDir().resolve(skillId + ".json");
+        Path dst = FileUtil.getArchivedDir().resolve(skillId + ".json");
+        JsonUtil.writeToFileSafeAtomic(dst, data);
+        try {
+            java.nio.file.Files.deleteIfExists(src);
+        } catch (java.io.IOException e) {
+            AIPlayerMod.LOGGER.warn("[ConditionedReflex] 删除原反射文件失败: {}", skillId);
+        }
+    }
+
+    public boolean tryReactivate(String skillId) {
+        Path archivedPath = FileUtil.getArchivedDir().resolve(skillId + ".json");
+        Map<String, Object> data = JsonUtil.readFromFileSafe(archivedPath, Map.class);
+        if (data == null) return false;
+        data.put("status", "healthy");
+        data.put("executionCount", 0);
+        data.put("successRate", 0.0);
+        data.put("shortTermWeight", DEFAULT_WEIGHT);
+        data.put("longTermBaseline", DEFAULT_WEIGHT);
+        Path activePath = FileUtil.getConditionedDir().resolve(skillId + ".json");
+        JsonUtil.writeToFileSafeAtomic(activePath, data);
+        try {
+            java.nio.file.Files.deleteIfExists(archivedPath);
+        } catch (java.io.IOException e) {
+            AIPlayerMod.LOGGER.warn("[ConditionedReflex] 删除归档文件失败: {}", skillId);
+        }
+        AIPlayerMod.LOGGER.info("[ConditionedReflex] 反射复活: {}", skillId);
+        return true;
+    }
+
+    public String matchReflexIdByHint(String hint) {
+        if (hint == null || hint.isEmpty()) return null;
+        String lower = hint.toLowerCase();
+        if (lastExecutedReflexId != null && lastExecutedReflexId.contains(lower)) {
+            return lastExecutedReflexId;
+        }
+        for (String id : skillManager.getSkills().keySet()) {
+            if (id.contains(lower)) {
+                return id;
+            }
+        }
+        return null;
+    }
+
     private void analyzeAndGenerate() {
         for (Map.Entry<String, List<Double>> entry : actionHistory.entrySet()) {
             String skillId = entry.getKey();
@@ -596,11 +692,6 @@ public class ConditionedReflex {
                 ConditionedSkill newSkill = new ConditionedSkill("reflex_" + skillId, "条件反射_" + skillId);
                 skillManager.registerConditionedSkill(newSkill);
                 AIPlayerMod.LOGGER.info("[ConditionedReflex] 生成条件反射: {}", skillId);
-
-                var stress = AIPlayerMod.getPersonalityStress();
-                if (stress != null) {
-                    stress.onReflexChange();
-                }
             }
         }
         actionHistory.clear();

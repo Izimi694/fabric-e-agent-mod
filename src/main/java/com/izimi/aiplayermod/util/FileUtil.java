@@ -78,6 +78,14 @@ public class FileUtil {
         return getAIMemoryDir().resolve("config");
     }
 
+    public static Path getArchivedDir() {
+        return getConditionedDir().resolve("archived");
+    }
+
+    public static Path getBotParamsPath() {
+        return getConfigDir().resolve("bot_params.json");
+    }
+
     public static Path getActiveTaskPath() {
         return getTasksDir().resolve("active_task.json");
     }
@@ -132,6 +140,7 @@ public class FileUtil {
         Files.createDirectories(getHighlightsDir());
         Files.createDirectories(getEvaluationsDir());
         Files.createDirectories(getConditionedDir());
+        Files.createDirectories(getArchivedDir());
         Files.createDirectories(getThresholdsDir());
     }
 
@@ -145,7 +154,7 @@ public class FileUtil {
 
     public static List<Path> getAllDataDirs() {
         return Arrays.asList(
-                getConditionedDir(), getTasksDir(), getMemoriesDir(),
+                getConditionedDir(), getArchivedDir(), getTasksDir(), getMemoriesDir(),
                 getTrialsDir(), getEvaluationsDir(), getCharacterDir(),
                 getPlansDir(), getStateDir(), getExecutionLogsDir(),
                 getConfigDir(), getThresholdsDir(),

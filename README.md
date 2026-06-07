@@ -26,12 +26,13 @@
 模组 = cortex/ + amygdala/ + hippocampus/ + brainstem/
 ```
 
-### 两大核心原则
+### 设计原则
 
 | 原则 | 内容 |
 |------|------|
 | **成本优先** | LLM 只做"本地无法完成的事"——理解语义、拆解任务。其余全部本地零成本。 |
 | **脑区解耦** | 每个新功能归属于一个脑区模块，层次分明，互不越界。 |
+| **连续内层，离散外层** | 学习层使用连续数值（权重、概率），交互层使用离散符号（指令、评价）。数字负责"怎么变"，符号负责"是什么"。 |
 
 ### 决策优先级链（P0 → P5）
 
@@ -57,7 +58,7 @@ tick (每 2 秒):
 |------|------|------|
 | **cortex/** | 前额叶 | LLM 任务拆解、Plan 管理、抑制控制（否决不当行为） |
 | **hippocampus/** | 海马体 | 高光记忆存储、记忆检索 |
-| **amygdala/** | 杏仁核+基底节 | 安全反射、条件反射固化、社交镜像、性格标签、评价归纳 |
+| **amygdala/** | 杏仁核+基底节 | 安全反射、条件反射固化、反射权重动力学、社交镜像、评价强化 |
 | **brainstem/** | 脑干 | 12 原子动作、寻路、bot 实体管理、Idle 动画 |
 
 ### 12 原子动作
@@ -74,12 +75,13 @@ tick (每 2 秒):
 - **社交镜像**：KNN + 朴素贝叶斯 → 选择性模仿群体
 - **模仿抑制**：前额叶否决有害从众（跳崖、打村民）
 
-### AI 性格
+### AI 性格（反射权重模型）
 
-- 个性标签（LLM 生成，如"乐于助人""喜欢挖矿"）
-- 偏好系统（valence -1.0 ~ +1.0）
-- 压力系统（衰减 + 触发阈值）
-- 30 天评估周期（从众系数自动调整）
+- **性格 = 反射权重的统计分布**：无独立标签模块，所有行为倾向编码在反射的 `shortTermWeight` + `longTermBaseline` 中
+- **负反馈稳定**：短期权重向长期基线回归，短时不变，长期互动中缓慢演进
+- **个体差异**：每个 AI 的学习率(α)和遗忘率(β)随机初始化，自然形成"固执"或"善变"
+- **直接强化**：玩家夸奖 → LLM 判"好" → 强化刚执行的反射权重，无需翻译为抽象标签
+- **反射归档**：成功率过低的反射标记为休眠，但不删除，可复活
 
 ---
 
@@ -149,19 +151,21 @@ cd AIPlayerMod-1.21.1-Fabric
 
 ```
 minecraft/ai_memory/
-├── conditioned/         条件反射库 (JSON)
-├── character/           性格标签 + 偏好 + 压力
-│   ├── preferences.json
-│   ├── personality_tags.json
-│   ├── personality_stress.json
-│   └── thresholds/
+├── conditioned/         条件反射库 (JSON，含 shortTermWeight + longTermBaseline)
+│   └── archived/         休眠反射归档
 ├── memory/               记忆 (7天窗口)
 │   ├── highlights/
 │   └── trials/
 ├── evaluations/          玩家评价缓存
 ├── plans/                任务计划
-├── config/               API 密钥 (api_key.json)
-│                         + 先天反射配置 (innate_reflexes.json)
+├── config/
+│   ├── config.json       模组全局配置
+│   ├── innate_reflexes.json  先天反射配置
+│   └── bot_params.json    AI 实体参数 (α/β 学习率)
+├── skills/
+│   └── character/
+│       └── thresholds/
+│           └── thresholds.json  社交镜像阈值
 └── execution_logs/       执行日志
 ```
 
