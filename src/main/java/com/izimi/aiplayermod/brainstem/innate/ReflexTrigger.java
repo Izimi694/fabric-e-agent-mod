@@ -1,4 +1,4 @@
-package com.izimi.aiplayermod.amygdala.reflexes;
+package com.izimi.aiplayermod.brainstem.innate;
 
 public record ReflexTrigger(TriggerType type, double value, int range) {
 

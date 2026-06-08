@@ -1,4 +1,4 @@
-package com.izimi.aiplayermod.amygdala.reflexes;
+package com.izimi.aiplayermod.brainstem.innate;
 
 import com.google.gson.reflect.TypeToken;
 import com.izimi.aiplayermod.AIPlayerMod;

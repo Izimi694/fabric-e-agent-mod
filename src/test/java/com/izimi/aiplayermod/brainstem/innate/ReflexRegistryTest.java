@@ -1,4 +1,4 @@
-package com.izimi.aiplayermod.amygdala.reflexes;
+package com.izimi.aiplayermod.brainstem.innate;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.DisplayName;

@@ -1,4 +1,4 @@
-package com.izimi.aiplayermod.amygdala.reflexes;
+package com.izimi.aiplayermod.brainstem.innate;
 
 import net.minecraft.block.Blocks;
 import net.minecraft.component.DataComponentTypes;

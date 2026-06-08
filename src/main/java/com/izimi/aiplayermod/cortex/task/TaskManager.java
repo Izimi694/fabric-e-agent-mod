@@ -1,6 +1,7 @@
 package com.izimi.aiplayermod.cortex.task;
 
 import com.izimi.aiplayermod.AIPlayerMod;
+import com.izimi.aiplayermod.cortex.planner.Plan;
 import com.izimi.aiplayermod.util.FileUtil;
 import com.izimi.aiplayermod.util.JsonUtil;
 
@@ -33,6 +34,30 @@ public class TaskManager {
         saveActiveTask();
         AIPlayerMod.LOGGER.info("[TaskManager] 任务创建: {} - {} ({}子任务)", taskId, goal, activeTask.subTasks.size());
         return taskId;
+    }
+
+    public String createTaskFromPlan(String goal, Plan plan) {
+        cancelActiveTask();
+
+        String taskId = generateTaskId();
+        activeTask = new Task(taskId, "plan", goal);
+        activeTask.progress.targetCount = plan.subSteps.size();
+
+        for (Plan.PlanStep step : plan.subSteps) {
+            String subGoal = step.target != null && !step.target.isEmpty()
+                    ? step.action + "_" + step.target : step.action;
+            activeTask.subTasks.add(new Task.SubTask(subGoal, step.action));
+        }
+
+        saveActivePlanToTask();
+        AIPlayerMod.LOGGER.info("[TaskManager] 从Plan创建任务: {} → {}步", goal, plan.subSteps.size());
+        return taskId;
+    }
+
+    private void saveActivePlanToTask() {
+        if (activeTask != null) {
+            JsonUtil.writeToFileSafeAtomic(FileUtil.getActiveTaskPath(), activeTask);
+        }
     }
 
     private void decomposeTask(Task task) {

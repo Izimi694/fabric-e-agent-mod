@@ -1,8 +1,15 @@
 package com.izimi.aiplayermod;
 
 import com.izimi.aiplayermod.cortex.planner.PlanManager;
+import com.izimi.aiplayermod.cortex.planner.KnowledgeBase;
+import com.izimi.aiplayermod.cortex.planner.LocalTaskDecomposer;
+import com.izimi.aiplayermod.cortex.chat.LocalChatHandler;
 import com.izimi.aiplayermod.brainstem.adapter.BasicActionAdapter;
 import com.izimi.aiplayermod.brainstem.adapter.MinecraftActionAdapter;
+import com.izimi.aiplayermod.brainstem.HormonalSystem;
+import com.izimi.aiplayermod.brainstem.scheduler.*;
+import com.izimi.aiplayermod.amygdala.DispatchReflex;
+import com.izimi.aiplayermod.amygdala.OneShotAlarmSystem;
 import com.izimi.aiplayermod.cortex.api.*;
 import com.izimi.aiplayermod.cortex.inhibitor.InhibitoryControl;
 import com.izimi.aiplayermod.amygdala.FamiliarityTracker;
@@ -26,8 +33,8 @@ import com.izimi.aiplayermod.brainstem.skill.SkillManager;
 import com.izimi.aiplayermod.amygdala.ConditionedReflex;
 import com.izimi.aiplayermod.log.ExecutionLogger;
 import com.izimi.aiplayermod.amygdala.learning.LearningSystem;
-import com.izimi.aiplayermod.amygdala.reflexes.InnateReflexRegistry;
-import com.izimi.aiplayermod.amygdala.reflexes.MinecraftReflexEvaluator;
+import com.izimi.aiplayermod.brainstem.innate.InnateReflexRegistry;
+import com.izimi.aiplayermod.brainstem.innate.MinecraftReflexEvaluator;
 import com.izimi.aiplayermod.util.FileUtil;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
@@ -41,6 +48,7 @@ import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 
 public class AIPlayerMod implements ModInitializer {
     public static final String MOD_ID = "ai-player-mod";
@@ -74,6 +82,9 @@ public class AIPlayerMod implements ModInitializer {
     private static BasicActionAdapter actionAdapter;
     private static PlanManager planManager;
     private static InhibitoryControl inhibitor;
+    private static KnowledgeBase knowledgeBase;
+    private static LocalTaskDecomposer localTaskDecomposer;
+    private static LocalChatHandler localChatHandler;
 
     public record PendingChat(String message, String stateStr, String taskStr, String memsStr) {}
     private static PendingChat pendingChat;
@@ -103,6 +114,10 @@ public class AIPlayerMod implements ModInitializer {
         aiChatHandler = new AIChatHandler(aiClient);
         aiMemoryGenerator = new AIMemoryGenerator(aiClient);
         planManager = new PlanManager(aiTaskPlanner);
+        knowledgeBase = KnowledgeBase.load();
+        localTaskDecomposer = new LocalTaskDecomposer(knowledgeBase, planManager);
+        localChatHandler = new LocalChatHandler();
+        LOGGER.info("[AI Player] KnowledgeBase + LocalTaskDecomposer + LocalChatHandler 已初始化 ({} 条知识)", knowledgeBase.allKeys().size());
 
         botSpawner = new BotSpawner();
         stateManager = new StateManager();
@@ -137,6 +152,31 @@ public class AIPlayerMod implements ModInitializer {
         botController = new BotController(botSpawner, taskManager, taskExecutor, stateManager,
                 conditionedReflex, aiTaskPlanner, aiChatHandler, aiClient, idleBrain,
                 socialClassifier, reflexRegistry, inhibitor);
+
+        MetaScheduler metaScheduler = new MetaScheduler();
+        var defaultParams = com.izimi.aiplayermod.amygdala.BotParams.load();
+        HormonalSystem hormonalSystem = new HormonalSystem();
+        MetaContext metaContext = new MetaContext(
+                UUID.fromString("a1b2c3d4-e5f6-7890-abcd-ef1234567890"),
+                "AI_Assistant",
+                defaultParams,
+                hormonalSystem,
+                new OneShotAlarmSystem(UUID.fromString("a1b2c3d4-e5f6-7890-abcd-ef1234567890")),
+                conditionedReflex,
+                new DispatchReflex(defaultParams, UUID.fromString("a1b2c3d4-e5f6-7890-abcd-ef1234567890")),
+                reflexRegistry,
+                inhibitor,
+                taskManager,
+                memoryManager,
+                stateManager,
+                idleBrain,
+                localTaskDecomposer,
+                localChatHandler,
+                planManager,
+                null
+        );
+        botController.setMetaScheduler(metaScheduler, metaContext);
+        LOGGER.info("[AI Player] MetaScheduler 已初始化 (DispatchReflex learnable mode)");
 
         learningSystem = new LearningSystem(conditionedReflex, skillManager);
         behaviorEventHandler.addLearningListener(learningSystem::onEvent);
@@ -199,6 +239,9 @@ public class AIPlayerMod implements ModInitializer {
                         evaluationCycle.checkMessage(content);
                     }
 
+                    pendingChat = new PendingChat(content, "", "", "");
+                    pendingChatTime = System.currentTimeMillis();
+
                     if (aiClient.isConfigured()) {
                         var state = stateManager.loadState();
                         var task = taskManager.getActiveTask();
@@ -241,11 +284,21 @@ public class AIPlayerMod implements ModInitializer {
     public static PlanManager getPlanManager() { return planManager; }
     public static InhibitoryControl getInhibitor() { return inhibitor; }
     public static BehaviorStats getBehaviorStats() { return behaviorStats; }
+    public static KnowledgeBase getKnowledgeBase() { return knowledgeBase; }
+    public static LocalTaskDecomposer getLocalTaskDecomposer() { return localTaskDecomposer; }
 
     public static boolean hasPendingChat(double timeoutSecs) {
         if (pendingChat == null) return false;
         long elapsed = (System.currentTimeMillis() - pendingChatTime) / 1000;
         return elapsed < (timeoutSecs > 0 ? timeoutSecs : 30);
+    }
+
+    public static boolean hasPendingChat() {
+        return pendingChat != null;
+    }
+
+    public static String peekPendingChatMessage() {
+        return pendingChat != null ? pendingChat.message() : null;
     }
 
     public static PendingChat consumePendingChat() {

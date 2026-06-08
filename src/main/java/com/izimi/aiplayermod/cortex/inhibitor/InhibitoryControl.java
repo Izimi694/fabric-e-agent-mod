@@ -2,7 +2,7 @@ package com.izimi.aiplayermod.cortex.inhibitor;
 
 import com.izimi.aiplayermod.AIPlayerMod;
 import com.izimi.aiplayermod.amygdala.character.BehaviorStats;
-import com.izimi.aiplayermod.amygdala.reflexes.InnateReflex;
+import com.izimi.aiplayermod.brainstem.innate.InnateReflex;
 import net.minecraft.block.Blocks;
 import net.minecraft.entity.EntityType;
 import net.minecraft.entity.LivingEntity;

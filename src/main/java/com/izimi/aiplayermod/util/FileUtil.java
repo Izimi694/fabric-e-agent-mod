@@ -6,6 +6,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.List;
+import java.util.UUID;
 
 public class FileUtil {
     private static final String AI_MEMORY_DIR = "ai_memory";
@@ -71,7 +72,51 @@ public class FileUtil {
     }
 
     public static Path getThresholdsDir() {
-        return getCharacterDir().resolve("thresholds");
+        return getAIMemoryDir().resolve("thresholds");
+    }
+
+    public static Path getBotsDir() {
+        return getAIMemoryDir().resolve("bots");
+    }
+
+    public static Path getBotDir(UUID botId) {
+        return getBotsDir().resolve(botId.toString());
+    }
+
+    public static Path getBotAlarmsDir(UUID botId) {
+        return getBotDir(botId).resolve("alarms");
+    }
+
+    public static Path getBotConditionedDir(UUID botId) {
+        return getBotDir(botId).resolve("conditioned");
+    }
+
+    public static Path getBotMemoriesDir(UUID botId) {
+        return getBotDir(botId).resolve("memory");
+    }
+
+    public static Path getBotTasksDir(UUID botId) {
+        return getBotDir(botId).resolve("tasks");
+    }
+
+    public static Path getBotPlansDir(UUID botId) {
+        return getBotDir(botId).resolve("plans");
+    }
+
+    public static Path getBotStateDir(UUID botId) {
+        return getBotDir(botId).resolve("state");
+    }
+
+    public static Path getBotCharacterDir(UUID botId) {
+        return getBotDir(botId).resolve("character");
+    }
+
+    public static Path getBotEvaluationsDir(UUID botId) {
+        return getBotDir(botId).resolve("evaluations");
+    }
+
+    public static Path getBotExecutionLogsDir(UUID botId) {
+        return getBotDir(botId).resolve("execution_logs");
     }
 
     public static Path getConfigDir() {
