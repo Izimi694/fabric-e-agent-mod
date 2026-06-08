@@ -93,6 +93,20 @@ public class MemoryManager {
                 .collect(Collectors.toList());
     }
 
+    public boolean hasNotSeenRecently(String entityType, long maxAgeMs) {
+        refreshCacheIfNeeded();
+        long cutoff = System.currentTimeMillis() - maxAgeMs;
+        String lower = entityType.toLowerCase();
+        for (MemoryEntry m : memoryCache) {
+            if (m.timestamp >= cutoff) {
+                String text = (m.summary != null ? m.summary : "") +
+                        (m.keyLearnings != null ? " " + String.join(" ", m.keyLearnings) : "");
+                if (text.toLowerCase().contains(lower)) return false;
+            }
+        }
+        return true;
+    }
+
     private void saveMemory(MemoryEntry memory) {
         Path dayFile = getDayFile(currentGameDay);
         try {

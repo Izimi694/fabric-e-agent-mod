@@ -23,6 +23,8 @@ public class DispatchReflex {
     private final BotParams botParams;
     private final UUID botId;
     private final Map<String, Map<String, DispatchWeight>> dispatchWeights = new LinkedHashMap<>();
+    private int gateCount = 0;
+    private int gateHabitSuccessCount = 0;
 
     public DispatchReflex(BotParams botParams, UUID botId) {
         this.botParams = botParams;
@@ -74,6 +76,14 @@ public class DispatchReflex {
         }
         return result;
     }
+
+    public void recordGateEvent(boolean habitSuccess) {
+        gateCount++;
+        if (habitSuccess) gateHabitSuccessCount++;
+    }
+
+    public int getGateCount() { return gateCount; }
+    public int getGateHabitSuccessCount() { return gateHabitSuccessCount; }
 
     private void save() {
         try {

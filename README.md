@@ -5,7 +5,7 @@
 [![Java](https://img.shields.io/badge/Java-21-orange)](https://openjdk.org/)
 [![Status](https://img.shields.io/badge/status-beta-yellow)](#测试版状态)
 
-> **核心理念**：反射为中心，LLM 为编译器。6 层拦截器 + MetaScheduler = 成本收敛到 0。
+> **核心理念**：反射为中心，LLM 为编译器。6 层拦截器 + MotivationEngine(玻尔兹曼选择) + LLM 门控 = 成本收敛到 0。
 > 学习是为了不学习。思考是为了不思考。
 
 一个能在 Minecraft 中自主生存、向玩家学习、形成习惯性格的 AI 玩家。
@@ -29,19 +29,21 @@ LLM 仅用于"陌生场景"的第一次思考，之后靠本地反射（0 成本
 | **L5 本地规划** | `LocalTaskDecomposer` | 规则匹配 | 0 | 模板拆解 |
 | **L6 LLM 兜底** | LLM | 以上全不命中 | $ | 最后一次思考 |
 
-### MetaScheduler — 动态路由器
+### MetaScheduler — 动机驱动的动态路由器
 
 固定流水线（P0→P5 每个 tick 全跑一遍）已被 **元调度器** 替代：
 
 ```
 MetaScheduler.tick():
-  1. selectPerspective()      ← 选视角（生存/任务/社交/好奇/谨慎）
-  2. labelProblem(视角)       ← 贴标签（现在是哪种问题）
-  3. getFlowAdjustment(ctx)   ← 升降级（该升还是降）
-  4. dispatch(label, flow)    ← 分派到对应执行层
+  1. MotivationEngine.computeDrives()  ← 5通道并行竞争 (生存/任务/社交/好奇/谨慎)
+  2. MotivationEngine.select()         ← 玻尔兹曼软最大化 (temperature 控制随机性)
+  3. labelProblem(视角)                ← 贴标签（现在是哪种问题）
+  4. getFlowAdjustment(ctx)            ← 升降级（该升还是降）
+  5. dispatch(label, flow)             ← 分派到对应执行层 (+ LLM 门控)
 ```
 
-不同激素状态、不同 α/β 参数的假人选择不同视角，自然形成性格差异。
+**5 通道并行竞争 + 交叉抑制** 替代了旧的 if-else 链。选中的视角对其它通道施加 -30% 抑制，持续 5 tick。
+**LLM 门控** 确保 LLM 只在 6 条件同时满足时才放行（API配置/冷却/本地可处理/标签/抑制/失败率）。
 
 ### 三层信息传递系统
 
@@ -105,7 +107,7 @@ cd AIPlayerMod-1.21.1-Fabric
 # 编译
 .\gradlew.bat build
 
-# 运行测试 (58 tests)
+# 运行测试 (102 tests)
 .\gradlew.bat runTests
 
 # 输出: build/libs/ai-player-mod-1.21.1.jar
@@ -144,16 +146,18 @@ cd AIPlayerMod-1.21.1-Fabric
 
 | 状态 | 说明 |
 |------|------|
-| ✅ | 四个脑区模块全部实现，58 tests 0 failures |
+| ✅ | 四个脑区模块全部实现，102 tests 0 failures |
 | ✅ | 六层拦截器: L0(本能)+L1(预警)+L2(条件反射)+L3(模仿)+L4(自组织)+L5(本地规划)+L6(LLM) |
 | ✅ | 三层信息传递: 基因层+激素层+反射层 闭环 |
-| ✅ | MetaScheduler 元调度器 |
+| ✅ | MetaScheduler + MotivationEngine (5通道玻尔兹曼选择 + 交叉抑制) |
+| ✅ | LLM 门控 (6条件合取) + 好奇心指数衰减 (30min半衰期) |
 | ✅ | OneShotAlarmSystem + HormonalSystem |
 | ✅ | ConditionedReflex + 反射动力学 |
 | ✅ | SocialObserver + 社交镜像 |
 | ✅ | 前额叶抑制控制 (InhibitoryControl) |
-| 🔴 | Phase 4 — LocalChatHandler + 模板差异化 |
-| ⬜ | Phase 5 — 紧急程度 + 时间缩放 + 自组织 |
+| ✅ | Phase 4.5 — MotivationEngine + LLM Gate |
+| 🔴 | Phase 5 — 紧急程度 (连续 urgency 信号 + 时间累积) |
+| ⬜ | Phase 5 — 时间缩放 + 自组织 |
 | ⬜ | Phase 6 — Multi-bot |
 | ⬜ | Phase 7 — 繁衍模块 |
 | ⚠️ | 寻路暂未集成到主循环（AStarPathfinder 存在但未接入） |
@@ -193,8 +197,9 @@ minecraft/ai_memory/
 | Phase 1 | MetaScheduler + BotContext | ✅ |
 | Phase 2 | OneShotAlarmSystem + HormonalSystem | ✅ |
 | Phase 3 | LocalTaskDecomposer | ✅ |
-| Phase 4 | LocalChatHandler + 模板差异化 | 🔴 当前 |
-| Phase 5 | 紧急程度 + 时间缩放 + 自组织 | ⬜ |
+| Phase 4 | LocalChatHandler + 模板差异化 | ✅ |
+| Phase 4.5 | MotivationEngine + LLM Gate + Curiosity Drive | ✅ |
+| Phase 5 | 紧急程度 (连续 urgency + 时间累积) | 🔴 部分 |
 | Phase 6 | 多假人 | ⬜ |
 | Phase 7 | 繁衍模块 | ⬜ |
 

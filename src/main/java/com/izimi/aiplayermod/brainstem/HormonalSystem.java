@@ -8,9 +8,13 @@ public class HormonalSystem {
 
     private static final double STRESS_DECAY = 0.001;
     private static final double AGGRESSION_DECAY = 0.002;
-    private static final double CURIOSITY_DECAY = 0.005;
+    private static final double CURIOSITY_DECAY_PER_TICK = 0.000019;
     private static final double CLAMP_MIN = 0.0;
     private static final double CLAMP_MAX = 1.0;
+    private static final double NOVELTY_BOOST = 0.3;
+    private static final double NOVELTY_CAP = 0.95;
+    private static final double FAMILIAR_SUPPRESS = 0.95;
+    private static final double STRESS_SUPPRESS_FACTOR = 1.5;
 
     private double stress;
     private double aggression;
@@ -32,7 +36,8 @@ public class HormonalSystem {
     public void onTakeDamage()          { stress = clamp(stress + 0.1); }
     public void onCombatWin()           { aggression = clamp(aggression + 0.05); stress = max(stress - 0.02, 0); }
     public void onCombatLoss()          { stress = clamp(stress + 0.15); aggression = clamp(aggression - 0.1); }
-    public void onNovelDiscovery()      { curiosity = clamp(curiosity + 0.1); }
+    public void onNovelDiscovery()      { curiosity = Math.min(NOVELTY_CAP, curiosity + NOVELTY_BOOST); }
+    public void onEnterNewBiome()       { curiosity = Math.min(NOVELTY_CAP, curiosity + 0.2); }
     public void onTaskSuccess()         { stress = max(stress - 0.02, 0); }
 
     public void onPlayerPraise(UUID playerId) {
@@ -57,7 +62,21 @@ public class HormonalSystem {
     public void tick() {
         stress     = max(stress - STRESS_DECAY, 0);
         aggression = max(aggression - AGGRESSION_DECAY, 0);
-        curiosity  = max(curiosity - CURIOSITY_DECAY, 0);
+        curiosity  = curiosity * (1 - CURIOSITY_DECAY_PER_TICK);
+        curiosity  = Math.max(0, Math.min(NOVELTY_CAP, curiosity));
+    }
+
+    public void tickWithFamiliarity(boolean familiar) {
+        tick();
+        if (familiar) {
+            curiosity *= FAMILIAR_SUPPRESS;
+        }
+    }
+
+    public double getCuriosityThreshold(double beta, double stress) {
+        double threshold = 0.5 + beta * 10;
+        if (stress > 0.5) threshold *= STRESS_SUPPRESS_FACTOR;
+        return Math.min(1.0, threshold);
     }
 
     public double getStress()     { return stress; }

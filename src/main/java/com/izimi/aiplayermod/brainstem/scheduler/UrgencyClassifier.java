@@ -21,17 +21,39 @@ public class UrgencyClassifier {
 
     private static final double HIGH_THRESHOLD = 0.5;
     private static final double LOW_THRESHOLD = 0.2;
+    private static final double THREAT_WEIGHT = 0.6;
+    private static final double TIME_WEIGHT = 0.4;
+    private static final int TIME_MAX_TICKS = 600;
+    private static final double TIME_FULL_ESCALATION = 1.0;
 
     public UrgencyLabel classify(HormonalSystem hormones, ServerPlayerEntity bot) {
+        double urgency = computeUrgency(hormones, bot, 0);
+        return labelFromUrgency(urgency);
+    }
+
+    public static UrgencyLabel labelFromUrgency(double urgency) {
+        if (urgency > 0.85) return UrgencyLabel.CRITICAL;
+        if (urgency > 0.65) return UrgencyLabel.HIGH;
+        if (urgency > 0.35) return UrgencyLabel.NORMAL;
+        if (urgency > 0.15) return UrgencyLabel.LOW;
+        return UrgencyLabel.OBSERVE;
+    }
+
+    public double computeUrgency(HormonalSystem hormones, ServerPlayerEntity bot, int ticksInState) {
+        double threatProximity = computeThreatProximity(hormones, bot);
+        double timePressure = Math.min(TIME_FULL_ESCALATION, (double) ticksInState / TIME_MAX_TICKS);
+        double urgency = threatProximity * THREAT_WEIGHT + timePressure * TIME_WEIGHT;
+        return Math.min(1.0, Math.max(0.0, urgency));
+    }
+
+    public double computeThreatProximity(HormonalSystem hormones, ServerPlayerEntity bot) {
         double stimulus = computeStimulus(hormones, bot);
         double inhibition = computeInhibition(hormones, bot);
-        double delta = stimulus - inhibition;
 
-        if (delta > HIGH_THRESHOLD)  return UrgencyLabel.CRITICAL;
-        if (delta < -HIGH_THRESHOLD) return UrgencyLabel.CRITICAL;
-        if (delta > LOW_THRESHOLD)   return UrgencyLabel.HIGH;
-        if (delta < -LOW_THRESHOLD)  return UrgencyLabel.LOW;
-        return UrgencyLabel.OBSERVE;
+        if (Math.abs(inhibition) < 0.001) return stimulus > 0.1 ? 1.0 : 0.0;
+
+        double ratio = stimulus / Math.max(0.01, inhibition);
+        return Math.min(1.0, Math.max(0.0, ratio));
     }
 
     private double computeStimulus(HormonalSystem hormones, ServerPlayerEntity bot) {

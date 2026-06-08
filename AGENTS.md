@@ -408,7 +408,7 @@
 ## 当前状态
 
 ```
-项目阶段: Phase 4 — LocalChatHandler + 模板差异化
+项目阶段: Phase 4.5 — MotivationEngine + LLM 门控
 已完成:   TS 原型核心逻辑验证 (18 tests 通过)
           P0 IdleBrain 零成本建议系统
           P1 观察学习系统 (事件捕获+模式检测+固化)
@@ -431,12 +431,18 @@
            ✅ Phase 2.5 HormonalSystem (激素系统)
            ✅ P6 前额叶抑制控制 (InhibitoryControl)
            ✅ DispatchReflex (调度反射权重学习)
-            ✅ 六层拦截器: Level 0(本能)+Level 1(预警)+Level 2(条件反射)+Level 3(模仿学习)+Level 4(自组织)+Level 5(本地规划)+Level 6(LLM兜底)
+           ✅ 六层拦截器: Level 0(本能)+Level 1(预警)+Level 2(条件反射)+Level 3(模仿学习)+Level 4(自组织)+Level 5(本地规划)+Level 6(LLM兜底)
            ✅ 三层信息传递: 基因层(DNA)+激素层(实时浓度)+反射层(经验固化) 闭环
            ✅ Phase 3 LocalTaskDecomposer (本地规则拆解器 + Plan→Task 集成)
            ✅ Phase 4 LocalChatHandler (本地聊天处理器 + 模板差异化)
-当前:     Phase 4 — LocalChatHandler + 模板差异化 (迭代完善)
-目标:     Phase 4-6: 本地聊天 + 紧急程度/时间缩放 + 多假人 + 繁衍
+           ✅ Phase 4.5 MotivationEngine (动机通道并行竞争 + 玻尔兹曼选择 + 交叉抑制)
+           ✅ Phase 4.5 LLM 门控 (6条件合取: API配置/冷却/失败/标签/本地/抑制)
+           ✅ Phase 4.5 Curiosity 驱动 (指数衰减 30min半衰期 + 熟悉环境压制 + 动态阈值)
+           ✅ Phase 4.5 MetaContext 存根修补 (9个方法全部接入真实数据)
+           ✅ Phase 4.5 测试 (102 tests, 0 failures, 2 新增测试类)
+当前:     Phase 4.5 — MotivationEngine + LLM 门控 (已完成)
+目标:     Phase 5-7: 紧急程度/时间缩放 + 多假人 + 繁衍
+当前:     Phase 5 紧急程度 — UrgencyClassifier 已重构为连续信号 + 时间累积升级
 ```
 
 **当前唯一活动项目是 Fabric 模组** (`AIPlayerMod-1.21.1-Fabric/`)。
@@ -1051,12 +1057,15 @@ AIPlayerMod-1.21.1-Fabric/
         │   ├── AttackSkill.java          先天攻击技能 [ L0 ]
         │   └── CraftSkill.java           先天合成技能 [ L0 ]
         ├── scheduler/
-        │   ├── MetaScheduler.java      元调度器 (selectPerspective→label→flow→dispatch) [ L2 ]
-        │   ├── MetaContext.java         假人上下文
+        │   ├── MetaScheduler.java      元调度器 (MotivationEngine→label→LLM gate→dispatch) [ L2 ]
+        │   ├── MotivationEngine.java   动机引擎 (5通道并行竞争 + 玻尔兹曼选择 + 交叉抑制) [ L2 ]
+        │   ├── DriveState.java         驱力值对象 (survival/task/social/curiosity/cautious)
+        │   ├── MetaContext.java         假人上下文 (存根已接入真实数据 + urgency 追踪)
         │   ├── Perspective.java         视角枚举（5个值）
         │   ├── ProblemLabel.java        问题标签
         │   ├── FlowLevel.java           升降级状态
-        │   └── ILocalPlanner.java       本地规划器接口 [ L3 ]
+        │   ├── ILocalPlanner.java       本地规划器接口 [ L3 ]
+        │   └── UrgencyClassifier.java   紧急程度分类器 (离散标签 + 连续 urgency ∈ [0,1])
         ├── skill/
         │   ├── Skill.java             抽象基类
         │   └── SkillManager.java      注册/加载/卸载
@@ -1074,10 +1083,12 @@ AIPlayerMod-1.21.1-Fabric/
 
 ```
 src/test/java/com/izimi/aiplayermod/
-├── cortex/task/TaskTest.java            extractAction/Count/Target + SubTask/Progress
-├── amygdala/learning/CategoryMapperTest.java  分类映射 18 tests
-├── brainstem/innate/ReflexRegistryTest.java  注册表 + Trigger/Action/Defaults (15 tests)
-└── brainstem/IdleBrainTest.java         状态机 + 肯定/否定/冷却 (11 tests)
+├── cortex/task/TaskTest.java                      extractAction/Count/Target + SubTask/Progress
+├── amygdala/learning/CategoryMapperTest.java      分类映射 18 tests
+├── brainstem/innate/ReflexRegistryTest.java       注册表 + Trigger/Action/Defaults (15 tests)
+├── brainstem/IdleBrainTest.java                   状态机 + 肯定/否定/冷却 (11 tests)
+├── brainstem/scheduler/MotivationEngineTest.java  驱力计算 + 玻尔兹曼分布 + 交叉抑制 + 好奇心指数衰减 (19 tests)
+└── brainstem/scheduler/MetaContextStubTest.java   存根修补 + LLM跟踪 + 门控条件 + 环境检测 (25 tests)
 ```
 
 ### TS 原型 (参考用, 只读)
@@ -1266,6 +1277,7 @@ minecraft/ai_memory/
 ✅ 已完成  Phase 1   MetaScheduler + BotContext (动态路由器)
 ✅ 已完成  Phase 2   OneShotAlarmSystem (一次预警系统)
 ✅ 已完成  Phase 2.5 HormonalSystem (激素系统)
+✅ 已完成  Phase 4.5 MotivationChannel (玻尔兹曼视角选择) + LLM Gate (6条件门控) + Curiosity 指数衰减
 ```
 
 ---
@@ -1290,8 +1302,9 @@ minecraft/ai_memory/
 | Phase 2 | OneShotAlarmSystem (Level 2 先天预警) | ✅ | 一次性学习 |
 | Phase 2.5 | HormonalSystem (激素系统) | ✅ | 按玩家亲密度 |
 | Phase 3 | LocalTaskDecomposer (本地规则拆解) | ✅ | KB模板→Plan→Task 集成 |
-| Phase 4 | LocalChatHandler + 模板差异化 | 🔴 | 0 LLM 聊天 |
-| Phase 5 | 紧急程度 + 时间缩放 + 自组织 | ⬜ | 动态调速 + 零成本探索 |
+| Phase 4 | LocalChatHandler + 模板差异化 | ✅ | 0 LLM 聊天 |
+| Phase 4.5 | MotivationEngine + LLM Gate + Curiosity Drive | ✅ | 玻尔兹曼视角选择 + 6条件门控 + 指数衰减驱动 |
+| Phase 5 | 紧急程度 + 时间缩放 + 自组织 | 🔴 部分 (连续 urgency + 时间累积已完成) | 动态调速 + 零成本探索 |
 | Phase 6 | 多假人 (BotSpawner Map + /ai spawn \<name\>) | ⬜ | 多假人共存 |
 | Phase 7 | 繁衍模块 (三规则继承 + BotContext.reproduce) | ⬜ | 正态分布涌现 |
 

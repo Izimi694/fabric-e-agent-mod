@@ -41,6 +41,8 @@ public class ConditionedReflex {
     private final Map<String, List<Double>> actionHistory = new HashMap<>();
     private int actionCount = 0;
     private String lastExecutedReflexId;
+    private int consecutiveFailures = 0;
+    private int recentSuccessCount = 0;
 
     public ConditionedReflex(SkillManager skillManager, ModConfig config, BasicActionAdapter actionAdapter) {
         this.skillManager = skillManager;
@@ -405,6 +407,13 @@ public class ConditionedReflex {
         int newSuccesses = oldSuccesses + (success ? 1 : 0);
         double newRate = count > 0 ? newSuccesses / (double) count : 0.0;
 
+        if (success) {
+            consecutiveFailures = 0;
+            recentSuccessCount++;
+        } else {
+            consecutiveFailures++;
+        }
+
         data.put("executionCount", count);
         data.put("successRate", newRate);
         data.put("lastEffectiveness", effectiveness);
@@ -652,6 +661,35 @@ public class ConditionedReflex {
         if (lastExecutedReflexId == null) return "最近没有执行特定反射";
         String ctx = getReflexContext(lastExecutedReflexId);
         return "Bot最近执行的反射: " + (ctx != null ? ctx : lastExecutedReflexId);
+    }
+
+    public double getHighestProficiency() {
+        double max = 0;
+        try {
+            var dir = FileUtil.getConditionedDir();
+            if (!java.nio.file.Files.exists(dir)) return 0;
+            try (var stream = java.nio.file.Files.list(dir)) {
+                for (var path : stream.toList()) {
+                    if (!path.toString().endsWith(".json")) continue;
+                    Map<String, Object> data = JsonUtil.readFromFileSafe(path, Map.class);
+                    if (data != null) {
+                        double ew = effectiveWeight(data);
+                        if (ew > max) max = ew;
+                    }
+                }
+            }
+        } catch (Exception e) {
+            AIPlayerMod.LOGGER.debug("[ConditionedReflex] getHighestProficiency: {}", e.getMessage());
+        }
+        return max;
+    }
+
+    public int getConsecutiveFailures() {
+        return consecutiveFailures;
+    }
+
+    public int getRecentSuccessCount() {
+        return recentSuccessCount;
     }
 
     public void moveToArchived(String skillId, Map<String, Object> data) {

@@ -20,18 +20,16 @@ import java.util.UUID;
 
 public class MetaScheduler {
 
-    private Perspective selectPerspective(MetaContext ctx) {
-        HormonalSystem h = ctx.hormones();
-        OneShotAlarmSystem alarms = ctx.alarms();
-        ServerPlayerEntity bot = ctx.bot();
+    private static final int LLM_COOLDOWN_TICKS = 400;
+    private static final int TIME_ESCALATION_TICKS = 200;
+    private static final int FLOW_STUCK_THRESHOLD = 600;
 
-        if (alarms != null && alarms.hasThreatMatchNearby(bot))  return Perspective.SURVIVAL;
-        if (h.getStress() > 0.7)                                   return Perspective.SURVIVAL;
-        if (ctx.activeTask() != null)                              return Perspective.TASK;
-        if (ctx.hasGroupActivity())                                return Perspective.SOCIAL;
-        if (h.getCuriosity() > 0.6)                                return Perspective.CURIOUS;
-        if (ctx.params().getBeta() > 0.02)                         return Perspective.CAUTIOUS;
-        return Perspective.TASK;
+    private final MotivationEngine motivationEngine;
+    private final UrgencyClassifier urgencyClassifier;
+
+    public MetaScheduler(MotivationEngine motivationEngine) {
+        this.motivationEngine = motivationEngine;
+        this.urgencyClassifier = new UrgencyClassifier();
     }
 
     private ProblemLabel labelProblem(MetaContext ctx, Perspective perspective) {
@@ -85,12 +83,29 @@ public class MetaScheduler {
             return FlowLevel.OVERRIDE;
         if (ctx.hasUrgentPlayerMessage())
             return FlowLevel.OVERRIDE;
+
+        if (ctx.getTicksInCurrentLabel() > FLOW_STUCK_THRESHOLD)
+            return FlowLevel.OVERRIDE;
+
+        if (ctx.getTicksInCurrentLabel() > TIME_ESCALATION_TICKS) {
+            double urgency = urgencyClassifier.computeUrgency(
+                    ctx.hormones(), ctx.bot(), ctx.getTicksInCurrentLabel());
+            if (urgency > 0.5) return FlowLevel.OVERRIDE;
+        }
+
         return FlowLevel.NORMAL;
     }
 
     public void tick(MetaContext ctx, MinecraftServer server) {
-        Perspective perspective = selectPerspective(ctx);
+        ctx.incrementTickSinceLastLLM();
+        ctx.tickNovelEntities();
+
+        DriveState drives = motivationEngine.computeDrives(ctx);
+        Perspective perspective = motivationEngine.select(ctx, drives);
+
         ProblemLabel label = labelProblem(ctx, perspective);
+        ctx.setCurrentProblemLabel(label);
+
         FlowLevel flow = getFlowAdjustment(ctx);
 
         DispatchReflex.DispatchAction action = null;
@@ -102,11 +117,43 @@ public class MetaScheduler {
             action = fallbackDispatch(label, flow);
         }
 
+        if (isLLMAction(action) && !shouldInvokeLLM(ctx, label, flow)) {
+            AIPlayerMod.LOGGER.debug("[MetaScheduler] LLM gate denied: {} {}, falling back to HABIT", label, flow);
+            action = new DispatchReflex.DispatchAction("HABIT", "llm_gate");
+        }
+
         boolean success = execute(action, ctx, server);
 
         if (ctx.dispatchReflex() != null) {
+            if ("llm_gate".equals(action.reason())) {
+                ctx.dispatchReflex().recordGateEvent(success);
+            }
             ctx.dispatchReflex().recordOutcome(label, flow, action, success);
         }
+
+        ctx.hormones().tick();
+    }
+
+    private boolean isLLMAction(DispatchReflex.DispatchAction action) {
+        return action != null && "CORTEX_LLM".equals(action.layer());
+    }
+
+    private boolean shouldInvokeLLM(MetaContext ctx, ProblemLabel label, FlowLevel flow) {
+        var aiClient = AIPlayerMod.getAIClient();
+        if (aiClient == null || !aiClient.isConfigured()) return false;
+        if (ctx.getTickSinceLastLLM() < LLM_COOLDOWN_TICKS) return false;
+        if (ctx.hasRecentLLMFailure()) return false;
+        if (label != ProblemLabel.NOVEL && flow != FlowLevel.OVERRIDE) return false;
+
+        ILocalPlanner lp = ctx.localPlanner();
+        if (lp != null && lp.canHandle(ctx.lastPlayerMessage())) return false;
+
+        InhibitoryControl inhibitor = ctx.inhibitor();
+        if (inhibitor != null) {
+            return false;
+        }
+
+        return true;
     }
 
     private DispatchReflex.DispatchAction fallbackDispatch(ProblemLabel label, FlowLevel flow) {
@@ -117,7 +164,7 @@ public class MetaScheduler {
             case SURVIVAL, LEARNED_THREAT -> new DispatchReflex.DispatchAction("INSTINCT", label.name());
             case TASK_ACTIVE, ROUTINE -> new DispatchReflex.DispatchAction("HABIT", label.name());
             case FAMILIAR -> new DispatchReflex.DispatchAction("CORTEX_LOCAL", "familiar");
-            case NOVEL -> new DispatchReflex.DispatchAction("CORTEX_LLM", "novel");
+            case NOVEL -> new DispatchReflex.DispatchAction("HABIT", "novel_fallback");
             case SOCIAL, TRIVIAL -> new DispatchReflex.DispatchAction("IDLE", label.name());
         };
     }
@@ -272,10 +319,18 @@ public class MetaScheduler {
         var aiChatHandler = AIPlayerMod.getAiChatHandler();
         if (aiChatHandler == null) return false;
 
-        aiChatHandler.handleChat(pc.message(), ctx.stateManager().loadState(),
-                ctx.taskManager().getActiveTask(),
-                ctx.memoryManager().getRecentMemories());
-        return true;
+        ctx.resetTickSinceLastLLM();
+        try {
+            aiChatHandler.handleChat(pc.message(), ctx.stateManager().loadState(),
+                    ctx.taskManager().getActiveTask(),
+                    ctx.memoryManager().getRecentMemories());
+            ctx.setRecentLLMFailure(false);
+            return true;
+        } catch (Exception e) {
+            AIPlayerMod.LOGGER.warn("[MetaScheduler] LLM call failed: {}", e.getMessage());
+            ctx.setRecentLLMFailure(true);
+            return false;
+        }
     }
 
     private boolean executeIdle(MetaContext ctx, ServerPlayerEntity bot) {

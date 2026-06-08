@@ -153,7 +153,8 @@ public class AIPlayerMod implements ModInitializer {
                 conditionedReflex, aiTaskPlanner, aiChatHandler, aiClient, idleBrain,
                 socialClassifier, reflexRegistry, inhibitor);
 
-        MetaScheduler metaScheduler = new MetaScheduler();
+        MotivationEngine motivationEngine = new MotivationEngine();
+        MetaScheduler metaScheduler = new MetaScheduler(motivationEngine);
         var defaultParams = com.izimi.aiplayermod.amygdala.BotParams.load();
         HormonalSystem hormonalSystem = new HormonalSystem();
         MetaContext metaContext = new MetaContext(
@@ -173,10 +174,12 @@ public class AIPlayerMod implements ModInitializer {
                 localTaskDecomposer,
                 localChatHandler,
                 planManager,
+                socialObserver,
+                familiarityTracker,
                 null
         );
         botController.setMetaScheduler(metaScheduler, metaContext);
-        LOGGER.info("[AI Player] MetaScheduler 已初始化 (DispatchReflex learnable mode)");
+        LOGGER.info("[AI Player] MetaScheduler 已初始化 (MotivationEngine + LLM Gate)");
 
         learningSystem = new LearningSystem(conditionedReflex, skillManager);
         behaviorEventHandler.addLearningListener(learningSystem::onEvent);
