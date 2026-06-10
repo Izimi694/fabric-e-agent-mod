@@ -90,6 +90,7 @@ public class BotInstance {
         this.taskExecutor = new TaskExecutor(taskManager, skillManager, AIPlayerMod.getExecutionLogger());
         this.memoryManager = new MemoryManager(config, botId);
         this.correlationDetector = new CorrelationDetector(skillManager, actionAdapter);
+        this.correlationDetector.setBayesianModule(bayesianModule);
         this.learningSystem = new LearningSystem(conditionedReflex, skillManager);
         this.planManager = new PlanManager(new AITaskPlanner(AIPlayerMod.getAIClient()), botId);
 

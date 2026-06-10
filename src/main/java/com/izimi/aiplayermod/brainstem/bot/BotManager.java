@@ -83,6 +83,7 @@ public class BotManager {
         if (instance == null) return false;
 
         try {
+            AIPlayerMod.getActionAdapter().stopNavigation(botId);
             // Save genome before removing (Phase 7)
             instance.saveDeathGenome("despawned");
 

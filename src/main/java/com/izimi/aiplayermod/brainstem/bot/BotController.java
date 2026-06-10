@@ -185,6 +185,7 @@ public class BotController {
             case "avoidLava" -> { adapter.avoidLava(bot, action.getDouble("speed", 0.2)); executed = true; }
             case "seekShelter" -> { adapter.seekShelter(bot, action.getDouble("speed", 0.1)); executed = true; }
             case "collectItem" -> { var r = adapter.collectItem(bot, action.getDouble("speed", 0.15)); executed = r.executed(); success = r.success(); }
+            case "sneak" -> { adapter.sneak(bot, true); executed = true; }
             case "invokeLLM" -> {
                 var pc = AIPlayerMod.consumePendingChat();
                 if (pc != null && aiChatHandler != null && aiClient.isConfigured()) {

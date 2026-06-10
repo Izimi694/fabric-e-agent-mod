@@ -2,6 +2,7 @@ package com.izimi.aiplayermod.amygdala.learning;
 
 import com.izimi.aiplayermod.AIPlayerMod;
 import com.izimi.aiplayermod.amygdala.ConditionedReflex;
+import com.izimi.aiplayermod.bayesian.BayesianModule;
 import com.izimi.aiplayermod.brainstem.adapter.BasicActionAdapter;
 import com.izimi.aiplayermod.brainstem.scheduler.MetaContext;
 import com.izimi.aiplayermod.brainstem.skill.SkillManager;
@@ -25,6 +26,7 @@ public class CorrelationDetector {
 
     private final SkillManager skillManager;
     private final BasicActionAdapter adapter;
+    private BayesianModule bayesianModule;
     private final Deque<TrialRecord> recentTrials = new ArrayDeque<>();
     private int cooldown = 0;
 
@@ -33,6 +35,10 @@ public class CorrelationDetector {
     public CorrelationDetector(SkillManager skillManager, BasicActionAdapter adapter) {
         this.skillManager = skillManager;
         this.adapter = adapter;
+    }
+
+    public void setBayesianModule(BayesianModule bayesianModule) {
+        this.bayesianModule = bayesianModule;
     }
 
     public boolean tryExplore(ServerPlayerEntity bot, MetaContext ctx) {
@@ -167,8 +173,6 @@ public class CorrelationDetector {
         data.put("source", "SELF_ORGANIZED");
         data.put("shortTermWeight", 0.5);
         data.put("longTermBaseline", 0.5);
-        data.put("executionCount", 0);
-        data.put("successRate", 0.0);
         data.put("proficiency", 0.3);
         data.put("occurrences", 1);
 

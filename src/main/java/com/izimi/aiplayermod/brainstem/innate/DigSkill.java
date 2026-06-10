@@ -56,7 +56,7 @@ public class DigSkill extends Skill {
     private BlockPos findDigTarget(ServerWorld world, ServerPlayerEntity bot) {
         if (currentTarget != null) {
             BlockState state = world.getBlockState(currentTarget);
-            if (!state.isAir() && !state.isOf(net.minecraft.block.Blocks.BEDROCK)) {
+            if (!state.isAir()) {
                 return currentTarget;
             }
         }
@@ -66,11 +66,7 @@ public class DigSkill extends Skill {
             for (int dx = -4; dx <= 4; dx++) {
                 for (int dz = -4; dz <= 4; dz++) {
                     BlockPos pos = botPos.add(dx, dy, dz);
-                    BlockState state = world.getBlockState(pos);
-                    if (!state.isAir() && state.getHardness(world, pos) >= 0
-                            && !state.isOf(net.minecraft.block.Blocks.BEDROCK)
-                            && !state.isOf(net.minecraft.block.Blocks.WATER)
-                            && !state.isOf(net.minecraft.block.Blocks.LAVA)) {
+                    if (!world.getBlockState(pos).isAir()) {
                         currentTarget = pos;
                         return pos;
                     }

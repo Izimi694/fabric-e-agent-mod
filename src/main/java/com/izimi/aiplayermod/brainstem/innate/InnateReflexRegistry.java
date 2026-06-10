@@ -81,6 +81,9 @@ public class InnateReflexRegistry {
         register(InnateReflex.create("collect_item", 1, false,
                 List.of(new ReflexTrigger(ReflexTrigger.TriggerType.ITEM_NEARBY, 0.0, 5)),
                 new ReflexAction("collectItem", Map.of("speed", 0.15))));
+        register(InnateReflex.create("sneak", 1, false,
+                List.of(new ReflexTrigger(ReflexTrigger.TriggerType.MONSTER_NEARBY, 0.0, 12)),
+                new ReflexAction("sneak", Map.of())));
         register(InnateReflex.create("vocal_response", 5, false,
                 List.of(new ReflexTrigger(ReflexTrigger.TriggerType.CHAT_PRESENCE, 0.0, 30)),
                 new ReflexAction("invokeLLM", Map.of())));

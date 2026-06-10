@@ -35,7 +35,7 @@
 |------|---------|---------|
 | 记忆 ≠ 技能 | 陈述性 vs 程序性 | MemoryManager vs ConditionedReflex |
 | 反射链 = 参数化步骤 | 有限状态机 | ConditionedReflex atoms |
-| 贝叶斯 = 错误预测拦截 | P(s\|f) ∝ P(f\|s)×P(s) | BayesianModule |
+| 贝叶斯 = 被动先验编码 | P(s\|f) ∝ P(f\|s)×P(s) ([事后统计，非实时门控](#2-核心抽象-os-内核视角)) | BayesianModule |
 | 激素 = 相对优先级 | 竞争性调度 | MotivationEngine boltzmann |
 | e = 自然切割 | 37% 探索 / 63% 利用 | 探索阈值/切换缓冲/收敛阈值 |
 
@@ -53,6 +53,7 @@
 | 优先级原则 | 成本越低、响应越快，优先级越高 |
 | 降级优先 | API 挂了降级本地，不停摆 |
 | 原子性原则 | 每反射只做一件事 |
+| 环境裁决原则 | 不做预判 — `jump()` 不查 `isOnGround`，`attack()` 不查 `instanceof`。执行动作，让环境反馈裁决成败 |
 
 ### 矛盾 B：个体差异 vs 群体稳定
 

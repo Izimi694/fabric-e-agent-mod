@@ -257,6 +257,7 @@ public class MetaScheduler {
             case "avoidLava" -> adapter.avoidLava(bot, reflex.action().getDouble("speed", 0.2) * speedMul);
             case "seekShelter" -> adapter.seekShelter(bot, reflex.action().getDouble("speed", 0.1) * speedMul);
             case "collectItem" -> adapter.collectItem(bot, reflex.action().getDouble("speed", 0.15) * speedMul);
+            case "sneak" -> adapter.sneak(bot, true);
         }
     }
 

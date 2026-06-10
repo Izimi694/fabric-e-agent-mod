@@ -1,11 +1,11 @@
 package com.izimi.aiplayermod.brainstem.adapter;
 
+import com.izimi.aiplayermod.brainstem.navigation.NavigationController;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.minecraft.component.DataComponentTypes;
 import net.minecraft.entity.ItemEntity;
 import net.minecraft.entity.LivingEntity;
-import net.minecraft.entity.mob.HostileEntity;
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.item.ItemStack;
 import net.minecraft.recipe.CraftingRecipe;
@@ -27,8 +27,13 @@ import net.minecraft.util.math.Vec3d;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class MinecraftActionAdapter implements BasicActionAdapter {
+
+    private final Map<UUID, NavigationController> navigationControllers = new ConcurrentHashMap<>();
 
     // Container slot layout constants (handler slot indices)
     // CraftingScreenHandler: 46 slots total
@@ -56,23 +61,26 @@ public class MinecraftActionAdapter implements BasicActionAdapter {
     public ActionResult moveTo(ServerPlayerEntity bot, BlockPos target) {
         if (bot == null || target == null) return ActionResult.unable("moveTo: bot或target为null");
 
+        NavigationController nav = navigationControllers.computeIfAbsent(
+                bot.getUuid(), k -> new NavigationController());
+
         Vec3d botPos = bot.getPos();
-        Vec3d targetVec = target.toCenterPos();
-        double dist = botPos.squaredDistanceTo(targetVec);
+        double dist = botPos.squaredDistanceTo(target.toCenterPos());
 
         if (dist < 4.0) {
+            nav.stopNavigation();
             return ActionResult.success("已到达");
         }
 
-        Vec3d dir = targetVec.subtract(botPos).normalize().multiply(0.15);
-        bot.setVelocity(new Vec3d(dir.x, 0.08, dir.z));
-        bot.velocityModified = true;
+        boolean navigating = nav.navigateTo(bot, target);
+        return navigating
+                ? ActionResult.success("已到达")
+                : ActionResult.partial(Math.max(0, 1.0 - dist / 100.0), "移动中");
+    }
 
-        if (Math.random() < 0.3 && bot.isOnGround()) {
-            bot.jump();
-        }
-
-        return ActionResult.partial(Math.max(0, 1.0 - dist / 100.0), "移动中");
+    public void stopNavigation(UUID botId) {
+        NavigationController nav = navigationControllers.remove(botId);
+        if (nav != null) nav.stopNavigation();
     }
 
     @Override
@@ -279,31 +287,36 @@ public class MinecraftActionAdapter implements BasicActionAdapter {
     @Override
     public ActionResult jump(ServerPlayerEntity bot) {
         if (bot == null) return ActionResult.unable("jump: bot为null");
+        bot.jump();
+        return ActionResult.success("跳跃");
+    }
 
-        if (bot.isOnGround()) {
-            bot.jump();
-            return ActionResult.success("跳跃");
-        }
-
-        return ActionResult.success("在空中，无法跳跃");
+    @Override
+    public ActionResult sneak(ServerPlayerEntity bot, boolean sneaking) {
+        if (bot == null) return ActionResult.unable("sneak: bot为null");
+        bot.setSneaking(sneaking);
+        return ActionResult.success("sneak: " + sneaking);
     }
 
     @Override
     public ActionResult flee(ServerPlayerEntity bot, double speed) {
         if (bot == null) return ActionResult.unable("flee: bot为null");
-        HostileEntity nearest = findNearestHostileForFlee(bot, 10);
-        if (nearest == null) return ActionResult.unable("flee: 未检测到威胁");
-        Vec3d away = bot.getPos().subtract(nearest.getPos()).normalize().multiply(speed);
-        bot.setVelocity(new Vec3d(away.x, 0.1, away.z));
+        Vec3d away = fleeDirection(bot);
+        bot.setVelocity(away.multiply(speed));
         bot.velocityModified = true;
         bot.jump();
-        return ActionResult.success("flee: " + nearest.getType().getName().getString());
+        return ActionResult.success("flee");
     }
 
     @Override
     public ActionResult eat(ServerPlayerEntity bot) {
         if (bot == null) return ActionResult.unable("eat: bot为null");
         PlayerInventory inv = bot.getInventory();
+        ItemStack held = inv.getMainHandStack();
+        if (!held.isEmpty() && held.contains(DataComponentTypes.FOOD)) {
+            bot.swingHand(Hand.MAIN_HAND);
+            return ActionResult.success("eat: " + held.getItem().getName().getString());
+        }
         for (int i = 0; i < 9; i++) {
             ItemStack stack = inv.getStack(i);
             if (stack.contains(DataComponentTypes.FOOD)) {
@@ -312,18 +325,16 @@ public class MinecraftActionAdapter implements BasicActionAdapter {
                 return ActionResult.success("eat: " + stack.getItem().getName().getString());
             }
         }
-        return ActionResult.unable("eat: 背包没有食物");
+        return ActionResult.partial(0.1, "eat: 没有食物");
     }
 
     @Override
     public ActionResult retreat(ServerPlayerEntity bot, double speed) {
         if (bot == null) return ActionResult.unable("retreat: bot为null");
-        HostileEntity nearest = findNearestHostileForFlee(bot, 20);
-        if (nearest == null) return ActionResult.unable("retreat: 未检测到威胁");
-        Vec3d away = bot.getPos().subtract(nearest.getPos()).normalize().multiply(speed);
-        bot.setVelocity(new Vec3d(away.x, 0.05, away.z));
+        Vec3d away = fleeDirection(bot);
+        bot.setVelocity(away.multiply(speed));
         bot.velocityModified = true;
-        return ActionResult.success("retreat: " + nearest.getType().getName().getString());
+        return ActionResult.success("retreat");
     }
 
     @Override
@@ -370,7 +381,10 @@ public class MinecraftActionAdapter implements BasicActionAdapter {
                 }
             }
         }
-        return ActionResult.unable("seekShelter: 附近没有庇护所");
+        Vec3d forward = bot.getRotationVector().multiply(speed);
+        bot.setVelocity(new Vec3d(forward.x, 0.05, forward.z));
+        bot.velocityModified = true;
+        return ActionResult.partial(0.1, "seekShelter: 寻找中");
     }
 
     @Override
@@ -382,12 +396,17 @@ public class MinecraftActionAdapter implements BasicActionAdapter {
                 bot.getBoundingBox().expand(5),
                 e -> !e.cannotPickup()
         );
-        if (items.isEmpty()) return ActionResult.unable("collectItem: 附近没有掉落物");
-        var nearest = items.get(0);
-        Vec3d dir = nearest.getPos().subtract(bot.getPos()).normalize();
-        bot.setVelocity(dir.multiply(speed));
+        if (!items.isEmpty()) {
+            var nearest = items.get(0);
+            Vec3d dir = nearest.getPos().subtract(bot.getPos()).normalize();
+            bot.setVelocity(dir.multiply(speed));
+            bot.velocityModified = true;
+            return ActionResult.success("collect: " + nearest.getStack().getItem().getName().getString());
+        }
+        Vec3d forward = bot.getRotationVector().multiply(speed);
+        bot.setVelocity(new Vec3d(forward.x, 0.05, forward.z));
         bot.velocityModified = true;
-        return ActionResult.success("collect: " + nearest.getStack().getItem().getName().getString());
+        return ActionResult.partial(0.1, "collectItem: 搜索中");
     }
 
     @Override
@@ -562,11 +581,7 @@ public class MinecraftActionAdapter implements BasicActionAdapter {
             for (int dx = -4; dx <= 4; dx++) {
                 for (int dz = -4; dz <= 4; dz++) {
                     BlockPos pos = botPos.add(dx, dy, dz);
-                    BlockState state = world.getBlockState(pos);
-                    if (!state.isAir() && state.getHardness(world, pos) >= 0
-                            && !state.isOf(Blocks.BEDROCK)
-                            && !state.isOf(Blocks.WATER)
-                            && !state.isOf(Blocks.LAVA)) {
+                    if (!world.getBlockState(pos).isAir()) {
                         return pos;
                     }
                 }
@@ -590,9 +605,7 @@ public class MinecraftActionAdapter implements BasicActionAdapter {
                 }
             }
         } else {
-            world.getEntitiesByClass(HostileEntity.class,
-                    bot.getBoundingBox().expand(SCAN_RANGE),
-                    e -> e.isAlive()).forEach(entities::add);
+            entities.addAll(allEntities);
         }
 
         if (entities.isEmpty()) return null;
@@ -638,15 +651,17 @@ public class MinecraftActionAdapter implements BasicActionAdapter {
         };
     }
 
-    private HostileEntity findNearestHostileForFlee(ServerPlayerEntity bot, int range) {
+    private Vec3d fleeDirection(ServerPlayerEntity bot) {
         ServerWorld world = bot.getServerWorld();
-        List<HostileEntity> mobs = world.getEntitiesByClass(
-                HostileEntity.class,
-                bot.getBoundingBox().expand(range),
-                e -> e.isAlive()
-        );
-        if (mobs.isEmpty()) return null;
-        mobs.sort((a, b) -> Double.compare(a.squaredDistanceTo(bot), b.squaredDistanceTo(bot)));
-        return mobs.get(0);
+        var entities = world.getEntitiesByClass(
+                LivingEntity.class, bot.getBoundingBox().expand(10), e -> e.isAlive() && e != bot);
+        if (!entities.isEmpty()) {
+            var nearest = entities.get(0);
+            Vec3d away = bot.getPos().subtract(nearest.getPos());
+            double len = away.length();
+            if (len > 0.01) return away.normalize();
+        }
+        Vec3d look = bot.getRotationVector();
+        return new Vec3d(-look.x, 0, -look.z).normalize();
     }
 }

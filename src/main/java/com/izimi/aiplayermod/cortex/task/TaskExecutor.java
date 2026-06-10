@@ -56,44 +56,42 @@ public class TaskExecutor {
         context.put("task", task);
 
         try {
-            if (skill.canExecute(bot.getServerWorld(), bot, context)) {
-                Skill.SkillResult result = skill.execute(bot.getServerWorld(), bot, context);
+            Skill.SkillResult result = skill.execute(bot.getServerWorld(), bot, context);
 
-                executionLogger.logAction(
-                        skill.getSkillId(),
-                        context,
-                        result.success() ? "success" : "fail",
-                        result.effectiveness()
-                );
+            executionLogger.logAction(
+                    skill.getSkillId(),
+                    context,
+                    result.success() ? "success" : "fail",
+                    result.effectiveness()
+            );
 
-                if (result.success()) {
-                    current.status = "success";
-                    task.progress.completedCount++;
-                    taskManager.saveActiveTask();
+            if (result.success()) {
+                current.status = "success";
+                task.progress.completedCount++;
+                taskManager.saveActiveTask();
 
-                    AIPlayerMod.LOGGER.info("[TaskExecutor] 子任务完成: {} ({}/{})",
-                            current.goal, task.progress.completedCount, task.progress.targetCount);
+                AIPlayerMod.LOGGER.info("[TaskExecutor] 子任务完成: {} ({}/{})",
+                        current.goal, task.progress.completedCount, task.progress.targetCount);
 
-                    if (task.progress.completedCount >= task.progress.targetCount) {
-                        taskManager.completeTask();
-                        executionTick = 0;
-                    }
-                } else {
-                    current.attemptCount++;
+                if (task.progress.completedCount >= task.progress.targetCount) {
+                    taskManager.completeTask();
+                    executionTick = 0;
+                }
+            } else {
+                current.attemptCount++;
 
-                    if (!result.executed()) {
-                        AIPlayerMod.LOGGER.warn("[TaskExecutor] 确定无法执行，跳过: {} (goal={})",
-                                current.skillId, current.goal);
-                        current.status = "skipped";
-                        return;
-                    }
+                if (!result.executed()) {
+                    AIPlayerMod.LOGGER.warn("[TaskExecutor] 确定无法执行，跳过: {} (goal={})",
+                            current.skillId, current.goal);
+                    current.status = "skipped";
+                    return;
+                }
 
-                    int maxRetries = getMaxRetries();
-                    if (current.attemptCount >= maxRetries) {
-                        AIPlayerMod.LOGGER.warn("[TaskExecutor] 子任务失败{}次: {} (goal={})",
-                                maxRetries, current.skillId, current.goal);
-                        current.status = "skipped";
-                    }
+                int maxRetries = getMaxRetries();
+                if (current.attemptCount >= maxRetries) {
+                    AIPlayerMod.LOGGER.warn("[TaskExecutor] 子任务失败{}次: {} (goal={})",
+                            maxRetries, current.skillId, current.goal);
+                    current.status = "skipped";
                 }
             }
         } catch (Exception e) {

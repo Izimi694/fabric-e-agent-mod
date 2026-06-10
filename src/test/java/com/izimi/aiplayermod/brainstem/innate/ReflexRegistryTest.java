@@ -29,11 +29,11 @@ class ReflexRegistryTest {
     }
 
     @Test
-    @DisplayName("loadDefaults loads 8 built-in reflexes")
-    void loadDefaultsLoadsEight() {
+    @DisplayName("loadDefaults loads 9 built-in reflexes")
+    void loadDefaultsLoadsNine() {
         InnateReflexRegistry registry = new InnateReflexRegistry(new MinecraftReflexEvaluator());
         registry.loadDefaults();
-        assertEquals(8, registry.size());
+        assertEquals(9, registry.size());
     }
 
     @Test

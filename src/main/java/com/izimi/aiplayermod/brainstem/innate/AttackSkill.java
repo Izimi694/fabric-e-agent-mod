@@ -3,8 +3,6 @@ package com.izimi.aiplayermod.brainstem.innate;
 import com.izimi.aiplayermod.brainstem.skill.Skill;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.LivingEntity;
-import net.minecraft.entity.mob.HostileEntity;
-import net.minecraft.entity.passive.AnimalEntity;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.Hand;
@@ -72,12 +70,10 @@ public class AttackSkill extends Skill {
         double closestDist = Double.MAX_VALUE;
 
         for (LivingEntity entity : entities) {
-            if (entity instanceof HostileEntity || entity instanceof AnimalEntity) {
-                double dist = entity.squaredDistanceTo(bot);
-                if (dist < closestDist) {
-                    closestDist = dist;
-                    closest = entity;
-                }
+            double dist = entity.squaredDistanceTo(bot);
+            if (dist < closestDist) {
+                closestDist = dist;
+                closest = entity;
             }
         }
 

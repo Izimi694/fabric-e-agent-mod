@@ -20,7 +20,9 @@ public abstract class Skill {
     public String getName() { return name; }
     public String getType() { return type; }
 
-    public abstract boolean canExecute(ServerWorld world, ServerPlayerEntity bot, Map<String, Object> context);
+    public boolean canExecute(ServerWorld world, ServerPlayerEntity bot, Map<String, Object> context) {
+        return true;
+    }
 
     public abstract SkillResult execute(ServerWorld world, ServerPlayerEntity bot, Map<String, Object> context);
 

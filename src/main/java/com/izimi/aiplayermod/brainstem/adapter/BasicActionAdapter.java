@@ -42,4 +42,8 @@ public interface BasicActionAdapter {
     ActionResult seekShelter(ServerPlayerEntity bot, double speed);
 
     ActionResult collectItem(ServerPlayerEntity bot, double speed);
+
+    ActionResult sneak(ServerPlayerEntity bot, boolean sneaking);
+
+    default void stopNavigation(java.util.UUID botId) {}
 }

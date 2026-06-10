@@ -8,7 +8,7 @@
 
 ```
 项目阶段: Phase A — BayesianModule 地基完成
-Phase A-F 实施中
+Phase A-F ✅ 已完成
 ```
 
 ### 完成情况
@@ -52,17 +52,28 @@ Phase 7 (繁衍) ── 三规则继承 (平均+脚手架 trial-first + 突变) 
 
 ## 3. 已知问题
 
-### P-1: MemoryManager.memoriesDir() 无限递归 (line 36)
-当 `botId != null` 时，`memoriesDir()` 递归调用自身而不是调用 `FileUtil.getBotMemoriesDir(botId)`。
+### ~~P-1: MemoryManager.memoriesDir() 无限递归 (line 36)~~ ✅ 已修复
+### ~~P-2: TaskManager.activeTaskPath() 无限递归 (line 32-33)~~ ✅ 已修复
 
-### P-2: TaskManager.activeTaskPath() 无限递归 (line 32-33)
-同上，当 `botId != null` 时递归调用自身。
+### ~~P-3: 寻路未接入主循环~~ ✅ 已修复
+`GreedyNavigator` (贪心一步导航) 取代 `AStarPathfinder`，接入 `NavigationController` → `MinecraftActionAdapter.moveTo()`。
 
-### P-3: 寻路未接入主循环
-AStarPathfinder 存在但未集成到 MetaScheduler 中。
+### ~~P-4: 导航使用 velocity-based 移动~~ ✅ 已修复
+`moveTo()` 每 tick 通过 `GreedyNavigator.getBestStep()` 选最优下一步方向，velocity 层执行。
 
-### P-4: 导航使用 velocity-based 移动
-`MinecraftActionAdapter` 使用 `setVelocity` 而非正式的寻路 AI。
+### ~~P-6: "我替环境判你能不能" — 预判反模式~~ ✅ 已修复
+12 处预判逻辑改为"先行动，让环境反馈裁决"：
+- `jump()` 不再检查 `isOnGround()`，直接跳
+- `flee()`/`retreat()` 不再要求 `HostileEntity` 存在才跑
+- `eat()` 找不到食物 → `partial` 而非 `unable`
+- `seekShelter()`/`collectItem()` 无目标时继续探索而非放弃
+- `dig()`/`attack()` 简化目标过滤 (删 `hardness≥0`/`BEDROCK`/`instanceof` 白名单)
+- `isWalkableLike()` 从 `isAir||WATER` 白名单 → `!isSolidBlock()` 碰撞检测
+- `Skill.canExecute()` 从 `abstract` → `default true`，消除双重扫描
+- `AttackSkill` 删 `instanceof HostileEntity||AnimalEntity` 白名单
+
+### P-5: TemplateManager.fill() 未接入主循环
+TemplateManager 已实现但未被 MetaScheduler 调用。当前 L6 路径直接调用 `AIChatHandler.handleChat()`。远期目标：统一到 TemplateManager 作为唯一 LLM 出入口。
 
 ---
 
@@ -129,10 +140,10 @@ src/main/java/com/izimi/aiplayermod/
 ├── brainstem/                        脑干
 │   ├── adapter/                      12 原子动作 (MinecraftActionAdapter)
 │   ├── bot/                          BotManager/BotInstance/BotSpawner/BotController
-│   ├── innate/                       InnateReflexRegistry/4 先天技能
+│   ├── innate/                       InnateReflexRegistry/9 先天技能 (含 sneak)
 │   ├── scheduler/                    MetaScheduler/MotivationEngine/MetaContext/UrgencyClassifier
 │   ├── skill/                        Skill + SkillManager
-│   ├── navigation/                   AStarPathfinder (未集成)
+│   ├── navigation/                   GreedyNavigator + NavigationController
 │   └── IdleBrain.java
 ├── command/                          AICommand
 ├── config/                           ModConfig
@@ -170,12 +181,12 @@ minecraft/ai_memory/
 | 测试文件 | 数量 | 内容 |
 |---------|:---:|------|
 | `CategoryMapperTest.java` | 18 | 分类映射 |
-| `TaskTest.java` | 11 | 任务拆解 |
-| `IdleBrainTest.java` | 11 | 状态机 |
+| `TaskTest.java` | 15 | 任务拆解 |
+| `IdleBrainTest.java` | 10 | 状态机 |
 | `ReflexRegistryTest.java` | 15 | 先天反射注册表 |
 | `MotivationEngineTest.java` | 19 | 驱力/玻尔兹曼/交叉抑制 |
 | `MetaContextStubTest.java` | 25 | MetaContext 查询/门控/环境检测 |
-| `BotParamsTest.java` | 8 | 三规则继承/参数范围/变异 |
-| **合计** | **~107** | **全部通过** |
+| `BotParamsTest.java` | 7 | 三规则继承/参数范围/变异 |
+| **合计** | **~109** | **全部通过** |
 
 **待补充测试：** `BayesianModule`, `TemplateManager`, `ChatSessionManager`
