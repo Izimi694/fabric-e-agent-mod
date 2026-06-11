@@ -16,7 +16,15 @@ public class ReflexPackManager {
 
     private static final int PACK_VERSION = 1;
 
-    public static boolean exportPack(UUID botId, String packName, boolean includePrior) {
+    private final UUID botId;
+    private final BayesianModule bayesianModule;
+
+    public ReflexPackManager(UUID botId, BayesianModule bayesianModule) {
+        this.botId = botId;
+        this.bayesianModule = bayesianModule;
+    }
+
+    public boolean exportPack(String packName, boolean includePrior) {
         Path packFile = FileUtil.getReflexPacksDir().resolve(packName + ".json");
         Path conditionedDir = FileUtil.getBotConditionedDir(botId);
 
@@ -26,7 +34,7 @@ public class ReflexPackManager {
         }
 
         try {
-            Map<String, Object> pack = buildPack(botId, conditionedDir, includePrior);
+            Map<String, Object> pack = buildPack(conditionedDir, includePrior);
             JsonUtil.writeToFileSafeAtomic(packFile, pack);
             Object refs = pack.get("reflexes");
             int count = refs instanceof Map ? ((Map<?, ?>) refs).size() : 0;
@@ -39,7 +47,7 @@ public class ReflexPackManager {
         }
     }
 
-    private static Map<String, Object> buildPack(UUID botId, Path conditionedDir, boolean includePrior) throws IOException {
+    private Map<String, Object> buildPack(Path conditionedDir, boolean includePrior) throws IOException {
         Map<String, Object> pack = new LinkedHashMap<>();
         pack.put("version", PACK_VERSION);
         pack.put("source", "AI_Assistant");
@@ -62,23 +70,20 @@ public class ReflexPackManager {
         pack.put("reflexes", reflexes);
 
         if (includePrior) {
-            BayesianModule bayesian = AIPlayerMod.getBayesianModule(botId);
-            if (bayesian != null) {
-                Map<String, Double> prior = bayesian.getSharedPrior();
-                Map<String, Double> filteredPrior = new HashMap<>();
-                for (String reflexId : reflexes.keySet()) {
-                    if (prior.containsKey(reflexId)) {
-                        filteredPrior.put(reflexId, prior.get(reflexId));
-                    }
+            Map<String, Double> prior = bayesianModule.getSharedPrior();
+            Map<String, Double> filteredPrior = new HashMap<>();
+            for (String reflexId : reflexes.keySet()) {
+                if (prior.containsKey(reflexId)) {
+                    filteredPrior.put(reflexId, prior.get(reflexId));
                 }
-                pack.put("bayesian_prior", filteredPrior);
             }
+            pack.put("bayesian_prior", filteredPrior);
         }
         return pack;
     }
 
     @SuppressWarnings("unchecked")
-    public static boolean importPack(UUID botId, String packName, boolean reset) {
+    public boolean importPack(String packName, boolean reset) {
         Path packFile = FileUtil.getReflexPacksDir().resolve(packName + ".json");
         Path conditionedDir = FileUtil.getBotConditionedDir(botId);
 
@@ -125,13 +130,10 @@ public class ReflexPackManager {
             if (pack.containsKey("bayesian_prior")) {
                 Object rawPrior = pack.get("bayesian_prior");
                 if (rawPrior instanceof Map) {
-                    BayesianModule bayesian = AIPlayerMod.getBayesianModule(botId);
-                    if (bayesian != null) {
-                        for (var entry : ((Map<String, Object>) rawPrior).entrySet()) {
-                            BayesianModule.setPrior(entry.getKey(), ((Number) entry.getValue()).doubleValue());
-                        }
-                        BayesianModule.saveSharedPrior();
+                    for (var entry : ((Map<String, Object>) rawPrior).entrySet()) {
+                        BayesianModule.setPrior(entry.getKey(), ((Number) entry.getValue()).doubleValue());
                     }
+                    BayesianModule.saveSharedPrior();
                 }
             }
 

@@ -51,6 +51,8 @@ public class BayesianModule {
     private static final double DEFAULT_PRIOR = 0.5;
     private static final double SMOOTHING = 0.5;
     private static final double CONVERGENCE_THRESHOLD = 1.0 / Math.E; // ≈ 0.3679
+    private static final double VARIANCE_SCALE = 0.1;
+    private static final double CONTROLLABILITY_ENV_PENALTY = 0.5;
 
     public BayesianModule(UUID botId) {
         this(botId, null);
@@ -311,6 +313,76 @@ public class BayesianModule {
 
     public Map<String, PosteriorSnapshot> getAllConvergence() {
         return Collections.unmodifiableMap(convergenceHistory);
+    }
+
+    // ── Public API: Environmental Controllability ──
+
+    public double computeControllability(String reflexId, List<BayesianFeature> features) {
+        if (reflexId == null) return 0.5;
+        PosteriorSnapshot snap = convergenceHistory.get(reflexId);
+        if (snap == null) return 0.5;
+        double variance = snap.initialVariance();
+        if (variance <= 0) return 1.0;
+        double controllability = 1.0 / (1.0 + variance / VARIANCE_SCALE);
+        if (features != null) {
+            for (BayesianFeature f : features) {
+                if ("environment_change".equals(f.key()) && f.value()) {
+                    controllability *= CONTROLLABILITY_ENV_PENALTY;
+                }
+            }
+        }
+        return Math.max(0, Math.min(1, controllability));
+    }
+
+    public double getConfidence(String reflexId) {
+        return sharedPrior.getOrDefault(reflexId, DEFAULT_PRIOR);
+    }
+
+    public boolean isPosteriorStable(String reflexId) {
+        PosteriorSnapshot snap = convergenceHistory.get(reflexId);
+        return snap != null && snap.sampleCount() >= 5 && snap.changeRate() < CONVERGENCE_THRESHOLD;
+    }
+
+    // ── Public API: Bidirectional Inference ──
+
+    public List<Map.Entry<String, Double>> inferForward(BotState state, List<BayesianFeature> evidence) {
+        if (state == null) return List.of();
+        return sharedPrior.entrySet().stream()
+                .filter(e -> state.isRelevantReflex(e.getKey()))
+                .map(e -> {
+                    double posterior = predictSuccess(e.getKey(), evidence);
+                    return Map.entry(e.getKey(), posterior);
+                })
+                .sorted(Map.Entry.<String, Double>comparingByValue().reversed())
+                .limit(5)
+                .toList();
+    }
+
+    public List<Map.Entry<String, Double>> inferBackward(String goalReflexId, List<BayesianFeature> evidence) {
+        if (goalReflexId == null) return List.of();
+        Map<String, Double> preconditionScores = new HashMap<>();
+        double goalPrior = sharedPrior.getOrDefault(goalReflexId, DEFAULT_PRIOR);
+        for (var entry : sharedPrior.entrySet()) {
+            if (entry.getKey().equals(goalReflexId)) continue;
+            double prior = entry.getValue();
+            double score = prior * goalPrior;
+            preconditionScores.put(entry.getKey(), score);
+        }
+        return preconditionScores.entrySet().stream()
+                .sorted(Map.Entry.<String, Double>comparingByValue().reversed())
+                .limit(5)
+                .toList();
+    }
+
+    public record BotState(String currentTask, String lastAction, String nearbyEntity, String nearbyBlock) {
+        public boolean isRelevantReflex(String reflexId) {
+            if (reflexId == null) return false;
+            String lower = reflexId.toLowerCase();
+            if (currentTask != null && lower.contains(currentTask.toLowerCase().replace(" ", "_"))) return true;
+            if (nearbyEntity != null && lower.contains(nearbyEntity.toLowerCase())) return true;
+            if (nearbyBlock != null && lower.contains(nearbyBlock.toLowerCase())) return true;
+            return false;
+        }
     }
 
     // ── Internal helpers ──

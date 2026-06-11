@@ -12,6 +12,7 @@ import com.izimi.aiplayermod.brainstem.innate.InnateReflexRegistry;
 import com.izimi.aiplayermod.brainstem.scheduler.ILocalPlanner;
 import com.izimi.aiplayermod.brainstem.skill.SkillManager;
 import com.izimi.aiplayermod.config.ModConfig;
+import com.izimi.aiplayermod.cortex.api.AIChatHandler;
 import com.izimi.aiplayermod.cortex.api.AIClient;
 import com.izimi.aiplayermod.cortex.api.TemplateManager;
 import com.izimi.aiplayermod.cortex.chat.LocalChatHandler;
@@ -30,6 +31,7 @@ public class WorldContextImpl implements WorldContext {
     private final TemplateManager templateManager;
     private final KnowledgeBase knowledgeBase;
     private final AIClient aiClient;
+    private final AIChatHandler chatAI;
     private final SkillManager skillManager;
     private final BehaviorStats behaviorStats;
     private final ModConfig modConfig;
@@ -49,6 +51,7 @@ public class WorldContextImpl implements WorldContext {
             TemplateManager templateManager,
             KnowledgeBase knowledgeBase,
             AIClient aiClient,
+            AIChatHandler chatAI,
             SkillManager skillManager,
             BehaviorStats behaviorStats,
             ModConfig modConfig
@@ -63,6 +66,7 @@ public class WorldContextImpl implements WorldContext {
         this.templateManager = templateManager;
         this.knowledgeBase = knowledgeBase;
         this.aiClient = aiClient;
+        this.chatAI = chatAI;
         this.skillManager = skillManager;
         this.behaviorStats = behaviorStats;
         this.modConfig = modConfig;
@@ -84,6 +88,7 @@ public class WorldContextImpl implements WorldContext {
             @Override public TemplateManager templateManager() { return WorldContextImpl.this.templateManager; }
             @Override public KnowledgeBase knowledgeBase() { return WorldContextImpl.this.knowledgeBase; }
             @Override public AIClient aiClient() { return WorldContextImpl.this.aiClient; }
+            @Override public AIChatHandler chatAI() { return WorldContextImpl.this.chatAI; }
         };
     }
 
@@ -93,4 +98,6 @@ public class WorldContextImpl implements WorldContext {
     @Override public SkillManager skillManager() { return skillManager; }
     @Override public BehaviorStats behaviorStats() { return behaviorStats; }
     @Override public ModConfig modConfig() { return modConfig; }
+
+    public AIChatHandler getChatAI() { return chatAI; }
 }

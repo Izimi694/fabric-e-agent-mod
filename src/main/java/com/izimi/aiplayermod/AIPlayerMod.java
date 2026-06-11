@@ -10,8 +10,7 @@ import com.izimi.aiplayermod.brainstem.adapter.BasicActionAdapter;
 import com.izimi.aiplayermod.brainstem.adapter.MinecraftActionAdapter;
 import com.izimi.aiplayermod.hormonal.HormonalSystem;
 import com.izimi.aiplayermod.brainstem.scheduler.*;
-import com.izimi.aiplayermod.amygdala.DispatchReflex;
-import com.izimi.aiplayermod.amygdala.OneShotAlarmSystem;
+
 import com.izimi.aiplayermod.cortex.api.*;
 import com.izimi.aiplayermod.cortex.inhibitor.InhibitoryControl;
 import com.izimi.aiplayermod.amygdala.FamiliarityTracker;
@@ -167,7 +166,7 @@ public class AIPlayerMod implements ModInitializer {
         worldContext = new WorldContextImpl(
                 reflexRegistry, actionAdapter, inhibitor,
                 socialObserver, familiarityTracker,
-                localTaskDecomposer, localChatHandler, templateManager, knowledgeBase, aiClient,
+                localTaskDecomposer, localChatHandler, templateManager, knowledgeBase, aiClient, aiChatHandler,
                 skillManager, behaviorStats, config
         );
         botManager.setWorldContext(worldContext);
@@ -178,34 +177,10 @@ public class AIPlayerMod implements ModInitializer {
 
         MotivationEngine motivationEngine = new MotivationEngine();
         MetaScheduler metaScheduler = new MetaScheduler(motivationEngine);
-        var defaultParams = com.izimi.aiplayermod.amygdala.BotParams.load();
-        HormonalSystem hormonalSystem = new HormonalSystem();
-        MetaContext metaContext = new MetaContext(
-                UUID.fromString("a1b2c3d4-e5f6-7890-abcd-ef1234567890"),
-                "AI_Assistant",
-                defaultParams,
-                hormonalSystem,
-                new OneShotAlarmSystem(UUID.fromString("a1b2c3d4-e5f6-7890-abcd-ef1234567890")),
-                conditionedReflex,
-                new DispatchReflex(defaultParams, UUID.fromString("a1b2c3d4-e5f6-7890-abcd-ef1234567890")),
-                reflexRegistry,
-                inhibitor,
-                taskManager,
-                memoryManager,
-                stateManager,
-                idleBrain,
-                localTaskDecomposer,
-                localChatHandler,
-                planManager,
-                socialObserver,
-                familiarityTracker,
-                bayesianModule,
-                null
-        );
-        botController.setMetaScheduler(metaScheduler, metaContext);
+        botController.setMetaScheduler(metaScheduler);
 
         var correlationDetector = new com.izimi.aiplayermod.amygdala.learning.CorrelationDetector(
-                skillManager, actionAdapter);
+                worldContext);
         metaScheduler.setCorrelationDetector(correlationDetector);
 
         LOGGER.info("[AI Player] MetaScheduler 已初始化 (MotivationEngine + LLM Gate)");
@@ -320,7 +295,7 @@ public class AIPlayerMod implements ModInitializer {
                 }
 
                 if (chatTarget != null) {
-                    chatTarget.getMetaContext().setPendingChat(content);
+                    chatTarget.setPendingChat(content);
                 } else {
                     pendingChat = new PendingChat(content, "", "", "");
                     pendingChatTime = System.currentTimeMillis();

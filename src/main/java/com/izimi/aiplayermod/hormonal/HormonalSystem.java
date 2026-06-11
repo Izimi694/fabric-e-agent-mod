@@ -2,6 +2,8 @@ package com.izimi.aiplayermod.hormonal;
 
 import java.util.Map;
 import java.util.HashMap;
+import java.util.List;
+import java.util.ArrayList;
 import java.util.UUID;
 
 public class HormonalSystem {
@@ -83,6 +85,21 @@ public class HormonalSystem {
     public double getAggression() { return aggression; }
     public double getCuriosity()  { return curiosity; }
     public Map<UUID, Double> getIntimacyMap() { return new HashMap<>(intimacy); }
+
+    /**
+     * 生成候选反射ID集 (粗筛, 不参与排序).
+     * 基于激素状态筛选相关范畴: stress高→生存, aggression高→战斗, curiosity高→探索.
+     */
+    public List<String> getCandidateCategories() {
+        List<String> categories = new ArrayList<>();
+        if (stress > 0.6) categories.add("flee");
+        if (stress > 0.4) categories.add("survival");
+        if (aggression > 0.6) categories.add("attack");
+        if (curiosity > 0.5) categories.add("explore");
+        if (stress < 0.3 && aggression < 0.4) categories.add("routine");
+        if (categories.isEmpty()) categories.add("routine");
+        return categories;
+    }
 
     public String summary() {
         return String.format("stress=%.2f aggression=%.2f curiosity=%.2f intimacy=%d players",

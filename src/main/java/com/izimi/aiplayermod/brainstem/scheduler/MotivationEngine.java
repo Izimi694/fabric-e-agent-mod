@@ -34,6 +34,20 @@ public class MotivationEngine {
         return exploreBias > EXPLORE_THRESHOLD;
     }
 
+    /**
+     * 麦穗策略: 基于置信度计算探索剩余窗口.
+     * exploreProb = max(0, 0.37 - confidence).
+     * 置信度越高, 探索窗口越短. 由 curiosity 调节阈值.
+     */
+    public static double wheatEarExplore(double confidence, HormonalSystem hormones) {
+        double base = Math.max(0, (1.0 / Math.E) - confidence);
+        if (hormones != null) {
+            double curiosityMod = hormones.getCuriosity() * 0.3;
+            base = Math.max(0, base + curiosityMod);
+        }
+        return Math.min(1.0, base);
+    }
+
     private final Random rng = new Random();
     private Perspective lastWinner = null;
     private int inhibitionTicks = 0;

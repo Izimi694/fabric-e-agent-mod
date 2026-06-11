@@ -47,6 +47,140 @@ public class ConditionedReflex {
     private int consecutiveFailures = 0;
     private int recentSuccessCount = 0;
 
+    private final Map<String, Set<String>> prevPointers = new HashMap<>();
+    private final Map<String, Set<String>> nextPointers = new HashMap<>();
+    private final Map<String, Boolean> bottleneckCache = new HashMap<>();
+
+    public void setPrev(String reflexId, String prevId) {
+        prevPointers.computeIfAbsent(reflexId, k -> new HashSet<>()).add(prevId);
+    }
+
+    public void setNext(String reflexId, String nextId) {
+        nextPointers.computeIfAbsent(reflexId, k -> new HashSet<>()).add(nextId);
+    }
+
+    public Set<String> getPrev(String reflexId) {
+        return prevPointers.getOrDefault(reflexId, Collections.emptySet());
+    }
+
+    public Set<String> getNext(String reflexId) {
+        return nextPointers.getOrDefault(reflexId, Collections.emptySet());
+    }
+
+    public void markBottleneck(String reflexId, boolean isBottleneck) {
+        bottleneckCache.put(reflexId, isBottleneck);
+        Path reflexPath = conditionedDir().resolve(reflexId + ".json");
+        Map<String, Object> data = JsonUtil.readMapFromFileSafe(reflexPath);
+        if (data != null) {
+            data.put("isBottleneck", isBottleneck);
+            JsonUtil.writeToFileSafeAtomic(reflexPath, data);
+        }
+    }
+
+    public boolean isBottleneck(String reflexId) {
+        return bottleneckCache.getOrDefault(reflexId, false);
+    }
+
+    public double getConfidence(String reflexId) {
+        Path reflexPath = conditionedDir().resolve(reflexId + ".json");
+        Map<String, Object> data = JsonUtil.readMapFromFileSafe(reflexPath);
+        if (data == null) return 0.5;
+        double stw = ((Number) data.getOrDefault("shortTermWeight", DEFAULT_WEIGHT)).doubleValue();
+        double ltb = ((Number) data.getOrDefault("longTermBaseline", DEFAULT_WEIGHT)).doubleValue();
+        return Math.max(0, Math.min(1, stw * EW_STW_RATIO + ltb * EW_LTB_RATIO));
+    }
+
+    public double getSharedWeight(String reflexId, String taskId) {
+        double base = getConfidence(reflexId);
+        double taskConf = 0.5;
+        if (bayesianModule != null) {
+            taskConf = bayesianModule.predictSuccess(reflexId, Collections.emptyList());
+        }
+        return base * taskConf;
+    }
+
+    public boolean isReflexStable(String reflexId) {
+        Path reflexPath = conditionedDir().resolve(reflexId + ".json");
+        Map<String, Object> data = JsonUtil.readMapFromFileSafe(reflexPath);
+        if (data == null) return false;
+        int execCount = ((Number) data.getOrDefault("executionCount", 0)).intValue();
+        boolean healthy = "healthy".equals(data.getOrDefault("status", "healthy"));
+        return execCount >= 10 && healthy && consecutiveFailures == 0;
+    }
+
+    public record PreconditionResult(boolean passed, String reason, String failStrategy) {}
+
+    public PreconditionResult checkPreconditions(String reflexId, net.minecraft.server.network.ServerPlayerEntity bot) {
+        return checkPreconditions(reflexId, bot, null);
+    }
+
+    public PreconditionResult checkPreconditions(String reflexId, net.minecraft.server.network.ServerPlayerEntity bot,
+                                                 com.izimi.aiplayermod.hormonal.HormonalSystem hormonalSystem) {
+        if (bot == null) return new PreconditionResult(true, null, "skip");
+        Path reflexPath = conditionedDir().resolve(reflexId + ".json");
+        Map<String, Object> data = JsonUtil.readMapFromFileSafe(reflexPath);
+        if (data == null) return new PreconditionResult(true, null, "skip");
+
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> preconditions = (List<Map<String, Object>>) data.get("preconditions");
+        if (preconditions == null || preconditions.isEmpty()) {
+            return new PreconditionResult(true, null, "skip");
+        }
+
+        for (Map<String, Object> pc : preconditions) {
+            String type = (String) pc.get("type");
+            String key = (String) pc.get("key");
+            String match = (String) pc.get("match");
+            String operator = (String) pc.get("operator");
+            double value = ((Number) pc.getOrDefault("value", 0.0)).doubleValue();
+            String failStrategy = (String) pc.getOrDefault("fail_strategy", "skip");
+
+            boolean passed = switch (type) {
+                case "item" -> checkItemPrecondition(bot, key, match);
+                case "state" -> checkStatePrecondition(bot, key, operator, value, hormonalSystem);
+                default -> true;
+            };
+
+            if (!passed) {
+                return new PreconditionResult(false, "precondition_failed:" + type + "." + key, failStrategy);
+            }
+        }
+        return new PreconditionResult(true, null, "skip");
+    }
+
+    private boolean checkItemPrecondition(net.minecraft.server.network.ServerPlayerEntity bot, String key, String match) {
+        var inventory = bot.getInventory();
+        if ("main_hand".equals(key)) {
+            var stack = inventory.getMainHandStack();
+            return stack.isEmpty() || match == null || stack.getItem().toString().toLowerCase().contains(match.toLowerCase());
+        }
+        for (int i = 0; i < inventory.size(); i++) {
+            var stack = inventory.getStack(i);
+            if (!stack.isEmpty()) {
+                String name = stack.getItem().toString().toLowerCase();
+                if (match == null || name.contains(match.toLowerCase())) return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean checkStatePrecondition(net.minecraft.server.network.ServerPlayerEntity bot, String key,
+                                            String operator, double value,
+                                            com.izimi.aiplayermod.hormonal.HormonalSystem hormonalSystem) {
+        double current = switch (key) {
+            case "stress" -> hormonalSystem != null ? hormonalSystem.getStress() : 0.0;
+            case "health" -> bot.getHealth() / bot.getMaxHealth();
+            default -> 0.0;
+        };
+        return switch (operator) {
+            case "<" -> current < value;
+            case ">" -> current > value;
+            case "<=" -> current <= value;
+            case ">=" -> current >= value;
+            default -> true;
+        };
+    }
+
     public ConditionedReflex(SkillManager skillManager, ModConfig config, BasicActionAdapter actionAdapter) {
         this(skillManager, config, actionAdapter, null);
     }
@@ -348,7 +482,7 @@ public class ConditionedReflex {
         JsonUtil.writeToFileSafeAtomic(reflexPath, data);
     }
 
-    private List<BayesianFeature> extractContextFeatures(ServerPlayerEntity bot) {
+    public List<BayesianFeature> extractContextFeatures(ServerPlayerEntity bot) {
         if (bot == null) return Collections.emptyList();
         List<BayesianFeature> features = new ArrayList<>();
 
@@ -793,6 +927,10 @@ public class ConditionedReflex {
 
     public int getConsecutiveFailures() {
         return consecutiveFailures;
+    }
+
+    public Skill getSkill(String skillId) {
+        return skillManager.getSkill(skillId);
     }
 
     public int getRecentSuccessCount() {

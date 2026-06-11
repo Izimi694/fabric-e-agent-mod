@@ -87,6 +87,37 @@ P(成功 | 环境) ∝ P(环境 | 成功) × P(成功)
 
 **工程落点**：探索阈值（MotivationEngine）、切换缓冲（MetaScheduler）、收敛判断（BayesianModule）。
 
+### 洞察 6：共享池 = 有限资源下的动态调配
+
+共享池的本质不是"无限容量的数据库"，而是用有限资源 + 动态调配实现效率最大化。
+
+| 池 | 生物对应 | 约束 | 工程实现 |
+|----|---------|:----:|---------|
+| 囊泡超级池 | 相邻突触共享囊泡 | 反射链长度 ≤ 5 | chain_max_length |
+| 工作记忆绑定池 | 有限特征绑定 | 贝叶斯候选集 ≤ 5 | bayesian_candidate_limit |
+| 跨脑共享子空间 | dmPFC 社交对齐 | 共享先验比例 10-30% | shared_prior_ratio |
+| 归一化网络池 | 总活动恒定 | 总驱力 = 1.0 | 硬编码归一化 |
+
+四池对应不同生物结构，约束独立，不交叉合并。
+
+### 洞察 7：连续信号 + 离散决策
+
+- 神经元速率编码是连续的（放电频率），门控阈值是离散的（钠离子通道阈值）
+- **信号存储和计算**用连续值（0-1），**决策边界**用离散阈值
+- 阈值由激素动态调节：stress↑ → 执行阈值↑（更谨慎），curiosity↑ → 探索阈值↓（更爱试错）
+
+| 连续信号 | 离散决策点 | 阈值调节 |
+|---------|-----------|---------|
+| 贝叶斯后验均值 > ? | 执行该反射 | stress 高时阈值↑ |
+| 置信度方差 < ? | 标记为 deterministic | curiosity 高时↓ |
+| 环境可控性 > ? | L1/L3 需验证 | stress 高时阈值↓ |
+
+### 洞察 8：Simon IDC 三阶段决策框架
+
+决策分三个阶段：I — 认识问题（情境识别），D — 设计对策（发散，≤5 候选），C — 选择对策（收敛，贝叶斯精筛）。价值计算（贝叶斯）和价值选择（MetaScheduler）分离。
+
+**前额叶三层次 (Grabenhorst & Rolls 2011)**：Tier1 识别特征 → Tier2 计算价值 → Tier3 做出选择（ACC 冲突仲裁）。
+
 ---
 
 ## 三、统一表述
@@ -135,6 +166,38 @@ P(成功 | 环境) ∝ P(环境 | 成功) × P(成功)
 8. **Tozzi, A. & Peters, J. F. (2019).** The brain deals with infinity by means of the finite. *Cognitive Neurodynamics*.
    → 建立观测边界替代处理"无限"，对应探索窗口切割。
 
+### 第六组：Go/NoGo 分层仲裁
+
+9. **Guitart-Masip, M. et al. (2012).** Go and no-go learning in the basal ganglia. *Nature Reviews Neuroscience*.
+   → Pavlovian vs Instrumental 系统竞争，对应环境可控性分层仲裁。
+
+10. **Collins, A. G. E. & Cockburn, J. (2021).** A framework for the development of decision-making. *PLOS Computational Biology*.
+    → Go/NoGo 实验验证了环境可控性对决策系统选择的动态调节。
+
+### 第七组：探索/利用平衡
+
+11. **Lee, M. D. & Zhang, N. (2024).** Individual differences in exploration-exploitation. *Journal of Cognitive Neuroscience*.
+    → 探索倾向跨任务一致，支持每反射独立置信度制导而非全局常量。
+
+12. **The Brain Bandit Team (2025).** Brain Bandit: uncertainty-driven exploration. *ICLR*.
+    → 探索偏向由网络内在不确定性编码，支持置信度制导探索窗口。
+
+### 第八组：共享子空间与任务分解
+
+13. **Nature (2025).** GABAergic neurons dominate shared subspaces in social behavior. *Nature*.
+    → 抑制性神经元主导共享子空间，共享编码的是行为/互动而非孤立动作。破坏共享子空间显著降低行为适应性。
+
+14. **Tomov, M. S. et al. (2023).** Task decomposition via bottleneck states. *arXiv*.
+    → 规划成本与任务性能的权衡决定最佳分解点，瓶颈节点即多条路径必须经过的状态。
+
+### 第九组：工作记忆与特征绑定
+
+15. **Treisman, A. (1996).** The binding problem. *Current Opinion in Neurobiology*.
+    → 注意是绑定的关键，对应 ParameterBinding 需要贝叶斯选择"注意"激活。
+
+16. **Grabenhorst, F. & Rolls, E. T. (2011).** Value, pleasure and choice in the orbitofrontal cortex. *Trends in Cognitive Sciences*.
+    → 前额叶三层次：识别特征→计算价值→做出选择。价值计算与价值选择分离。
+
 ### 论文章节建议
 
 | 章节 | 引用论文 |
@@ -143,7 +206,12 @@ P(成功 | 环境) ∝ P(环境 | 成功) × P(成功)
 | 方法：贝叶斯模块 | Fudenberg et al. (2022), Baltieri & Buckley (2021) |
 | 方法：并发与调度 | Ferguson (1989), Gilbert & Mosteller (1966) |
 | 方法：认知架构对比 | Rosenbloom et al. (2013) |
+| 方法：决策仲裁 | Guitart-Masip et al. (2012), Collins & Cockburn (2021) |
+| 方法：探索/利用 | Lee & Zhang (2024), Brain Bandit (2025) |
+| 方法：任务分解 | Tomov et al. (2023), Treisman (1996) |
+| 方法：决策层次 | Grabenhorst & Rolls (2011) |
 | 讨论：认知根源 | Tozzi & Peters (2019) |
+| 讨论：共享子空间 | Nature (2025) |
 
 ---
 
@@ -179,6 +247,6 @@ P(成功 | 环境) ∝ P(环境 | 成功) × P(成功)
 
 ---
 
-> 工程架构详细说明见 [ARCHITECTURE.md](./ARCHITECTURE.md)
-> 开发状态与路线图见 [DEVELOPMENT.md](./DEVELOPMENT.md)
-> Agent 设计指南见 [AGENTS.md](./AGENTS.md)
+> 工程架构详细说明见 [ARCHITECTURE.md](./ARCHITECTURE.md) (含 §15-24: DAG/ReflexChain/Loop/可控性/死路/双向推理/回退/共享池/门控/参数绑定)
+> 开发状态与路线图见 [DEVELOPMENT.md](./DEVELOPMENT.md) (含 Phase G-M)
+> Agent 设计指南见 [AGENTS.md](./AGENTS.md) (含 §7-11: 贝叶斯仲裁/麦穗/共享池/连续信号/IDC)

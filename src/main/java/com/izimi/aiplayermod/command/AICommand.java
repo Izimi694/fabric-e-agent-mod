@@ -469,7 +469,7 @@ public class AICommand {
                 source.sendFeedback(() -> Text.literal("§7[ReflexPack] 没有活动的AI"), false);
                 return 0;
             }
-            boolean ok = ReflexPackManager.exportPack(bot.getBotId(), packName, includePrior);
+            boolean ok = bot.getReflexPackManager().exportPack(packName, includePrior);
             if (ok) {
                 source.sendFeedback(() -> Text.literal("§a[ReflexPack] 导出成功: " + packName
                         + (includePrior ? " (含先验)" : " (不含先验)")), false);
@@ -494,7 +494,7 @@ public class AICommand {
                 source.sendFeedback(() -> Text.literal("§7[ReflexPack] 没有活动的AI"), false);
                 return 0;
             }
-            boolean ok = ReflexPackManager.importPack(bot.getBotId(), packName, reset);
+            boolean ok = bot.getReflexPackManager().importPack(packName, reset);
             if (ok) {
                 source.sendFeedback(() -> Text.literal("§a[ReflexPack] 导入成功: " + packName
                         + (reset ? " (冷启动)" : " (合并)")), false);

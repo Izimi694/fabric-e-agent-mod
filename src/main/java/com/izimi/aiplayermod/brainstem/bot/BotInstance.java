@@ -17,7 +17,6 @@ import com.izimi.aiplayermod.bayesian.BayesianModule;
 import com.izimi.aiplayermod.hormonal.HormonalSystem;
 import com.izimi.aiplayermod.brainstem.IdleBrain;
 import com.izimi.aiplayermod.brainstem.adapter.TemporalScaler;
-import com.izimi.aiplayermod.brainstem.scheduler.MetaContext;
 import com.izimi.aiplayermod.brainstem.scheduler.MetaScheduler;
 import com.izimi.aiplayermod.brainstem.scheduler.MotivationEngine;
 import com.izimi.aiplayermod.cortex.api.AITaskPlanner;
@@ -48,7 +47,6 @@ public class BotInstance {
     private final HormonalSystem hormonalSystem;
     private final MotivationEngine motivationEngine;
     private final MetaScheduler metaScheduler;
-    private final MetaContext metaContext;
     private final StateManager stateManager;
     private final TemporalScaler temporalScaler;
     private final CorrelationDetector correlationDetector;
@@ -56,11 +54,13 @@ public class BotInstance {
     private final BayesianModule bayesianModule;
     private final IdleBrain idleBrain;
     private final LearningSystem learningSystem;
+    private final ReflexPackManager reflexPackManager;
     private final TaskManager taskManager;
     private final TaskExecutor taskExecutor;
     private final MemoryManager memoryManager;
     private final PlanManager planManager;
 
+    private String pendingChatMessage;
     private int tickCounter = 0;
     private static final int STATE_SAVE_INTERVAL = 200;
     private boolean deathGenomeSaved = false;
@@ -82,10 +82,6 @@ public class BotInstance {
         var config = AIPlayerMod.getConfig();
         var skillManager = AIPlayerMod.getSkillManager();
         var actionAdapter = AIPlayerMod.getActionAdapter();
-        var reflexRegistry = AIPlayerMod.getReflexRegistry();
-        var inhibitor = AIPlayerMod.getInhibitor();
-        var localTaskDecomposer = AIPlayerMod.getLocalTaskDecomposer();
-        var localChatHandler = AIPlayerMod.getLocalChatHandler();
 
         this.botParams = inheritedParams != null ? inheritedParams : BotParams.generate();
         this.botParams.withBotId(botId);
@@ -102,12 +98,13 @@ public class BotInstance {
         this.taskManager = new TaskManager(botId);
         this.taskExecutor = new TaskExecutor(taskManager, skillManager, AIPlayerMod.getExecutionLogger());
         this.memoryManager = new MemoryManager(config, botId);
-        this.correlationDetector = new CorrelationDetector(skillManager, actionAdapter);
+        this.correlationDetector = new CorrelationDetector(worldContext);
         this.correlationDetector.setBayesianModule(bayesianModule);
         this.learningSystem = new LearningSystem(conditionedReflex, skillManager);
         this.planManager = new PlanManager(new AITaskPlanner(AIPlayerMod.getAIClient()), botId);
 
         this.idleBrain = new IdleBrain(taskManager, skillManager);
+        this.reflexPackManager = new ReflexPackManager(botId, bayesianModule);
         this.metaScheduler.setCorrelationDetector(correlationDetector);
 
         if (worldContext != null) {
@@ -123,16 +120,6 @@ public class BotInstance {
                     new ChatSessionManager(bayesianModule, botId)
             );
         }
-
-        this.metaContext = new MetaContext(
-                botId, botName, botParams, hormonalSystem, alarms,
-                conditionedReflex, dispatchReflex, reflexRegistry, inhibitor,
-                taskManager, memoryManager, stateManager, idleBrain,
-                localTaskDecomposer, localChatHandler, planManager,
-                AIPlayerMod.getSocialObserver(), AIPlayerMod.getFamiliarityTracker(),
-                bayesianModule,
-                botPlayer.asEntity()
-            );
     }
 
     public void tick(MinecraftServer server) {
@@ -151,6 +138,8 @@ public class BotInstance {
         tickCounter++;
 
         MetaState state = new MetaState();
+        String pendingChat = consumePendingChat();
+        if (pendingChat != null) state.setPendingChat(pendingChat);
         metaScheduler.tick(botContext, worldContext, bot, state, server);
 
         hormonalSystem.tick();
@@ -185,7 +174,6 @@ public class BotInstance {
     public HormonalSystem getHormonalSystem() { return hormonalSystem; }
     public MotivationEngine getMotivationEngine() { return motivationEngine; }
     public MetaScheduler getMetaScheduler() { return metaScheduler; }
-    public MetaContext getMetaContext() { return metaContext; }
     public StateManager getStateManager() { return stateManager; }
     public TemporalScaler getTemporalScaler() { return temporalScaler; }
     public CorrelationDetector getCorrelationDetector() { return correlationDetector; }
@@ -197,6 +185,14 @@ public class BotInstance {
     public TaskExecutor getTaskExecutor() { return taskExecutor; }
     public MemoryManager getMemoryManager() { return memoryManager; }
     public PlanManager getPlanManager() { return planManager; }
+    public ReflexPackManager getReflexPackManager() { return reflexPackManager; }
+
+    public void setPendingChat(String message) { this.pendingChatMessage = message; }
+    public String consumePendingChat() {
+        String msg = pendingChatMessage;
+        pendingChatMessage = null;
+        return msg;
+    }
 
     public boolean isSpawned() {
         return botPlayer != null && !botPlayer.isRemoved();

@@ -17,6 +17,7 @@ public class TemplateManager {
     public enum TemplateType {
         REFLEX_CREATE,
         TASK_PLAN,
+        DAG_TASK_PLAN,
         EVALUATION_BATCH,
         FAILURE_CLASSIFY,
         CHAT_DIRECTION
@@ -84,6 +85,7 @@ public class TemplateManager {
         return switch (type) {
             case REFLEX_CREATE -> "你是一个Minecraft AI助手。请填空以下JSON模板，生成一个新的反射技能。";
             case TASK_PLAN -> "你是一个Minecraft AI助手。请填空以下JSON模板，生成任务执行步骤。";
+            case DAG_TASK_PLAN -> "你是一个Minecraft AI助手。请填空以下JSON模板，生成带依赖关系的任务DAG。输出DAG结构，包含subtasks数组，每个子任务有id、name、action、target、depends_on[{id, type, weight, bindings[{from, to, transform}]}]，以及bottleneck_nodes列表。";
             case EVALUATION_BATCH -> "你是一个行为评价系统。请填空以下JSON模板，输出评价结果。";
             case FAILURE_CLASSIFY -> "你是一个错误分析系统。请填空以下JSON模板，分析失败原因。";
             case CHAT_DIRECTION -> "你是一个对话方向系统。请填空以下JSON模板，提供对话方向。";
@@ -117,6 +119,33 @@ public class TemplateManager {
                           ],
                           "target_count": {填数量}
                         }""", goal);
+            }
+            case DAG_TASK_PLAN -> {
+                String taskGoal = (String) context.getOrDefault("goal", "");
+                String availableActions = (String) context.getOrDefault("availableActions", "moveTo, dig, attack, placeBlock, useItem, equipItem, craft, chat, jump, lookAt, openBlock, closeWindow, clickSlot");
+                yield String.format("""
+                        任务: %s
+                        可用原子动作: %s
+                        填空以下JSON (输出DAG依赖图):
+                        {
+                          "task_id": "%s",
+                          "subtasks": [
+                            {
+                              "id": "a1",
+                              "name": "{子任务名称}",
+                              "action": "{原子动作}",
+                              "target": "{目标}",
+                              "count": 1,
+                              "depends_on": [
+                                {"id": "{上游id}", "type": "hard|soft", "weight": 0.95, "bindings": [
+                                  {"from": "output.{字段}", "to": "{参数字段}"}
+                                ]}
+                              ],
+                              "is_bottleneck": false
+                            }
+                          ],
+                          "bottleneck_nodes": ["{瓶颈节点id}"]
+                        }""", taskGoal, availableActions, taskGoal.replaceAll("\\s+", "_").toLowerCase());
             }
             case EVALUATION_BATCH -> {
                 String evaluations = (String) context.getOrDefault("evaluations", "");

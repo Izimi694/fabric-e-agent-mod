@@ -1,6 +1,7 @@
 package com.izimi.aiplayermod.amygdala;
 
 import com.izimi.aiplayermod.AIPlayerMod;
+import com.izimi.aiplayermod.bayesian.BayesianModule;
 import com.izimi.aiplayermod.util.FileUtil;
 import com.izimi.aiplayermod.util.JsonUtil;
 import net.minecraft.entity.LivingEntity;
@@ -13,13 +14,30 @@ import java.util.*;
 
 public class OneShotAlarmSystem {
 
+    private static final double CONTROLLABILITY_GATE = 0.3;
+
     private final UUID botId;
     private final List<AlarmEntry> alarms = new ArrayList<>();
     private static final double DEFAULT_CONFIDENCE = 1.0;
+    private BayesianModule bayesianModule;
 
     public OneShotAlarmSystem(UUID botId) {
         this.botId = botId;
         load();
+    }
+
+    public void setBayesianModule(BayesianModule bayesianModule) {
+        this.bayesianModule = bayesianModule;
+    }
+
+    /**
+     * 环境可控性门控: 低于阈值 → 报警可直接固化(环境不可控),
+     * 否则需要贝叶斯验证后才能固化.
+     */
+    public boolean shouldDirectConsolidate(String alarmId) {
+        if (bayesianModule == null) return false;
+        double controllability = bayesianModule.computeControllability(alarmId, null);
+        return controllability < CONTROLLABILITY_GATE;
     }
 
     public void labelEntity(String entityMatcher, AlarmType type, String action, String source) {

@@ -7,11 +7,13 @@ import com.izimi.aiplayermod.api.WorldContext;
 import com.izimi.aiplayermod.amygdala.DispatchReflex;
 import com.izimi.aiplayermod.amygdala.OneShotAlarmSystem;
 import com.izimi.aiplayermod.amygdala.learning.CorrelationDetector;
+import com.izimi.aiplayermod.bayesian.BayesianModule;
 import com.izimi.aiplayermod.brainstem.adapter.TemporalScaler;
 import com.izimi.aiplayermod.brainstem.innate.InnateReflex;
 import com.izimi.aiplayermod.brainstem.innate.InnateReflexRegistry;
 import com.izimi.aiplayermod.cortex.inhibitor.InhibitoryControl;
 import com.izimi.aiplayermod.cortex.task.Task;
+import com.izimi.aiplayermod.hormonal.HormonalSystem;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.text.Text;
@@ -29,6 +31,24 @@ public class MetaScheduler {
     // ── e-based timing constants: 63.2% execution / 36.8% buffer ──
     private static final double EXECUTION_RATIO = 1.0 - (1.0 / Math.E); // ≈ 0.632
     private static final double PREEMPT_THRESHOLD = 1.0 / Math.E;
+
+    // ── Dead-end detection ──
+    private static final int MAX_CONSECUTIVE_FAILURES = 5;
+    private static final double MIN_POSTERIOR_THRESHOLD = 0.1;
+    private static final int EXPLORATION_EXHAUST_THRESHOLD = 37;
+
+    // ── Rollback ──
+    private static final int MAX_RETRY_COUNT = 3;
+    private static final double MIN_ALT_THRESHOLD = 0.3;
+
+    // ── Loop ──
+    private static final int MAX_REFLECTION_LOOPS = 4;
+
+    public record DeadEndResult(boolean isDeadEnd, String reason) {}
+    public record RollbackStage(int stage, String action) {}
+
+    private int reflectionLoopCount = 0;
+    private String lastExecutedNodeId = null;
 
     /** 计算可用时间片: 63.2% 执行, 36.8% 缓冲 */
     public static long computeTimeSlice(long totalLatencyBound, int taskCount, long switchOverheadMs) {
@@ -167,6 +187,77 @@ public class MetaScheduler {
         botCtx.hormonalSystem().tick();
     }
 
+    // ── Loop Event-Driven Execution ──
+
+    public void executeLoop(BotContext botCtx, WorldContext worldCtx, ServerPlayerEntity bot,
+                            MetaState state, MinecraftServer server, String reflexId) {
+        if (bot == null) return;
+
+        reflectionLoopCount = 0;
+        while (reflectionLoopCount < MAX_REFLECTION_LOOPS) {
+            reflectionLoopCount++;
+
+            var conditioned = botCtx.conditionedReflex();
+            var bayesian = botCtx != null ? botCtx.bayesianModule() : null;
+
+            if (conditioned == null) break;
+
+            // 激素粗筛 (candidate generation)
+            String candidateReflex = reflexId != null ? reflexId : conditioned.getLastExecutedReflexId();
+            if (candidateReflex == null) {
+                var autoReflex = conditioned.scanAndTrigger(bot);
+                if (autoReflex == null) break;
+                candidateReflex = autoReflex.getSkillId();
+            }
+
+            // DAG 依赖检查 + 参数绑定 + 前置条件门控
+            if (bayesian != null) {
+                double posterior = bayesian.predictSuccess(candidateReflex, conditioned.extractContextFeatures(bot));
+                if (posterior < 0.05) {
+                    AIPlayerMod.LOGGER.debug("[MetaScheduler] Loop: 贝叶斯预判提前返回 {} (posterior={})", candidateReflex, posterior);
+                    break;
+                }
+            }
+
+            var precond = conditioned.checkPreconditions(candidateReflex, bot, botCtx.hormonalSystem());
+            if (!precond.passed()) {
+                AIPlayerMod.LOGGER.debug("[MetaScheduler] Loop: 前置条件不通过 {} → {}", candidateReflex, precond.reason());
+                break;
+            }
+
+            // 反射执行
+            var skill = conditioned.getSkill(candidateReflex);
+            if (skill == null) break;
+
+            lastExecutedNodeId = candidateReflex;
+            conditioned.executeReflex(skill, bot);
+
+            // 死路检测
+            DeadEndResult deadEnd = isDeadEnd(botCtx, worldCtx, bot, candidateReflex);
+            if (deadEnd.isDeadEnd()) {
+                AIPlayerMod.LOGGER.warn("[MetaScheduler] Loop: 死路检测触发 {} → {}, 回退中...", candidateReflex, deadEnd.reason());
+                RollbackStage rb = rollback(botCtx, worldCtx, bot, candidateReflex, 0, 0);
+                AIPlayerMod.LOGGER.info("[MetaScheduler] Loop: 回退阶段 {} → {}", rb.stage(), rb.action());
+                if (rb.stage() >= 5) {
+                    // LLM 兜底
+                    executeCortexLLM(botCtx, worldCtx, state);
+                }
+                break;
+            }
+
+            // 麦穗判断: 探索窗口是否耗尽
+            double confidence = conditioned.getConfidence(candidateReflex);
+            double exploreProb = MotivationEngine.wheatEarExplore(confidence, botCtx.hormonalSystem());
+            if (exploreProb <= 0.01 && reflectionLoopCount > 1) {
+                AIPlayerMod.LOGGER.debug("[MetaScheduler] Loop: 麦穗探索窗口耗尽 (conf={}), 停止探索", confidence);
+                break;
+            }
+
+            // 进度推进 → 下一轮
+            reflexId = null;
+        }
+    }
+
     private boolean isLLMAction(DispatchReflex.DispatchAction action) {
         return action != null && "CORTEX_LLM".equals(action.layer());
     }
@@ -232,7 +323,7 @@ public class MetaScheduler {
                         null, worldCtx.behaviorStats())) {
                     AIPlayerMod.LOGGER.debug("[MetaScheduler] P0.5 veto safety: {}", safety.id());
                 } else {
-                    dispatchReflexAction(bot, safety);
+                    dispatchReflexAction(bot, safety, worldCtx);
                     if (safety.critical()) return true;
                 }
             }
@@ -245,15 +336,15 @@ public class MetaScheduler {
                 dispatchReflexAction(bot,
                         new InnateReflex("alarm_" + threat.alarmId(), 0, false,
                                 List.of(), new com.izimi.aiplayermod.brainstem.innate.ReflexAction(threat.action(),
-                                java.util.Map.of("speed", 0.3)), true));
+                                java.util.Map.of("speed", 0.3)), true), worldCtx);
                 return true;
             }
         }
         return false;
     }
 
-    private void dispatchReflexAction(ServerPlayerEntity bot, InnateReflex reflex) {
-        var adapter = AIPlayerMod.getActionAdapter();
+    private void dispatchReflexAction(ServerPlayerEntity bot, InnateReflex reflex, WorldContext worldCtx) {
+        var adapter = worldCtx.brainstem().basicActions();
         if (adapter == null) return;
         float speedMul = temporalScaler.getSpeed();
         switch (reflex.action().type()) {
@@ -296,15 +387,12 @@ public class MetaScheduler {
     }
 
     private boolean executeCortexLocal(BotContext botCtx, WorldContext worldCtx, MetaState state, ServerPlayerEntity bot) {
-        String msg = state.getPendingChatMessage();
-        if (msg == null) msg = AIPlayerMod.peekPendingChatMessage();
+        String msg = state.consumePendingChat();
         if (msg == null) return false;
 
         var planner = worldCtx.cortex().localPlanner();
 
         if (planner != null && planner.canHandle(msg)) {
-            state.consumePendingChat();
-            AIPlayerMod.consumePendingChat();
             var response = planner.decompose(msg);
             if (response != null && response.isAction()) {
                 var planManager = botCtx.planManager();
@@ -324,8 +412,6 @@ public class MetaScheduler {
 
         var chatHandler = worldCtx.cortex().chatHandler();
         if (chatHandler != null && chatHandler.canHandle(msg)) {
-            state.consumePendingChat();
-            AIPlayerMod.consumePendingChat();
             UUID playerId = botCtx.botId();
             String response = chatHandler.getResponse(msg, botCtx.hormonalSystem(), playerId);
             if (response != null) {
@@ -344,13 +430,9 @@ public class MetaScheduler {
         if (aiClient == null || !aiClient.isConfigured()) return false;
 
         String msg = state.consumePendingChat();
-        if (msg == null) {
-            var pc = AIPlayerMod.consumePendingChat();
-            if (pc == null) return false;
-            msg = pc.message();
-        }
+        if (msg == null) return false;
 
-        var aiChatHandler = AIPlayerMod.getAiChatHandler();
+        var aiChatHandler = worldCtx.cortex().chatAI();
         if (aiChatHandler == null) return false;
 
         state.resetTickSinceLastLLM();
@@ -402,6 +484,91 @@ public class MetaScheduler {
                 bot.setVelocity(new Vec3d(dx / len * 0.15 * speedMul, 0.08, dz / len * 0.15 * speedMul));
                 bot.velocityModified = true;
             }
+        }
+    }
+
+    // ── Dead-end Detection ──
+
+    public DeadEndResult isDeadEnd(BotContext botCtx, WorldContext worldCtx, ServerPlayerEntity bot, String reflexId) {
+        var conditioned = botCtx.conditionedReflex();
+        if (conditioned == null) return new DeadEndResult(false, null);
+
+        if (conditioned.getConsecutiveFailures() >= MAX_CONSECUTIVE_FAILURES) {
+            return new DeadEndResult(true, "CONSECUTIVE_FAILURES");
+        }
+
+        var bayesian = botCtx != null ? botCtx.bayesianModule() : null;
+        if (bayesian != null) {
+            double posterior = bayesian.predictSuccess(reflexId, conditioned.extractContextFeatures(bot));
+            if (posterior < MIN_POSTERIOR_THRESHOLD) {
+                return new DeadEndResult(true, "LOW_POSTERIOR");
+            }
+        }
+
+        double confidence = conditioned.getConfidence(reflexId);
+        if (conditioned.getConsecutiveFailures() > 0 && confidence < 0.1) {
+            return new DeadEndResult(true, "EXPLORATION_EXHAUSTED");
+        }
+
+        return new DeadEndResult(false, null);
+    }
+
+    // ── Rollback 5-Stage ──
+
+    public RollbackStage rollback(BotContext botCtx, WorldContext worldCtx, ServerPlayerEntity bot,
+                                  String nodeId, int retryCount, int stage) {
+        switch (stage) {
+            case 0: { // Stage 1: 本地重试
+                if (retryCount < MAX_RETRY_COUNT) {
+                    AIPlayerMod.LOGGER.debug("[MetaScheduler] Rollback Stage1: 本地重试 {} (retry={})", nodeId, retryCount);
+                    return new RollbackStage(1, "retry");
+                }
+                return rollback(botCtx, worldCtx, bot, nodeId, retryCount, 1);
+            }
+            case 1: { // Stage 2: 替代方案
+                AIPlayerMod.LOGGER.debug("[MetaScheduler] Rollback Stage2: 寻找替代 {}", nodeId);
+                var bayesian = botCtx != null ? botCtx.bayesianModule() : null;
+                if (bayesian != null) {
+                    var alternatives = bayesian.inferForward(
+                            new BayesianModule.BotState(null, null, null, null),
+                            List.of());
+                    if (!alternatives.isEmpty()) {
+                        String altId = alternatives.get(0).getKey();
+                        double altScore = alternatives.get(0).getValue();
+                        if (altScore > MIN_ALT_THRESHOLD) {
+                            AIPlayerMod.LOGGER.debug("[MetaScheduler] Rollback Stage2: 替代方案 {} (score={})", altId, altScore);
+                            return new RollbackStage(2, "alternative:" + altId);
+                        }
+                    }
+                }
+                return rollback(botCtx, worldCtx, bot, nodeId, retryCount, 2);
+            }
+            case 2: { // Stage 3: 回溯上游
+                AIPlayerMod.LOGGER.debug("[MetaScheduler] Rollback Stage3: 回溯上游 {}", nodeId);
+            var bayesian = botCtx != null ? botCtx.bayesianModule() : null;
+                if (bayesian != null && lastExecutedNodeId != null) {
+                    String upId = lastExecutedNodeId;
+                    double upConfidence = bayesian.getConfidence(upId);
+                    if (upConfidence < 0.3) {
+                        AIPlayerMod.LOGGER.debug("[MetaScheduler] Rollback Stage3: 回溯到 {} (conf={})", upId, upConfidence);
+                        return new RollbackStage(3, "backtrack:" + upId);
+                    }
+                }
+                return rollback(botCtx, worldCtx, bot, nodeId, retryCount, 3);
+            }
+            case 3: { // Stage 4: 麦穗探索
+                AIPlayerMod.LOGGER.debug("[MetaScheduler] Rollback Stage4: 麦穗探索 {}", nodeId);
+                HormonalSystem h = botCtx.hormonalSystem();
+                double exploreProb = MotivationEngine.wheatEarExplore(0.3, h);
+                if (exploreProb > Math.random()) {
+                    return new RollbackStage(4, "explore");
+                }
+                return rollback(botCtx, worldCtx, bot, nodeId, retryCount, 4);
+            }
+            case 4: // Stage 5: LLM 重新规划
+            default:
+                AIPlayerMod.LOGGER.warn("[MetaScheduler] Rollback Stage5: LLM重新规划 {}", nodeId);
+                return new RollbackStage(5, "llm_replan");
         }
     }
 

@@ -245,12 +245,13 @@ LLM 的唯⼀工作：**看到 JSON 模板，填空**。
   └─────────────────┘
 ```
 
-### 7.1 五大模板
+### 7.1 六大模板
 
 | 模板 | LLM 填入内容 | 下游消费者 |
 |------|-------------|-----------|
 | REFLEX_CREATE | `reflex_{skill}_{target}`，步骤链 | ConditionedReflex |
 | TASK_PLAN | `steps[{action, target, params}]` | TaskManager |
+| DAG_TASK_PLAN | `subtasks[{id, name, action, target, depends_on[{id, type, weight, bindings}], bottleneck_nodes]` | TaskDAG / ReflexChain |
 | EVALUATION_BATCH | `[{reflexId, delta}]` | EvaluationCycle |
 | FAILURE_CLASSIFY | `{featureKey, outcome}` | BayesianModule |
 | CHAT_DIRECTION | `{perspective, priority}` | ChatSessionManager |
@@ -472,13 +473,326 @@ copyReflexesFromMentor()
 | SocialObserver | 骨架 | 内存 |
 | BehaviorStats | 骨架 | 内存 |
 | ChatSessionManager | 骨架 (cortex/chat) | 内存窗口 |
-| ReflexPackManager | 骨架 (brainstem/bot) | `reflex_packs/*.json` |
+| ReflexPackManager | 骨架 (brainstem/bot) | 实例注入（botId + BayesianModule） `reflex_packs/*.json` |
 | WorldContext | 骨架 (api) | `WorldContext` 接口 / `WorldContextImpl` |
 | BotContext | 骨架 (api) | `BotContext` 接口 / `BotContextImpl` |
 | MetaState | 骨架 (api) | `MetaState` 类（每 tick 新建） |
 | BrainstemAPI | 骨架 (api) | 脑干门面接口（innateReflexes/basicActions/inhibitor） |
 | AmygdalaAPI | 骨架 (api) | 杏仁核门面接口（socialObserver/familiarityTracker） |
-| CortexAPI | 骨架 (api) | 前额叶门面接口（localPlanner/chatHandler/templateManager/aiClient） |
+| CortexAPI | 骨架 (api) | 前额叶门面接口（localPlanner/chatHandler/templateManager/aiClient/chatAI） |
+| ReflexChain | L4 (时序/执行) | `dag/` 索引 + 反射节点间关系 |
+| TaskDAG | 骨架 | 内存 (cortex/planner) |
+| ParameterBinder | 骨架 | 内存 |
+| SharedPoolConfig | 骨架 (config) | `config/` |
+
+---
+
+## 15. DAG 任务依赖图 (数据/逻辑层)
+
+DAG 描述任务子步骤之间的**数据/逻辑依赖关系**，与 ReflexChain 的时序/执行链分层独立。
+
+### 15.1 TaskDAG 数据模型
+
+```json
+{
+  "task_id": "mine_10_iron",
+  "subtasks": [
+    {
+      "id": "a1", "name": "找到铁矿", "action": "moveTo", "target": "iron_ore",
+      "depends_on": []
+    },
+    {
+      "id": "a2", "name": "挖掘铁矿", "action": "dig", "target": "iron_ore",
+      "count": 10,
+      "depends_on": [{
+        "id": "a1", "type": "hard", "weight": 0.95,
+        "bindings": [
+          {"from": "output.position", "to": "target_position"},
+          {"from": "output.block_type", "to": "block_type"}
+        ]
+      }]
+    }
+  ],
+  "bottleneck_nodes": ["a2"]
+}
+```
+
+### 15.2 依赖类型
+
+| 类型 | 失败后果 | 回退策略 |
+|------|---------|---------|
+| `hard` | 下游不可执行 | 重试/回溯上游 |
+| `soft` | 可尝试替代方案 | 查 weight 最高替代 |
+
+### 15.3 瓶颈节点识别
+
+- LLM 粗分解时主动标记语义瓶颈（一次性）
+- 运行时入度检测自动标记结构瓶颈（入度 ≥ 3 → `isBottleneck = true`）
+
+---
+
+## 16. ReflexChain 执行链表 (时序/执行层)
+
+ReflexChain 描述反射的**时序执行顺序**，与 DAG 的依赖关系分层独立。
+
+### 16.1 树形多指针
+
+```java
+class ReflexNode {
+    String id;
+    String reflexId;
+    Set<String> prev;  // 前置节点 (多指针)
+    Set<String> next;  // 后续节点 (多指针)
+    boolean isBottleneck;
+    double baseWeight;
+    double getSharedWeight(String taskId) {
+        return baseWeight * getTaskConfidence(taskId);
+    }
+}
+```
+
+### 16.2 共享节点权重动态调整
+
+- 多任务均成功 → 增加共享权重
+- 仅一任务成功、其他失败 → 降低该节点在失败任务中的置信度，保留基础权重
+
+---
+
+## 17. Loop 事件驱动刷新循环
+
+```
+
+记忆(当前进度)
+  → 激素粗筛 (candidate_set ≤ 5)                    [D — 发散]
+    → 贝叶斯精筛 (sorted by posterior)              [C — 收敛]
+      → 取 top candidate
+        → DAG 依赖检查 (depends_on 全满足?)
+          不满足 → 五阶段回退 (§21)
+          满足 →
+            → 参数绑定 (bindings → input_slots)      [填空]
+              绑定失败 → 依赖回退
+              绑定成功 →
+                → 前置条件检查 (preconditions 全通过?)
+                  贝叶斯预判: posterior < 0.05 → 提前返回 (不更新贝叶斯)
+                  不通过 → fail_strategy: skip/wait/defer
+                  通过 → 反射执行(params)
+                    → 成功 → 推进进度, 存储输出, 更新贝叶斯
+                    → 失败 → 贝叶斯更新, 死路检测
+                             死路 → 五阶段回退/LLM 兜底
+                             非死路 → 下一轮
+      → 无候选 → LLM 兜底                                    [L6]
+```
+
+### 17.1 事件驱动机制
+
+- 每次反射完成触发一轮刷新，非独立 tick
+- 最大 4 轮 reflection loops
+- 当前反射执行中不触发新决策
+
+---
+
+## 18. 环境可控性指数
+
+### 18.1 计算公式
+
+```java
+public double computeControllability(ReflexId reflexId, BotContext context) {
+    Posterior posterior = bayesian.getPosterior(reflexId, context);
+    double variance = posterior.variance;
+    double controllability = 1.0 / (1.0 + variance / varianceScale);
+    if (envChangeRate > threshold) controllability *= 0.5;
+    return clamp(controllability, 0, 1);
+}
+```
+
+### 18.2 分层仲裁
+
+| 方差 | 后验分布 | 可控性 | L1/L3 行为 |
+|:----:|---------|:------:|-----------|
+| 低 | 集中尖锐 | 高 | 需贝叶斯验证后固化 |
+| 高 | 分散平坦 | 低 | 允许直接固化 |
+
+---
+
+## 19. 死路三条件
+
+按优先级排序，任一满足即触发回退或 LLM 兜底：
+
+```java
+public DeadEndResult isDeadEnd(Reflex reflex, BotContext context) {
+    if (reflex.consecutiveFailures >= 5)
+        return new DeadEndResult(true, "CONSECUTIVE_FAILURES");
+    if (bayesian.posteriorSuccessRate(reflex, context) < 0.1)
+        return new DeadEndResult(true, "LOW_POSTERIOR");
+    if (reflex.attempts > 37 && !reflex.isStable())
+        return new DeadEndResult(true, "EXPLORATION_EXHAUSTED");
+    return new DeadEndResult(false, null);
+}
+```
+
+---
+
+## 20. 贝叶斯双向推理
+
+### 20.1 顺推 (inferForward)
+
+从当前状态预测最大可能下一步，贝叶斯原生能力：
+
+```java
+public List<Candidate> inferForward(BotState state, Evidence evidence) {
+    return getPosteriorSorted(state, evidence);
+}
+```
+
+### 20.2 倒推 (inferBackward)
+
+从目标反推前置条件，贝叶斯仅做概率排序，因果关系来自外部：
+
+```java
+public List<Precondition> inferBackward(Goal goal, Evidence evidence) {
+    // 1. 历史归纳: getFrequentPredecessors(goal)
+    // 2. 反射元数据: goal.prev
+    // 3. LLM 按需生成
+    return sortByPrior(getPreconditions(goal, evidence));
+}
+```
+
+---
+
+## 21. 回退五阶段
+
+```java
+public void rollback(Node node, Failure failure) {
+    // Stage 1: 本地重试
+    if (node.retryCount < MAX_RETRY) { retry(node); return; }
+    // Stage 2: 替代方案
+    Reflex alt = findAlternative(node);
+    if (alt != null && bayesian.posterior(alt) > MIN_ALT_THRESHOLD) { tryAlternative(alt); return; }
+    // Stage 3: 回溯上游
+    Node upstream = traceToUpstream(node);
+    if (upstream != null && bayesian.hasDegradedOutput(upstream)) { rollback(upstream, failure); return; }
+    // Stage 4: 麦穗探索
+    if (wheatEarExplore(node)) { markExploration(node); return; }
+    // Stage 5: LLM 重新规划
+    llmReplan(memento);
+}
+```
+
+---
+
+## 22. 四类共享池形式化参数
+
+| 池 | 生物对应 | 约束 | 配置键 |
+|----|---------|:----:|--------|
+| 囊泡超级池 | 相邻突触共享囊泡 | 反射链长度 ≤ 5 | `chain_max_length` |
+| 工作记忆绑定池 | 有限特征绑定 | 贝叶斯候选集 ≤ 5 | `bayesian_candidate_limit` |
+| 跨脑共享子空间 | dmPFC 社交对齐 | 共享先验比例 10-30% | `shared_prior_ratio` |
+| 归一化网络池 | 总活动恒定 | 总驱力 = 1.0 | 硬编码归一化 |
+
+四池对应不同生物结构，约束独立，不交叉合并。
+
+---
+
+## 23. 边界条件门控与提前返回
+
+### 23.1 门控位置
+
+在贝叶斯精筛后、反射执行前插入：
+
+```
+贝叶斯精筛 → 依赖检查 → 参数绑定 → 前置条件门控 → 反射执行
+                                          ↓ 不通过
+                                      提前返回
+```
+
+### 23.2 三类前置条件
+
+| 类型 | 例子 | 检查方式 | 成本 |
+|------|------|---------|:----:|
+| 物品条件 | `requires_item: "wooden_pickaxe"` | 查背包 | 0 |
+| 环境条件 | `block_reachable(x,y,z)` | 调导航 | 0 |
+| 状态条件 | `stress < 0.8` | 读激素 | 0 |
+
+### 23.3 依赖检查 ≠ 前置条件检查
+
+| 检查 | 归属 | 失败后果 |
+|------|------|---------|
+| 依赖检查 (DAG) | depends_on | 回退五阶段 (§21) |
+| 前置条件 (反射) | preconditions[] | skip/wait/defer |
+
+### 23.4 贝叶斯预判提前返回
+
+```java
+if (bayesian.posteriorMean(reflex, context) < 0.05) {
+    return EarlyReturn(reason: "posterior_too_low", updateBayesian: false);
+}
+```
+
+### 23.5 fail_strategy 三种策略
+
+| 策略 | 行为 | 适用场景 |
+|:----:|------|---------|
+| `skip` | 尝试下一个候选反射 | 同类候选多 (多种攻击方式) |
+| `wait` | 挂起当前任务，等待条件满足 | 临时条件 (等天亮) |
+| `defer` | 标记阻塞，推进不相关子任务 | DAG 并行场景 |
+
+默认值: `skip`
+
+### 23.6 反射 JSON 新字段
+
+```json
+{
+  "reflex_id": "reflex_dig_iron_ore",
+  "input_slots": [
+    {"name": "target_position", "type": "BlockPos", "required": true},
+    {"name": "block_type", "type": "string", "optional": true}
+  ],
+  "capabilities": ["break_block", "collect_item"],
+  "preconditions": [
+    {"type": "item", "key": "main_hand", "match": "pickaxe", "fail_strategy": "skip"},
+    {"type": "state", "key": "stress", "operator": "<", "value": 0.8, "fail_strategy": "defer"}
+  ]
+}
+```
+
+---
+
+## 24. 参数绑定 (ParameterBinding) — 填空题显式化
+
+### 24.1 存储方案 (方案 B)
+
+- **反射 JSON**: 声明 `input_slots`（参数槽位定义）
+- **TaskDAG**: `depends_on` 中 `bindings` 字段声明从上游输出到下游输入的映射
+
+### 24.2 支持变换类型
+
+| 变换 | 格式 | 例子 |
+|------|------|------|
+| 直接传递 | `from → to` | `output.position → target_position` |
+| 变换 | `transform` 字段 | `"transform": "offset(x, y+2, z)"` |
+
+### 24.3 绑定时机
+
+```
+依赖检查 → 参数绑定 → 前置条件检查 → 反射执行
+```
+
+绑定失败 → 视为依赖不满足 → 回退五阶段
+
+### 24.4 绑定执行逻辑
+
+```java
+public Map<String, Object> bindParameters(SubtaskNode node, Map<String, Object> upstreamOutputs) {
+    Map<String, Object> params = new HashMap<>();
+    for (Binding binding : node.getBindings()) {
+        Object value = upstreamOutputs.get(binding.from);
+        if (value == null) throw new BindingError("Missing upstream output: " + binding.from);
+        if (binding.transform != null) value = applyTransform(value, binding.transform);
+        params.put(binding.to, value);
+    }
+    return params;
+}
+```
 
 ---
 

@@ -35,6 +35,7 @@ Phase 1-2 (Decoupling) ✅ 已完成
 | **Phase 1 (Decoupling)** | **api/ 接口定义 (WorldContext/BotContext/MetaState/BrainstemAPI/AmygdalaAPI/CortexAPI)** | ✅ |
 | **Phase 2 (Decoupling)** | **MetaScheduler 重构 (BotContext+WorldContext+MetaState 注入), CorrelationDetector 解耦** | ✅ |
 | **Phase 2.5 (Decoupling)** | **TemplateManagerTest (14 个测试), BayesianModuleTest (16 个测试)** | ✅ |
+| **Phase G-M** | **ReflexChain DAG/死路检测/环境可控性/双向推理/共享池/参数绑定/L1/L3 门控/前置条件门控 (99 tests)** | ✅ |
 
 ---
 
@@ -49,6 +50,42 @@ Phase A (Bayesian地基) ── ✅
         ├── Phase E (模板填空) ── TemplateManager 统一 LLM 入口
         └── Phase RP (反射包)  ── ReflexPackManager 导出/导入/合并
 Phase 7 (繁衍) ── 三规则继承 (平均+脚手架 trial-first + 突变) + 基因组存档
+
+Phase G: ReflexChain DAG 结构
+  ├── ReflexChain.java / TaskDAG.java 新建
+  ├── ConditionedReflex: prev/next 树形指针, bottleneck标记, getConfidence(), isStable(), getSharedWeight(context)
+  └── TaskDecomposer: LLM 粗分解输出 TaskDAG + 瓶颈识别 (入度≥3)
+
+Phase H: Loop 事件驱动刷新 + 死路检测 + 麦穗
+  ├── MetaScheduler: 重构为事件驱动loop + isDeadEnd() 三路检测
+  └── MotivationEngine: wheatEarExplore() 每反射独立连续置信度
+
+Phase I: 环境可控性指数 + L1/L3 分层门控
+  ├── BayesianModule: computeControllability(), getConfidence(), isPosteriorStable()
+  ├── SocialObserver / OneShotAlarmSystem: 固化前查可控性
+  └── HormonalSystem: 明确为候选集生成器，不参与排序
+
+Phase J: 共享池 + 贝叶斯双向推理 + 回退五阶段
+  ├── SharedPoolConfig.java 4 类池约束常量
+  ├── BayesianModule: inferForward(), inferBackward()
+  └── MetaScheduler: rollback() 五阶段 (本地重试→替代→回溯→探索→LLM)
+
+Phase K: LLM 模板 DAG 化
+  ├── TASK_PLAN 模板改为 DAG 格式 (depends_on[{id, type, weight, bindings}], bottleneck_nodes)
+  └── TaskDecomposer: validateDAGSchema(), resolveMissingAction() → L4 探索
+
+Phase L: 边界条件门控
+  ├── ConditionedReflex: checkPreconditions(BotContext) → (passed, failed[])
+  ├── ReflexChain: getNextCandidate(afterSkip, candidates) 跳过后取下一个
+  ├── MetaScheduler: loop 嵌入 precondition guard; fail_strategy: skip/wait/defer
+  └── reflex JSON: +preconditions[{type, key, match/operator, value, fail_strategy}]
+      默认 fail_strategy = skip; 依赖检查≠前置条件检查
+
+Phase M: ParameterBinding (参数绑定)
+  ├── ParameterBinder.java 新建 — bindParameters, 支持 direct + transform
+  ├── ConditionedReflex: +input_slots[{name, type, required, optional}]
+  ├── TaskDAG: depends_on +bindings[{from, to, transform?}]
+  └── MetaScheduler loop: 依赖检查→参数绑定→前置条件检查→执行
 ```
 
 ---
@@ -78,8 +115,8 @@ Phase 7 (繁衍) ── 三规则继承 (平均+脚手架 trial-first + 突变) 
 ### P-5: TemplateManager.fill() 未接入主循环
 TemplateManager 已实现但未被 MetaScheduler 调用。当前 L6 路径直接调用 `AIChatHandler.handleChat()`。远期目标：统一到 TemplateManager 作为唯一 LLM 出入口。
 
-### P-6: MetaContext 已弃用，BotController 待删除
-Phase 2 已将 MetaScheduler 和 CorrelationDetector 中的 `MetaContext` 依赖全部移除。`MetaContext` 已标记 `@Deprecated`。`BotController`（旧单 bot 路径）仍引用它，将在 Phase 3 随 BotController 一起物理删除。
+### P-6: MetaContext 已物理删除
+Phase 2 已将 MetaContext 物理删除（268 行代码 + 271 行测试移除）。`pendingChatMessage` 状态已合入 `BotInstance` 直管。`BotController.setMetaScheduler()` 的 `MetaContext` 参数也已移除。
 
 ---
 
@@ -157,7 +194,7 @@ src/main/java/com/izimi/aiplayermod/
 │   ├── adapter/                      12 原子动作 (MinecraftActionAdapter)
 │   ├── bot/                          BotManager/BotInstance/BotSpawner/BotController
 │   ├── innate/                       InnateReflexRegistry/9 先天技能 (含 sneak)
-│   ├── scheduler/                    MetaScheduler/MotivationEngine/MetaContext/UrgencyClassifier
+│   ├── scheduler/                    MetaScheduler/MotivationEngine/UrgencyClassifier
 │   ├── skill/                        Skill + SkillManager
 │   ├── navigation/                   GreedyNavigator + NavigationController
 │   └── IdleBrain.java
@@ -201,10 +238,22 @@ minecraft/ai_memory/
 | `IdleBrainTest.java` | 10 | 状态机 |
 | `ReflexRegistryTest.java` | 15 | 先天反射注册表 |
 | `MotivationEngineTest.java` | 19 | 驱力/玻尔兹曼/交叉抑制 |
-| `MetaContextStubTest.java` | 25 | MetaContext 查询/门控/环境检测 |
 | `BotParamsTest.java` | 7 | 三规则继承/参数范围/变异 |
 | `BayesianModuleTest.java` | 16 | 三层存储/概率预测/收敛判断/FileSystem注入 |
 | `TemplateManagerTest.java` | 14 | 模板填空/解析/钩子/速率限制/异常传播 |
-| **合计** | **~139** | **全部通过** |
+| **合计 (含新增)** | **213** | **全部通过** |
 
 **待补充测试：** `ChatSessionManager`
+
+**新增测试计划：**
+
+| Phase | 测试文件 | 数量 | 内容 |
+|:-----:|---------|:---:|------|
+| G | `ReflexChainTest.java` | 22 | DAG 构建/遍历/瓶颈检测/共享权重/链约束 |
+| H | `MetaSchedulerPhaseHTest.java` | 13 | 时间片/抢占/死路三条件/麦穗连续置信度 |
+| I | `BayesianModulePhaseITest.java` | 14 | 环境可控性计算/置信度/后验稳定性/BotState |
+| J | `SharedPoolConfigTest.java` + `BayesianModulePhaseJTest.java` | 12+7 | 共享池常量/inferForward/inferBackward/回退阶段 |
+| K | `TaskDAGTest.java` | 16 | LLM JSON 解析/DAG 遍历/瓶颈检测/格式校验 |
+| L | `ConditionedReflexPhaseLTest.java` | 4 | precondition guard skip/wait/defer |
+| M | `ParameterBinderTest.java` | 12 | bindings 绑定/transform/绑定失败→回退 |
+| | `AlarmGatingTest.java` | 11 | L1/L3 门控 (OneShotAlarmSystem/SocialObserver/HormonalSystem) |

@@ -14,6 +14,7 @@ import java.util.Set;
 
 import com.izimi.aiplayermod.AIPlayerMod;
 import com.izimi.aiplayermod.amygdala.ConditionedReflex;
+import com.izimi.aiplayermod.api.WorldContext;
 import com.izimi.aiplayermod.bayesian.BayesianModule;
 import com.izimi.aiplayermod.brainstem.adapter.BasicActionAdapter;
 import com.izimi.aiplayermod.brainstem.skill.SkillManager;
@@ -41,9 +42,9 @@ public class CorrelationDetector {
 
     record TrialRecord(String action, String target, String contextFingerprint, boolean success) {}
 
-    public CorrelationDetector(SkillManager skillManager, BasicActionAdapter adapter) {
-        this.skillManager = skillManager;
-        this.adapter = adapter;
+    public CorrelationDetector(WorldContext worldCtx) {
+        this.skillManager = worldCtx.skillManager();
+        this.adapter = worldCtx.brainstem().basicActions();
     }
 
     @SuppressWarnings("unused")

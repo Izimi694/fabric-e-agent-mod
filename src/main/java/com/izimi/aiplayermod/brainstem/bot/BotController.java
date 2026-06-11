@@ -3,7 +3,6 @@ package com.izimi.aiplayermod.brainstem.bot;
 import com.izimi.aiplayermod.AIPlayerMod;
 import com.izimi.aiplayermod.brainstem.innate.InnateReflex;
 import com.izimi.aiplayermod.brainstem.innate.InnateReflexRegistry;
-import com.izimi.aiplayermod.brainstem.scheduler.MetaContext;
 import com.izimi.aiplayermod.brainstem.scheduler.MetaScheduler;
 import com.izimi.aiplayermod.cortex.api.*;
 import com.izimi.aiplayermod.brainstem.IdleBrain;
@@ -34,7 +33,6 @@ public class BotController {
     private final InhibitoryControl inhibitor;
 
     private MetaScheduler metaScheduler;
-    private MetaContext metaContext;
 
     private int tickCounter = 0;
     private int stateSaveInterval = 200;
@@ -297,11 +295,9 @@ public class BotController {
         }
     }
 
-    public void setMetaScheduler(MetaScheduler scheduler, MetaContext ctx) {
+    public void setMetaScheduler(MetaScheduler scheduler) {
         this.metaScheduler = scheduler;
-        this.metaContext = ctx;
     }
 
     public MetaScheduler getMetaScheduler() { return metaScheduler; }
-    public MetaContext getMetaContext() { return metaContext; }
 }
