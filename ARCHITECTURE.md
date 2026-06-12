@@ -232,7 +232,7 @@ Fabric 事件触发
 
 ## 7. 模板填空架构 (Template Fill-in)
 
-> **当前状态**：TemplateManager 已实现但尚未接入主循环。MetaScheduler 的 L6 路径当前直接调用 `AIChatHandler.handleChat()`，未走 `TemplateManager.fill()`。远期目标：统一到 TemplateManager 作为唯一 LLM 出入口。
+> **当前状态**：TemplateManager 已接入。MetaScheduler.executeCortexLLM() 通过 `TemplateMatcher.match()` 路由 → `TemplateManager.fill()`。
 
 LLM 的唯⼀工作：**看到 JSON 模板，填空**。
 
@@ -245,16 +245,16 @@ LLM 的唯⼀工作：**看到 JSON 模板，填空**。
   └─────────────────┘
 ```
 
-### 7.1 六大模板
+### 7.1 六种模板 (四种用户交互 + 两种后台)
 
-| 模板 | LLM 填入内容 | 下游消费者 |
-|------|-------------|-----------|
-| REFLEX_CREATE | `reflex_{skill}_{target}`，步骤链 | ConditionedReflex |
-| TASK_PLAN | `steps[{action, target, params}]` | TaskManager |
-| DAG_TASK_PLAN | `subtasks[{id, name, action, target, depends_on[{id, type, weight, bindings}], bottleneck_nodes]` | TaskDAG / ReflexChain |
-| EVALUATION_BATCH | `[{reflexId, delta}]` | EvaluationCycle |
-| FAILURE_CLASSIFY | `{featureKey, outcome}` | BayesianModule |
-| CHAT_DIRECTION | `{perspective, priority}` | ChatSessionManager |
+| 模板 | 用途 | LLM 填入内容 | 下游消费者 | 是否固化 |
+|------|------|-------------|-----------|:--------:|
+| CLARIFICATION | 用户输入模糊时生成澄清问题 | `{ambiguity_detected, possible_interpretations, missing_info, suggested_question}` | 直接返回用户 | 否 |
+| TASK_PLAN | 生成带依赖关系的任务DAG | `{task_id, subtasks[{id, name, action, target, depends_on[{id, type, weight, bindings}]}], bottleneck_nodes}` | TaskDAG → ReflexChain | 是 |
+| REFLEX_CREATE | 生成新的条件反射 | `{reflex_id, display_name, steps[{action, target}]}` | ConditionedReflex | 是 |
+| CHAT_RESPONSE | 生成对玩家的回复文本 | `{reply_text, suggested_emote, tone}` | 直接返回用户 | 否 |
+| EVALUATION_BATCH | 批量评价反射效果 | `[{reflexId, delta}]` | EvaluationCycle | 否 (内部) |
+| FAILURE_CLASSIFY | 分析失败原因 | `{featureKey, outcome}` | BayesianModule | 否 (内部) |
 
 ### 7.2 TemplateManager 核心接口
 
@@ -262,9 +262,42 @@ LLM 的唯⼀工作：**看到 JSON 模板，填空**。
 public class TemplateManager {
     public CompletableFuture<JsonObject> fill(TemplateType type, Map<String, Object> context);
     void registerPostFillHook(TemplateType type, Consumer<JsonObject> hook);
-    enum TemplateType { REFLEX_CREATE, TASK_PLAN, EVALUATION_BATCH, FAILURE_CLASSIFY, CHAT_DIRECTION }
+    void setActivePersona(String persona);
+    String injectPersona(String basePrompt, String persona);
+    enum TemplateType { CLARIFICATION, TASK_PLAN, REFLEX_CREATE, CHAT_RESPONSE, EVALUATION_BATCH, FAILURE_CLASSIFY }
 }
 ```
+
+### 7.3 TemplateMatcher 路由
+
+`TemplateMatcher.match(message, botCtx, worldCtx)` 按以下顺序路由用户输入：
+
+1. **LocalChatHandler** 正则匹配 → `null` (0 成本)
+2. **关键词分类**:
+   - 明确任务请求 (挖/打/建+N) → `TASK_PLAN`
+   - 明确学习请求 (学/记住/如果...就) → `REFLEX_CREATE`
+   - 纯社交 (你好/谢谢/喵~) → `CHAT_RESPONSE`
+   - 模糊输入 (怎么/如何/能不能/?) → `CLARIFICATION`
+   - 含具体名词 → `TASK_PLAN`, 否则 `CHAT_RESPONSE`
+
+### 7.4 CLARIFICATION 调用限制
+
+- 同一对话轮次最多调用一次 CLARIFICATION
+- 用户二次模糊 → 返回预设 "请更具体地描述你的需求"
+
+### 7.5 CHAT_RESPONSE 预算隔离
+
+- 独立预算配额 (最多 50 次), 与核心循环完全隔离
+- 预算耗尽 → 回退到 LocalChatHandler 预设回复
+
+### 7.6 PersonaManager
+
+PersonaManager 管理角色设定注入:
+
+- `setPersona(description)` → 覆盖 `TemplateManager.activePersona`
+- 只影响 `CHAT_RESPONSE` 和 `REFLEX_CREATE` 的系统提示
+- 不影响 `TASK_PLAN`、`CLARIFICATION`、贝叶斯统计、反射权重、激素系统
+- 持久化到 `eagent/skills/character/active_persona.txt`
 
 ---
 
@@ -328,11 +361,14 @@ public boolean isConverged(Posterior posterior) {
 | 自动固化 | 脑干 | 0 | ≥3 成功 |
 | 观察学习 | 脑干 | 0 | 每次 Fabric 事件 |
 | Idle 主动建议 | 脑干 | 0 | idle > 30s |
+| 本地聊天 (LocalChatHandler) | 脑干 | 0 | 正则匹配 |
 | **────** | | **────** | **────** |
-| 新任务拆解 (TASK_PLAN) | LLM | 1 | 每个新任务 |
-| 批量评价 (EVALUATION_BATCH) | LLM | 1 | 每 30min |
-| 失败分类 (FAILURE_CLASSIFY) | LLM | 1 | 每次未覆盖的失败 |
-| 对话方向 (CHAT_DIRECTION) | LLM | 1 | 按需 |
+| 澄清问题 (CLARIFICATION) | LLM | 1 | 模糊输入 (同一轮次只一次) |
+| 任务分解 (TASK_PLAN) | LLM | 1 | 每个新任务 |
+| 反射创建 (REFLEX_CREATE) | LLM | 1 | 每个新行为 |
+| 闲聊回复 (CHAT_RESPONSE) | LLM | 1 | 按需 (独立预算 50次) |
+| 批量评价 (EVALUATION_BATCH) | LLM | 1 | 每 30min (内部) |
+| 失败分类 (FAILURE_CLASSIFY) | LLM | 1 | 每次未覆盖的失败 (内部) |
 
 **挂机 1 小时: 0 次 API。活跃 1 小时: ~4-8 次。**
 

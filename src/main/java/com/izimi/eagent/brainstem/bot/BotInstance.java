@@ -1,0 +1,201 @@
+package com.izimi.eagent.brainstem.bot;
+
+import java.util.UUID;
+
+import com.izimi.eagent.api.BotContext;
+import com.izimi.eagent.api.MetaState;
+import com.izimi.eagent.api.WorldContext;
+import com.izimi.eagent.api.impl.BotContextImpl;
+import com.izimi.eagent.amygdala.BotParams;
+import com.izimi.eagent.amygdala.ConditionedReflex;
+import com.izimi.eagent.amygdala.DispatchReflex;
+import com.izimi.eagent.amygdala.OneShotAlarmSystem;
+import com.izimi.eagent.amygdala.learning.CorrelationDetector;
+import com.izimi.eagent.amygdala.learning.LearningSystem;
+import com.izimi.eagent.bayesian.BayesianModule;
+import com.izimi.eagent.hormonal.HormonalSystem;
+import com.izimi.eagent.brainstem.IdleBrain;
+import com.izimi.eagent.brainstem.adapter.TemporalScaler;
+import com.izimi.eagent.brainstem.scheduler.MetaScheduler;
+import com.izimi.eagent.brainstem.scheduler.MotivationEngine;
+import com.izimi.eagent.cortex.api.AITaskPlanner;
+import com.izimi.eagent.cortex.chat.ChatSessionManager;
+import com.izimi.eagent.cortex.planner.PlanManager;
+import com.izimi.eagent.cortex.task.TaskExecutor;
+import com.izimi.eagent.cortex.task.TaskManager;
+import com.izimi.eagent.hippocampus.MemoryManager;
+import com.izimi.eagent.state.StateManager;
+import com.izimi.eagent.util.FileUtil;
+
+import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.network.ServerPlayerEntity;
+import net.minecraft.text.Text;
+
+public class BotInstance {
+    private final UUID botId;
+    private final String botName;
+    private final BotPlayer botPlayer;
+
+    private BotContext botContext;
+    private WorldContext worldContext;
+
+    // Per-bot components
+    private final BotParams botParams;
+    private final ConditionedReflex conditionedReflex;
+    private final OneShotAlarmSystem alarms;
+    private final HormonalSystem hormonalSystem;
+    private final MotivationEngine motivationEngine;
+    private final MetaScheduler metaScheduler;
+    private final StateManager stateManager;
+    private final TemporalScaler temporalScaler;
+    private final CorrelationDetector correlationDetector;
+    private final DispatchReflex dispatchReflex;
+    private final BayesianModule bayesianModule;
+    private final IdleBrain idleBrain;
+    private final LearningSystem learningSystem;
+    private final ReflexPackManager reflexPackManager;
+    private final TaskManager taskManager;
+    private final TaskExecutor taskExecutor;
+    private final MemoryManager memoryManager;
+    private final PlanManager planManager;
+
+    private String pendingChatMessage;
+    private int tickCounter = 0;
+    private static final int STATE_SAVE_INTERVAL = 200;
+    private boolean deathGenomeSaved = false;
+
+    public BotInstance(UUID botId, String botName, BotPlayer botPlayer) {
+        this(botId, botName, botPlayer, null, null);
+    }
+
+    public BotInstance(UUID botId, String botName, BotPlayer botPlayer, BotParams inheritedParams) {
+        this(botId, botName, botPlayer, inheritedParams, null);
+    }
+
+    public BotInstance(UUID botId, String botName, BotPlayer botPlayer, BotParams inheritedParams, WorldContext worldContext) {
+        this.botId = botId;
+        this.botName = botName;
+        this.botPlayer = botPlayer;
+        this.worldContext = worldContext;
+
+        var config = worldContext.modConfig();
+        var skillManager = worldContext.skillManager();
+        var actionAdapter = worldContext.brainstem().basicActions();
+
+        this.botParams = inheritedParams != null ? inheritedParams : BotParams.generate();
+        this.botParams.withBotId(botId);
+        this.conditionedReflex = new ConditionedReflex(skillManager, config, actionAdapter, botId);
+        this.conditionedReflex.setBotInstance(this);
+        this.alarms = new OneShotAlarmSystem(botId);
+        this.hormonalSystem = new HormonalSystem();
+        this.motivationEngine = new MotivationEngine();
+        this.metaScheduler = new MetaScheduler(motivationEngine);
+        this.stateManager = new StateManager(botId);
+        this.temporalScaler = this.metaScheduler.getTemporalScaler();
+        this.dispatchReflex = new DispatchReflex(botParams, botId);
+        this.bayesianModule = new BayesianModule(botId);
+        this.conditionedReflex.setBayesianModule(bayesianModule);
+        this.taskManager = new TaskManager(botId);
+        this.taskExecutor = new TaskExecutor(taskManager, skillManager, worldContext.executionLogger());
+        this.memoryManager = new MemoryManager(config, botId);
+        this.correlationDetector = new CorrelationDetector(worldContext);
+        this.correlationDetector.setBayesianModule(bayesianModule);
+        this.learningSystem = new LearningSystem(conditionedReflex, skillManager);
+        this.planManager = new PlanManager(new AITaskPlanner(worldContext.cortex().aiClient()), botId);
+        this.planManager.setWorldContext(worldContext);
+
+        this.idleBrain = new IdleBrain(taskManager, skillManager);
+        this.reflexPackManager = new ReflexPackManager(botId, bayesianModule);
+        this.metaScheduler.setCorrelationDetector(correlationDetector);
+
+        if (worldContext != null) {
+            this.botContext = new BotContextImpl(
+                    botId, botName, worldContext,
+                    botParams, hormonalSystem,
+                    conditionedReflex, alarms,
+                    bayesianModule, dispatchReflex,
+                    taskManager, taskExecutor,
+                    stateManager, memoryManager,
+                    planManager, idleBrain,
+                    correlationDetector, learningSystem,
+                    new ChatSessionManager(bayesianModule, botId)
+            );
+        }
+    }
+
+    public void tick(MinecraftServer server) {
+        ServerPlayerEntity bot = botPlayer.asEntity();
+        if (bot == null) return;
+
+        if (bot.isRemoved()) {
+            saveDeathGenome("removed");
+            return;
+        }
+
+        if (bot.getHealth() <= 0 && !deathGenomeSaved) {
+            saveDeathGenome("killed");
+        }
+
+        tickCounter++;
+
+        MetaState state = new MetaState();
+        String pendingChat = consumePendingChat();
+        if (pendingChat != null) state.setPendingChat(pendingChat);
+        metaScheduler.tick(botContext, worldContext, bot, state, server);
+
+        hormonalSystem.tick();
+
+        if (tickCounter % STATE_SAVE_INTERVAL == 0) {
+            stateManager.saveState(bot);
+        }
+    }
+
+    public void saveDeathGenome(String cause) {
+        if (deathGenomeSaved) return;
+        deathGenomeSaved = true;
+        botParams.saveToPath(FileUtil.getBotParamsPath(botId));
+        GenomeArchivist.saveGenome(botId, botParams, botName, cause);
+    }
+
+    public void sendMessage(String message) {
+        if (botPlayer != null && !botPlayer.isRemoved()) {
+            botPlayer.asEntity().sendMessage(Text.literal("§b[" + botName + "] §f" + message));
+        }
+    }
+
+    // Per-bot component getters
+    public BotContext getBotContext() { return botContext; }
+    public UUID getBotId() { return botId; }
+    public String getBotName() { return botName; }
+    public BotPlayer getBotPlayer() { return botPlayer; }
+    public ServerPlayerEntity asEntity() { return botPlayer != null ? botPlayer.asEntity() : null; }
+    public BotParams getBotParams() { return botParams; }
+    public ConditionedReflex getConditionedReflex() { return conditionedReflex; }
+    public OneShotAlarmSystem getAlarms() { return alarms; }
+    public HormonalSystem getHormonalSystem() { return hormonalSystem; }
+    public MotivationEngine getMotivationEngine() { return motivationEngine; }
+    public MetaScheduler getMetaScheduler() { return metaScheduler; }
+    public StateManager getStateManager() { return stateManager; }
+    public TemporalScaler getTemporalScaler() { return temporalScaler; }
+    public CorrelationDetector getCorrelationDetector() { return correlationDetector; }
+    public DispatchReflex getDispatchReflex() { return dispatchReflex; }
+    public BayesianModule getBayesianModule() { return bayesianModule; }
+    public IdleBrain getIdleBrain() { return idleBrain; }
+    public LearningSystem getLearningSystem() { return learningSystem; }
+    public TaskManager getTaskManager() { return taskManager; }
+    public TaskExecutor getTaskExecutor() { return taskExecutor; }
+    public MemoryManager getMemoryManager() { return memoryManager; }
+    public PlanManager getPlanManager() { return planManager; }
+    public ReflexPackManager getReflexPackManager() { return reflexPackManager; }
+
+    public void setPendingChat(String message) { this.pendingChatMessage = message; }
+    public String consumePendingChat() {
+        String msg = pendingChatMessage;
+        pendingChatMessage = null;
+        return msg;
+    }
+
+    public boolean isSpawned() {
+        return botPlayer != null && !botPlayer.isRemoved();
+    }
+}

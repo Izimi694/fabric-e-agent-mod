@@ -1,30 +1,28 @@
 {
 	"schemaVersion": 1,
-	"id": "ai-player-mod",
+	"id": "e-agent",
 	"version": "${version}",
-	"name": "AI player Mod",
-	"description": "This is an example description! Tell everyone what your mod is about!",
+	"name": "E-Agent",
+	"description": "E-Agent — Minecraft AI bot mod with zero-cost reflex learning. LLM only on first encounter, then local reflexes forever.",
 	"authors": [
-		"Me!"
+		"izimi"
 	],
 	"contact": {
-		"homepage": "https://fabricmc.net/",
-		"sources": "https://github.com/FabricMC/fabric-example-mod"
+		"homepage": "https://github.com/Izimi694/fabric-e-agent-mod",
+		"sources": "https://github.com/Izimi694/fabric-e-agent-mod"
 	},
-	"license": "CC0-1.0",
-	"icon": "assets/ai-player-mod/icon.png",
+	"license": "MIT",
+	"icon": "assets/e-agent/icon.png",
 	"environment": "*",
 	"entrypoints": {
 		"main": [
-			"com.izimi.aiplayermod.AIPlayerMod"
+			"com.izimi.eagent.EAgent"
 		],
 		"fabric-datagen": [
-			"com.izimi.aiplayermod.AIPlayerModDataGenerator"
+			"com.izimi.eagent.EAgentDataGenerator"
 		]
 	},
-	"mixins": [
-		"ai-player-mod.mixins.json"
-	],
+
 	"depends": {
 		"fabricloader": ">=0.19.3",
 		"minecraft": "~1.21.1",
