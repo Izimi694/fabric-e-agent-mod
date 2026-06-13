@@ -13,6 +13,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.stream.Collectors;
 
 public class MemoryManager {
@@ -20,7 +21,7 @@ public class MemoryManager {
 
     private final ModConfig config;
     private final UUID botId;
-    private final List<MemoryEntry> memoryCache = new ArrayList<>();
+    private final List<MemoryEntry> memoryCache = new CopyOnWriteArrayList<>();
     private long lastCacheUpdate = 0;
     private static final long CACHE_REFRESH_MS = 60000;
     private int currentGameDay = 1;
@@ -105,6 +106,7 @@ public class MemoryManager {
         refreshCacheIfNeeded();
         long cutoff = System.currentTimeMillis() - (long) config.memoryWindowDays * 86400000L;
         return memoryCache.stream()
+                .filter(Objects::nonNull)
                 .filter(m -> m.timestamp >= cutoff)
                 .collect(Collectors.toList());
     }
@@ -113,6 +115,7 @@ public class MemoryManager {
         if (query == null || query.isEmpty()) return getRecentMemories();
         String lower = query.toLowerCase();
         return memoryCache.stream()
+                .filter(Objects::nonNull)
                 .filter(m -> matchesQuery(m, lower))
                 .collect(Collectors.toList());
     }
@@ -121,6 +124,7 @@ public class MemoryManager {
         if (id == null) return null;
         refreshCacheIfNeeded();
         return memoryCache.stream()
+                .filter(Objects::nonNull)
                 .filter(m -> id.equals(m.id))
                 .findFirst().orElse(null);
     }
@@ -133,6 +137,7 @@ public class MemoryManager {
         if (keywords == null || keywords.isEmpty()) return Collections.emptyList();
 
         return memoryCache.stream()
+                .filter(Objects::nonNull)
                 .filter(m -> {
                     StringBuilder textBuilder = new StringBuilder();
                     if (m.summary != null) textBuilder.append(m.summary);
@@ -156,6 +161,7 @@ public class MemoryManager {
         long maxAgeMs = (long) (curiosity * 86400000L * 7); // curiosity 比例决定回溯天数
         long cutoff = System.currentTimeMillis() - maxAgeMs;
         List<MemoryEntry> coarse = all.stream()
+                .filter(Objects::nonNull)
                 .filter(m -> m.timestamp >= cutoff)
                 .collect(Collectors.toList());
         if (coarse.isEmpty()) coarse = all;
@@ -163,8 +169,8 @@ public class MemoryManager {
         // 阶段2: 贝叶斯精排
         if (bayes != null) {
             coarse.sort((a, b) -> {
-                String textA = a.summary != null ? a.summary : "";
-                String textB = b.summary != null ? b.summary : "";
+                String textA = a != null && a.summary != null ? a.summary : "";
+                String textB = b != null && b.summary != null ? b.summary : "";
                 double scoreA = bayes.predictRelevance(query, textA);
                 double scoreB = bayes.predictRelevance(query, textB);
                 return Double.compare(scoreB, scoreA);
@@ -180,6 +186,7 @@ public class MemoryManager {
         long cutoff = System.currentTimeMillis() - maxAgeMs;
         String lower = entityType.toLowerCase();
         for (MemoryEntry m : memoryCache) {
+            if (m == null) continue;
             if (m.timestamp >= cutoff) {
                 String text = (m.summary != null ? m.summary : "") +
                         (m.keyLearnings != null ? " " + String.join(" ", m.keyLearnings) : "");
@@ -215,27 +222,36 @@ public class MemoryManager {
     }
 
     private void refreshCache() {
-        memoryCache.clear();
+        List<MemoryEntry> newCache = new ArrayList<>();
         Path dir = memoriesDir();
-        if (!Files.exists(dir)) return;
+        if (!Files.exists(dir)) {
+            memoryCache.clear();
+            memoryCache.addAll(newCache);
+            lastCacheUpdate = System.currentTimeMillis();
+            return;
+        }
 
         try (var stream = Files.list(dir)) {
             stream.filter(p -> p.toString().endsWith(".mem") && !p.getFileName().toString().equals("latest.mem"))
                     .sorted(Comparator.reverseOrder())
-                    .forEach(this::loadMemoryFile);
-        } catch (IOException ignored) {}
+                    .forEach(p -> {
+                        try {
+                            MemoryEntry[] arr = JsonUtil.readFromFile(p, MemoryEntry[].class);
+                            if (arr != null) {
+                                newCache.addAll(Arrays.asList(arr));
+                            }
+                        } catch (Exception e) {
+                            LOGGER.warn("加载记忆文件失败: {} — {}", p.getFileName(), e.getMessage());
+                        }
+                    });
+        } catch (IOException e) {
+            LOGGER.warn("读取记忆目录失败: {}", e.getMessage());
+        }
 
-        memoryCache.sort((a, b) -> Long.compare(b.timestamp, a.timestamp));
+        newCache.sort((a, b) -> Long.compare(b.timestamp, a.timestamp));
+        memoryCache.clear();
+        memoryCache.addAll(newCache);
         lastCacheUpdate = System.currentTimeMillis();
-    }
-
-    private void loadMemoryFile(Path p) {
-        try {
-            MemoryEntry[] arr = JsonUtil.readFromFile(p, MemoryEntry[].class);
-            if (arr != null) {
-                memoryCache.addAll(Arrays.asList(arr));
-            }
-        } catch (Exception ignored) {}
     }
 
     private void refreshCacheIfNeeded() {

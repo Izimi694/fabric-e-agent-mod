@@ -13,7 +13,7 @@ import com.izimi.eagent.amygdala.character.BehaviorStats;
 import com.izimi.eagent.brainstem.adapter.BasicActionAdapter;
 import com.izimi.eagent.amygdala.FamiliarityTracker;
 import com.izimi.eagent.amygdala.SocialObserver;
-import com.izimi.eagent.cortex.inhibitor.InhibitoryControl;
+import com.izimi.eagent.brainstem.scheduler.InhibitoryControl;
 import com.izimi.eagent.state.StateManager;
 import com.izimi.eagent.cortex.task.TaskExecutor;
 import com.izimi.eagent.cortex.task.TaskManager;

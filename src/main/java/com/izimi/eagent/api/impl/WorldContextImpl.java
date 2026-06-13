@@ -18,7 +18,7 @@ import com.izimi.eagent.cortex.api.AIClient;
 import com.izimi.eagent.cortex.api.AITaskPlanner;
 import com.izimi.eagent.cortex.api.TemplateManager;
 import com.izimi.eagent.cortex.chat.LocalChatHandler;
-import com.izimi.eagent.cortex.inhibitor.InhibitoryControl;
+import com.izimi.eagent.brainstem.scheduler.InhibitoryControl;
 import com.izimi.eagent.cortex.planner.KnowledgeBase;
 import com.izimi.eagent.log.ExecutionLogger;
 

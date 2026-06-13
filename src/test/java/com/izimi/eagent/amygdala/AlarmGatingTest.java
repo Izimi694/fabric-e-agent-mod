@@ -9,14 +9,14 @@ import org.junit.jupiter.api.Test;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-import com.izimi.eagent.bayesian.BayesianModule;
+import com.izimi.eagent.bayesian.GatingArbiter;
 import com.izimi.eagent.hormonal.HormonalSystem;
 
 class AlarmGatingTest {
 
     @Test
-    @DisplayName("shouldDirectConsolidate returns false when no BayesianModule")
-    void alarmNoBayesian() {
+    @DisplayName("shouldDirectConsolidate returns false when no GatingArbiter")
+    void alarmNoGatingArbiter() {
         var alarm = new OneShotAlarmSystem(UUID.randomUUID());
         assertFalse(alarm.shouldDirectConsolidate("test_alarm"));
     }
@@ -24,28 +24,28 @@ class AlarmGatingTest {
     @Test
     @DisplayName("shouldDirectConsolidate returns true when controllability below gate")
     void alarmDirectConsolidate() {
-        var bayesian = mock(BayesianModule.class);
-        when(bayesian.computeControllability("test", null)).thenReturn(0.2);
+        var gating = mock(GatingArbiter.class);
+        when(gating.computeControllability("test", null)).thenReturn(0.2);
 
         var alarm = new OneShotAlarmSystem(UUID.randomUUID());
-        alarm.setBayesianModule(bayesian);
+        alarm.setGatingArbiter(gating);
         assertTrue(alarm.shouldDirectConsolidate("test"));
     }
 
     @Test
     @DisplayName("shouldDirectConsolidate returns false when controllability above gate")
     void alarmNoDirectConsolidate() {
-        var bayesian = mock(BayesianModule.class);
-        when(bayesian.computeControllability("test", null)).thenReturn(0.8);
+        var gating = mock(GatingArbiter.class);
+        when(gating.computeControllability("test", null)).thenReturn(0.8);
 
         var alarm = new OneShotAlarmSystem(UUID.randomUUID());
-        alarm.setBayesianModule(bayesian);
+        alarm.setGatingArbiter(gating);
         assertFalse(alarm.shouldDirectConsolidate("test"));
     }
 
     @Test
-    @DisplayName("SocialObserver shouldDirectConsolidate returns false when no BayesianModule")
-    void socialNoBayesian() {
+    @DisplayName("SocialObserver shouldDirectConsolidate returns false when no GatingArbiter")
+    void socialNoGatingArbiter() {
         var tracker = new FamiliarityTracker();
         var observer = new SocialObserver(tracker);
         assertFalse(observer.shouldDirectConsolidate("test_reflex"));
@@ -54,24 +54,24 @@ class AlarmGatingTest {
     @Test
     @DisplayName("SocialObserver shouldDirectConsolidate true when controllability low")
     void socialDirectConsolidate() {
-        var bayesian = mock(BayesianModule.class);
-        when(bayesian.computeControllability("test", null)).thenReturn(0.2);
+        var gating = mock(GatingArbiter.class);
+        when(gating.computeControllability("test", null)).thenReturn(0.2);
 
         var tracker = new FamiliarityTracker();
         var observer = new SocialObserver(tracker);
-        observer.setBayesianModule(bayesian);
+        observer.setGatingArbiter(gating);
         assertTrue(observer.shouldDirectConsolidate("test"));
     }
 
     @Test
     @DisplayName("SocialObserver shouldDirectConsolidate false when controllability high")
     void socialNoDirectConsolidate() {
-        var bayesian = mock(BayesianModule.class);
-        when(bayesian.computeControllability("test", null)).thenReturn(0.8);
+        var gating = mock(GatingArbiter.class);
+        when(gating.computeControllability("test", null)).thenReturn(0.8);
 
         var tracker = new FamiliarityTracker();
         var observer = new SocialObserver(tracker);
-        observer.setBayesianModule(bayesian);
+        observer.setGatingArbiter(gating);
         assertFalse(observer.shouldDirectConsolidate("test"));
     }
 

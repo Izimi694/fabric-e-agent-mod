@@ -52,8 +52,6 @@ public class BayesianModule {
     private static final double DEFAULT_PRIOR = 0.5;
     private static final double SMOOTHING = 0.5;
     private static final double CONVERGENCE_THRESHOLD = 1.0 / Math.E; // ≈ 0.3679
-    private static final double VARIANCE_SCALE = 0.1;
-    private static final double CONTROLLABILITY_ENV_PENALTY = 0.5;
 
     public BayesianModule(UUID botId) {
         this(botId, null);
@@ -185,8 +183,9 @@ public class BayesianModule {
 
         PosteriorSnapshot prev = convergenceHistory.get(reflexId);
         if (prev == null) {
-            double variance = Math.abs(updated - DEFAULT_PRIOR);
-            convergenceHistory.put(reflexId, new PosteriorSnapshot(reflexId, current, updated, Math.max(variance, 0.1), 1));
+            double deviation = Math.abs(updated - DEFAULT_PRIOR);
+            double variance = Math.max(deviation, PRIOR_LEARNING_RATE);
+            convergenceHistory.put(reflexId, new PosteriorSnapshot(reflexId, current, updated, variance, 1));
         } else {
             convergenceHistory.put(reflexId, new PosteriorSnapshot(
                     reflexId, prev.newProb(), updated,
@@ -327,24 +326,7 @@ public class BayesianModule {
         return Collections.unmodifiableMap(convergenceHistory);
     }
 
-    // ── Public API: Environmental Controllability ──
-
-    public double computeControllability(String reflexId, List<BayesianFeature> features) {
-        if (reflexId == null) return 0.5;
-        PosteriorSnapshot snap = convergenceHistory.get(reflexId);
-        if (snap == null) return 0.5;
-        double variance = snap.initialVariance();
-        if (variance <= 0) return 1.0;
-        double controllability = 1.0 / (1.0 + variance / VARIANCE_SCALE);
-        if (features != null) {
-            for (BayesianFeature f : features) {
-                if ("environment_change".equals(f.key()) && f.value()) {
-                    controllability *= CONTROLLABILITY_ENV_PENALTY;
-                }
-            }
-        }
-        return Math.max(0, Math.min(1, controllability));
-    }
+    // ── Confidence ──
 
     public double getConfidence(String reflexId) {
         return sharedPrior.getOrDefault(reflexId, DEFAULT_PRIOR);

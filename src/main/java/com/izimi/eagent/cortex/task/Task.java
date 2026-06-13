@@ -1,8 +1,11 @@
 package com.izimi.eagent.cortex.task;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import java.util.*;
 
 public class Task {
+    private static final Logger LOGGER = LoggerFactory.getLogger("e-agent");
     public String taskId;
     public String type;
     public String goal;
@@ -81,7 +84,9 @@ public class Task {
         if (m.find()) {
             try {
                 return Integer.parseInt(m.group(1));
-            } catch (NumberFormatException ignored) {}
+            } catch (NumberFormatException e) {
+                LOGGER.debug("从目标字符串解析数量失败: {} — {}", goal, e.getMessage());
+            }
         }
         return 1;
     }

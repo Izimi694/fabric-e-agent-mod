@@ -13,6 +13,7 @@ import java.util.Random;
 import java.util.Set;
 
 import com.izimi.eagent.amygdala.ConditionedReflex;
+import static com.izimi.eagent.amygdala.ReflexConstants.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import com.izimi.eagent.api.WorldContext;
@@ -180,24 +181,24 @@ public class CorrelationDetector {
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("skillId", skillId);
         data.put("type", "conditioned");
-        data.put("status", "active");
+        data.put(KEY_STATUS, "active");
         data.put("displayName", action + "_" + (target.isEmpty() ? "auto" : target));
         data.put("category", "selforg_" + action);
         data.put("target", target);
         data.put("source", "SELF_ORGANIZED");
-        data.put("shortTermWeight", 0.5);
-        data.put("longTermBaseline", 0.5);
-        data.put("proficiency", 0.3);
+        data.put(KEY_SHORT_TERM_WEIGHT, 0.5);
+        data.put(KEY_LONG_TERM_BASELINE, 0.5);
+        data.put(KEY_PROFICIENCY, 0.3);
         data.put("occurrences", 1);
 
         List<Map<String, Object>> atoms = new ArrayList<>();
         Map<String, Object> atom = new LinkedHashMap<>();
         atom.put("action", action);
         atom.put("target", target);
-        atom.put("proficiency", 0.3);
-        atom.put("status", "healthy");
+        atom.put(KEY_PROFICIENCY, 0.3);
+        atom.put(KEY_STATUS, STATUS_HEALTHY);
         atoms.add(atom);
-        data.put("atoms", atoms);
+        data.put(KEY_ATOMS, atoms);
         data.put("trigger", Map.of("type", "selforg", "action", action));
 
         JsonUtil.writeToFileSafeAtomic(FileUtil.getConditionedDir().resolve(skillId + ".json"), data);

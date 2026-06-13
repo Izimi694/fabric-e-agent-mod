@@ -6,10 +6,14 @@ import net.minecraft.recipe.RecipeEntry;
 import net.minecraft.recipe.RecipeType;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.Map;
 
 public class CraftSkill extends Skill {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger("e-agent");
 
     public CraftSkill() {
         super("craft", "合成", "innate");
@@ -38,7 +42,9 @@ public class CraftSkill extends Skill {
                             return SkillResult.partial(0.4, "找到可合成配方");
                         }
                     }
-                } catch (Exception ignored) {}
+                } catch (Exception e) {
+                    LOGGER.debug("检查合成配方时出错: {}", e.getMessage());
+                }
             }
         }
 

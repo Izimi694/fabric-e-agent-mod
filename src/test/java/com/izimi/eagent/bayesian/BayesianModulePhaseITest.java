@@ -26,30 +26,33 @@ class BayesianModulePhaseITest {
     // ── Environmental Controllability ──
 
     @Test
-    @DisplayName("computeControllability returns 0.5 for unknown reflex")
+    @DisplayName("GatingArbiter computes controllability for unknown reflex")
     void controllabilityUnknown() {
-        double c = module.computeControllability("unknown_reflex", null);
+        var gating = new GatingArbiter(module);
+        double c = gating.computeControllability("unknown_reflex", null);
         assertEquals(0.5, c, 0.001);
     }
 
     @Test
-    @DisplayName("computeControllability returns >= 0.5 for low-variance reflex")
+    @DisplayName("GatingArbiter returns >= 0.5 for low-variance reflex")
     void controllabilityHighForLowVariance() {
         for (int i = 0; i < 10; i++) {
             module.update("reflex_dig_stone", List.of(new BayesianFeature("block=stone", true)), true);
         }
-        double c = module.computeControllability("reflex_dig_stone", null);
+        var gating = new GatingArbiter(module);
+        double c = gating.computeControllability("reflex_dig_stone", null);
         assertTrue(c >= 0.5, "Low-variance should give controllability >= 0.5, got " + c);
     }
 
     @Test
-    @DisplayName("computeControllability decreases with environment_change feature")
+    @DisplayName("GatingArbiter decreases controllability with environment_change feature")
     void controllabilityDecreasesWithEnvChange() {
         for (int i = 0; i < 5; i++) {
             module.update("reflex_test", List.of(new BayesianFeature("test", true)), true);
         }
-        double without = module.computeControllability("reflex_test", null);
-        double with = module.computeControllability("reflex_test",
+        var gating = new GatingArbiter(module);
+        double without = gating.computeControllability("reflex_test", null);
+        double with = gating.computeControllability("reflex_test",
                 List.of(new BayesianFeature("environment_change", true)));
         assertTrue(with < without, "Environment change should reduce controllability");
     }

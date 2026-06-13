@@ -15,20 +15,16 @@ import com.izimi.eagent.brainstem.innate.InnateReflex;
 import com.izimi.eagent.brainstem.innate.InnateReflexRegistry;
 import com.izimi.eagent.cortex.api.TemplateManager;
 import com.izimi.eagent.cortex.api.TemplateMatcher;
-import com.izimi.eagent.cortex.inhibitor.InhibitoryControl;
-import com.izimi.eagent.cortex.task.Task;
-import com.izimi.eagent.cortex.task.TaskManager;
+import com.izimi.eagent.cortex.prefrontal.CognitiveControl;
 import com.izimi.eagent.hormonal.HormonalSystem;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.text.Text;
-import net.minecraft.util.math.Vec3d;
 
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.LinkedHashSet;
-import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import com.izimi.eagent.hippocampus.MemoryEntry;
 import com.izimi.eagent.hippocampus.MemoryEdge;
@@ -83,6 +79,7 @@ public class MetaScheduler {
     private final TemporalScaler temporalScaler;
     private final TemplateMatcher templateMatcher;
     private CorrelationDetector correlationDetector;
+    private CognitiveControl cognitiveControl;
 
     public MetaScheduler(MotivationEngine motivationEngine) {
         this.motivationEngine = motivationEngine;
@@ -93,6 +90,10 @@ public class MetaScheduler {
 
     public void setCorrelationDetector(CorrelationDetector cd) {
         this.correlationDetector = cd;
+    }
+
+    public void setCognitiveControl(CognitiveControl cc) {
+        this.cognitiveControl = cc;
     }
 
     private ProblemLabel labelProblem(BotContext botCtx, WorldContext worldCtx, ServerPlayerEntity bot, Perspective perspective) {
@@ -259,6 +260,18 @@ public class MetaScheduler {
                 break;
             }
 
+            // CognitiveControl 调制门控 (Gate 3)
+            if (cognitiveControl != null) {
+                var h = botCtx.hormonalSystem();
+                if (h != null) {
+                    String vetoReason = cognitiveControl.checkReflex(candidateReflex, h.getNeuroState());
+                    if (vetoReason != null) {
+                        LOGGER.debug("[MetaScheduler] Loop: CognitiveControl 否决 {} → {}", candidateReflex, vetoReason);
+                        break;
+                    }
+                }
+            }
+
             // 反射执行
             var skill = conditioned.getSkill(candidateReflex);
             if (skill == null) break;
@@ -355,140 +368,16 @@ public class MetaScheduler {
 
         LOGGER.debug("[MetaScheduler] Dispatch: {} ({})", action.layer(), action.reason());
 
-        switch (action.layer()) {
-            case "INSTINCT" -> {
-                return executeInstinctLayer(botCtx, worldCtx, bot);
-            }
-            case "HABIT" -> {
-                return executeHabitLayer(botCtx, state, bot);
-            }
-            case "CORTEX_LOCAL" -> {
-                return executeCortexLocal(botCtx, worldCtx, state, bot);
-            }
-            case "CORTEX_LLM" -> {
-                return executeCortexLLM(botCtx, worldCtx, state, bot);
-            }
-            case "IDLE" -> {
-                return executeIdle(botCtx, bot);
-            }
-        }
-        return false;
+        return switch (action.layer()) {
+            case "INSTINCT" -> LowLevelDispatcher.executeInstinctLayer(botCtx, worldCtx, bot, temporalScaler);
+            case "HABIT" -> LowLevelDispatcher.executeHabitLayer(botCtx, state, bot, correlationDetector);
+            case "CORTEX_LOCAL" -> LowLevelDispatcher.executeCortexLocal(botCtx, worldCtx, state, bot);
+            case "CORTEX_LLM" -> executeCortexLLM(botCtx, worldCtx, state, bot);
+            case "IDLE" -> LowLevelDispatcher.executeIdle(botCtx, bot, temporalScaler);
+            default -> false;
+        };
     }
 
-    private boolean executeInstinctLayer(BotContext botCtx, WorldContext worldCtx, ServerPlayerEntity bot) {
-        InnateReflexRegistry reg = worldCtx.brainstem().innateReflexes();
-        InhibitoryControl inhibitor = worldCtx.brainstem().inhibitor();
-        OneShotAlarmSystem alarms = botCtx.alarmSystem();
-
-        if (reg != null) {
-            InnateReflex safety = reg.highest(bot, 0);
-            if (safety != null) {
-                if (inhibitor != null && inhibitor.shouldVetoSafety(safety, bot,
-                        null, worldCtx.behaviorStats())) {
-                    LOGGER.debug("[MetaScheduler] P0.5 veto safety: {}", safety.id());
-                } else {
-                    LOGGER.debug("[MetaScheduler] L0 reflex: {} critical={}", safety.id(), safety.critical());
-                    dispatchReflexAction(bot, safety, worldCtx);
-                    if (safety.critical()) return true;
-                }
-            }
-        }
-
-        if (alarms != null) {
-            var threat = alarms.matchNearest(bot);
-            if (threat != null && threat.type() == OneShotAlarmSystem.AlarmType.THREAT) {
-                LOGGER.debug("[MetaScheduler] Level2 threat: {}", threat.alarmId());
-                dispatchReflexAction(bot,
-                        new InnateReflex("alarm_" + threat.alarmId(), 0, false,
-                                List.of(), new com.izimi.eagent.brainstem.innate.ReflexAction(threat.action(),
-                                java.util.Map.of("speed", 0.3)), true), worldCtx);
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private void dispatchReflexAction(ServerPlayerEntity bot, InnateReflex reflex, WorldContext worldCtx) {
-        var adapter = worldCtx.brainstem().basicActions();
-        if (adapter == null) return;
-        float speedMul = temporalScaler.getSpeed();
-        switch (reflex.action().type()) {
-            case "flee" -> adapter.flee(bot, reflex.action().getDouble("speed", 0.3) * speedMul);
-            case "eat" -> adapter.eat(bot);
-            case "retreat" -> adapter.retreat(bot, reflex.action().getDouble("speed", 0.25) * speedMul);
-            case "avoidLava" -> adapter.avoidLava(bot, reflex.action().getDouble("speed", 0.2) * speedMul);
-            case "seekShelter" -> adapter.seekShelter(bot, reflex.action().getDouble("speed", 0.1) * speedMul);
-            case "collectItem" -> adapter.collectItem(bot, reflex.action().getDouble("speed", 0.15) * speedMul);
-            case "sneak" -> adapter.sneak(bot, true);
-        }
-    }
-
-    private boolean executeHabitLayer(BotContext botCtx, MetaState state, ServerPlayerEntity bot) {
-        var conditioned = botCtx.conditionedReflex();
-        var taskManager = botCtx.taskManager();
-        if (conditioned == null || taskManager == null) return false;
-
-        Task activeTask = taskManager.getActiveTask();
-        if (activeTask != null && "running".equals(activeTask.getStatus())) {
-            var reflexSkill = conditioned.match(activeTask);
-            if (reflexSkill != null) {
-                conditioned.executeReflex(reflexSkill, bot);
-                return true;
-            }
-        }
-
-        if (state.getP3Cooldown() <= 0) {
-            var autoReflex = conditioned.scanAndTrigger(bot);
-            if (autoReflex != null) {
-                conditioned.executeReflex(autoReflex, bot);
-                return true;
-            }
-        }
-
-        if (correlationDetector != null) {
-            return correlationDetector.tryExplore(bot);
-        }
-        return false;
-    }
-
-    private boolean executeCortexLocal(BotContext botCtx, WorldContext worldCtx, MetaState state, ServerPlayerEntity bot) {
-        String msg = state.consumePendingChat();
-        if (msg == null) return false;
-
-        var planner = worldCtx.cortex().localPlanner();
-
-        if (planner != null && planner.canHandle(msg)) {
-            var response = planner.decompose(msg);
-            if (response != null && response.isAction()) {
-                var planManager = botCtx.planManager();
-                if (planManager != null) {
-                    var plan = planManager.getActivePlan();
-                    if (plan != null && !plan.subSteps.isEmpty()) {
-                        botCtx.taskManager().createTaskFromPlan(msg, plan);
-                        LOGGER.info("[MetaScheduler] CortexLocal 从Plan创建任务: {} → {}步",
-                                msg, plan.subSteps.size());
-                        return true;
-                    }
-                }
-                botCtx.taskManager().createTask(msg);
-                return true;
-            }
-        }
-
-        var chatHandler = worldCtx.cortex().chatHandler();
-        if (chatHandler != null && chatHandler.canHandle(msg)) {
-            UUID playerId = botCtx.botId();
-            String response = chatHandler.getResponse(msg, botCtx.hormonalSystem(), playerId);
-            if (response != null) {
-                bot.sendMessage(Text.literal("§b[E-Agent] §f" + response));
-                LOGGER.info("[MetaScheduler] CortexLocal 本地聊天: \"{}\" → \"{}\"",
-                        msg, response);
-                return true;
-            }
-        }
-
-        return false;
-    }
 
     private boolean executeCortexLLM(BotContext botCtx, WorldContext worldCtx, MetaState state, ServerPlayerEntity bot) {
         var templateManager = worldCtx.cortex().templateManager();
@@ -626,42 +515,7 @@ public class MetaScheduler {
         }
     }
 
-    private boolean executeIdle(BotContext botCtx, ServerPlayerEntity bot) {
-        var idleBrain = botCtx.idleBrain();
-        if (idleBrain != null) {
-            var suggestion = idleBrain.onTick();
-            if (suggestion != null) {
-                bot.sendMessage(Text.literal("§b[E-Agent] §f" + suggestion.text()));
-                return true;
-            }
-        }
 
-        animateIdle(bot);
-        return true;
-    }
-
-    private void animateIdle(ServerPlayerEntity bot) {
-        float speedMul = temporalScaler.getSpeed();
-        long tick = bot.age;
-        if (tick % 40 < 20) {
-            float yaw = bot.getYaw() + (float) (Math.sin(tick * 0.05) * 15);
-            bot.setYaw(yaw);
-            bot.setHeadYaw(yaw);
-        }
-        if (tick % Math.max(20, (int)(100 / speedMul)) == 0) {
-            var pos = bot.getPos();
-            double angle = Math.random() * Math.PI * 2;
-            double dist = (2.0 + Math.random() * 3.0) * speedMul;
-            var target = pos.add(Math.cos(angle) * dist, 0, Math.sin(angle) * dist);
-            double dx = target.x - pos.x;
-            double dz = target.z - pos.z;
-            double len = Math.sqrt(dx * dx + dz * dz);
-            if (len > 0) {
-                bot.setVelocity(new Vec3d(dx / len * 0.15 * speedMul, 0.08, dz / len * 0.15 * speedMul));
-                bot.velocityModified = true;
-            }
-        }
-    }
 
     // ── Dead-end Detection ──
 

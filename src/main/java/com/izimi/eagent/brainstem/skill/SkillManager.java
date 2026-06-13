@@ -1,10 +1,13 @@
 package com.izimi.eagent.brainstem.skill;
 
 import com.izimi.eagent.amygdala.ConditionedReflex;
+import static com.izimi.eagent.amygdala.ReflexConstants.*;
 import com.izimi.eagent.brainstem.innate.AttackSkill;
 import com.izimi.eagent.brainstem.innate.CraftSkill;
 import com.izimi.eagent.brainstem.innate.DigSkill;
 import com.izimi.eagent.brainstem.innate.MoveSkill;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -16,6 +19,7 @@ import com.izimi.eagent.util.FileUtil;
 import com.izimi.eagent.util.JsonUtil;
 
 public class SkillManager {
+    private static final Logger LOGGER = LoggerFactory.getLogger("e-agent");
     private final Map<String, Skill> skills = new HashMap<>();
 
     public SkillManager() {
@@ -63,9 +67,9 @@ public class SkillManager {
 
     private void saveSkillToFile(Path path, Skill skill) {
         Map<String, Object> skillData = new HashMap<>();
-        skillData.put("skill_id", skill.getSkillId());
-        skillData.put("type", skill.getType());
-        skillData.put("name", skill.getName());
+skillData.put(KEY_SKILL_ID, skill.getSkillId());
+skillData.put("type", skill.getType());
+skillData.put("name", skill.getName());
         JsonUtil.writeToFileSafeAtomic(path, skillData);
     }
 
@@ -78,13 +82,17 @@ public class SkillManager {
                 try {
                     Map<String, Object> data = JsonUtil.readFromFile(p, Map.class);
                     if (data != null) {
-                        String skillId = (String) data.get("skill_id");
-                        String name = (String) data.getOrDefault("name", skillId);
+String skillId = (String) data.get(KEY_SKILL_ID);
+String name = (String) data.getOrDefault("name", skillId);
                         ConditionedReflex.ConditionedSkill skill = new ConditionedReflex.ConditionedSkill(skillId, name);
                         registerSkill(skill);
                     }
-                } catch (Exception ignored) {}
+                } catch (Exception e) {
+                    LOGGER.warn("加载条件反射技能文件失败: {}", e.getMessage());
+                }
             });
-        } catch (IOException ignored) {}
+        } catch (IOException e) {
+            LOGGER.warn("读取条件反射技能目录失败: {}", e.getMessage());
+        }
     }
 }

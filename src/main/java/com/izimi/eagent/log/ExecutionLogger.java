@@ -2,6 +2,8 @@ package com.izimi.eagent.log;
 
 import com.izimi.eagent.util.FileUtil;
 import com.izimi.eagent.util.JsonUtil;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -11,6 +13,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.*;
 
 public class ExecutionLogger {
+    private static final Logger LOGGER = LoggerFactory.getLogger("e-agent");
     private final List<LogEntry> recentLogs = new ArrayList<>();
     private int logCounter = 0;
     private static final int MAX_RECENT = 100;
@@ -69,7 +72,9 @@ public class ExecutionLogger {
         if (!Files.exists(dir)) return;
         try (var stream = Files.list(dir)) {
             stream.filter(p -> p.toString().endsWith(".json")).forEach(p -> loadLogFile(p, analysis));
-        } catch (IOException ignored) {}
+        } catch (IOException e) {
+            LOGGER.warn("列出执行日志目录失败: {}", e.getMessage());
+        }
     }
 
     private void loadLogFile(Path p, Map<String, List<Double>> analysis) {
@@ -79,7 +84,9 @@ public class ExecutionLogger {
             for (LogEntry entry : entries) {
                 analysis.computeIfAbsent(entry.action, k -> new ArrayList<>()).add(entry.effectiveness);
             }
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            LOGGER.warn("加载执行日志条目失败: {} — {}", p.getFileName(), e.getMessage());
+        }
     }
 
     public static class LogEntry {

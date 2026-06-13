@@ -2,6 +2,7 @@ package com.izimi.eagent.brainstem.innate;
 
 import com.google.gson.reflect.TypeToken;
 import com.izimi.eagent.amygdala.BotParams;
+import static com.izimi.eagent.amygdala.ReflexConstants.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import com.izimi.eagent.util.FileUtil;
@@ -170,8 +171,8 @@ public class InnateReflexRegistry {
             if (saved != null) {
                 for (var entry : saved.entrySet()) {
                     Map<String, Double> vals = entry.getValue();
-                    double stw = vals.getOrDefault("shortTermWeight", DEFAULT_WEIGHT);
-                    double ltb = vals.getOrDefault("longTermBaseline", DEFAULT_WEIGHT);
+                    double stw = vals.getOrDefault(KEY_SHORT_TERM_WEIGHT, DEFAULT_WEIGHT);
+                    double ltb = vals.getOrDefault(KEY_LONG_TERM_BASELINE, DEFAULT_WEIGHT);
                     reflexWeights.put(entry.getKey(), new double[]{stw, ltb});
                 }
             }
@@ -185,8 +186,8 @@ public class InnateReflexRegistry {
             Map<String, Map<String, Double>> data = new LinkedHashMap<>();
             for (var entry : reflexWeights.entrySet()) {
                 Map<String, Double> vals = new LinkedHashMap<>();
-                vals.put("shortTermWeight", entry.getValue()[0]);
-                vals.put("longTermBaseline", entry.getValue()[1]);
+                vals.put(KEY_SHORT_TERM_WEIGHT, entry.getValue()[0]);
+                vals.put(KEY_LONG_TERM_BASELINE, entry.getValue()[1]);
                 data.put(entry.getKey(), vals);
             }
             JsonUtil.writeToFileSafeAtomic(FileUtil.getInnateReflexWeightsPath(), data);

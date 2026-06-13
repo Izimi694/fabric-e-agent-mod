@@ -20,7 +20,7 @@ import com.izimi.eagent.cortex.api.AIConfig;
 import com.izimi.eagent.cortex.api.TemplateManager;
 import com.izimi.eagent.cortex.api.PersonaManager;
 import com.izimi.eagent.cortex.api.TemplateMatcher;
-import com.izimi.eagent.cortex.inhibitor.InhibitoryControl;
+import com.izimi.eagent.brainstem.scheduler.InhibitoryControl;
 import com.izimi.eagent.amygdala.FamiliarityTracker;
 import com.izimi.eagent.brainstem.IdleBrain;
 import com.izimi.eagent.amygdala.NaiveBayesClassifier;

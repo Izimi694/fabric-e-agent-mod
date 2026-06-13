@@ -39,7 +39,9 @@ public class LocalTaskDecomposer implements ILocalPlanner {
         int count = 1;
         try {
             if (countStr != null && !countStr.isEmpty()) count = Integer.parseInt(countStr);
-        } catch (NumberFormatException ignored) {}
+        } catch (NumberFormatException e) {
+            LOGGER.warn("解析任务数量失败, 使用默认值 1: {}", e.getMessage());
+        }
 
         String taskId = "local_" + System.currentTimeMillis();
         Plan plan = planManager.createPlan(taskId, message);

@@ -2,6 +2,8 @@ package com.izimi.eagent.hippocampus;
 
 import com.izimi.eagent.bayesian.BayesianModule;
 import com.izimi.eagent.util.JsonUtil;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -11,6 +13,7 @@ import java.util.stream.Collectors;
 
 public class MemoryGraph {
 
+    private static final Logger LOGGER = LoggerFactory.getLogger("e-agent");
     private static final double SALIENCE_THRESHOLD = 0.6;
     private static final int MAX_INFER_PER_CALL = 5;
     private static final double EDGE_THRESHOLD = 0.7;
@@ -65,7 +68,13 @@ public class MemoryGraph {
     public void addEdge(String fromId, String toId, MemoryEdge.RelationType type, double weight) {
         Objects.requireNonNull(type, "type must not be null");
         if (fromId == null || toId == null) throw new IllegalArgumentException("fromId and toId must not be null");
+        if (fromId.equals(toId)) return;
         if (!nodes.containsKey(fromId) || !nodes.containsKey(toId)) return;
+        MemoryEdge existing = findEdge(fromId, toId, type);
+        if (existing != null) {
+            if (weight > existing.weight()) existing.setWeight(weight);
+            return;
+        }
         edges.add(new MemoryEdge(fromId, toId, type, Math.max(0, Math.min(1, weight))));
     }
 
@@ -356,7 +365,9 @@ public class MemoryGraph {
                     ? new MemoryEdge(from, to, type, w, ca, ra > 0 ? ra : ca)
                     : new MemoryEdge(from, to, type, w);
             edges.add(edge);
-        } catch (IllegalArgumentException ignored) {}
+        } catch (IllegalArgumentException e) {
+            LOGGER.warn("跳过无效的图边: {}({})→{}({}): {}", from, typeStr, to, w, e.getMessage());
+        }
     }
 
     public void save(Path path) {
@@ -458,6 +469,15 @@ public class MemoryGraph {
 
     private MemoryEdge findEdge(String fromId, String toId) {
         for (MemoryEdge e : edges) {
+            if (e.fromId().equals(fromId) && e.toId().equals(toId)) return e;
+            if (e.fromId().equals(toId) && e.toId().equals(fromId)) return e;
+        }
+        return null;
+    }
+
+    private MemoryEdge findEdge(String fromId, String toId, MemoryEdge.RelationType type) {
+        for (MemoryEdge e : edges) {
+            if (e.type() != type) continue;
             if (e.fromId().equals(fromId) && e.toId().equals(toId)) return e;
             if (e.fromId().equals(toId) && e.toId().equals(fromId)) return e;
         }
@@ -604,7 +624,9 @@ public class MemoryGraph {
             } else {
                 addEdge(from, to, type, weight);
             }
-        } catch (IllegalArgumentException ignored) {}
+        } catch (IllegalArgumentException e) {
+            LOGGER.warn("导入骨骼边时跳过无效的 RelationType: {} ({})", typeStr, e.getMessage());
+        }
     }
 
     static String deinstanceLabel(String summary) {
@@ -615,7 +637,10 @@ public class MemoryGraph {
                 .replaceAll(" \\d{4}-\\d{2}-\\d{2}", "")
                 .replaceAll("\\[.*?\\]", "")
                 .trim();
-        return result.isEmpty() ? summary : result;
+        if (result.isEmpty()) {
+            return "label_" + Math.abs(summary.hashCode());
+        }
+        return result;
     }
 
     void setReflexToNodes(Map<String, List<String>> index) {

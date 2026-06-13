@@ -4,6 +4,8 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonSyntaxException;
 import com.google.gson.reflect.TypeToken;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import java.io.*;
 import java.lang.reflect.Type;
 import java.nio.charset.StandardCharsets;
@@ -13,6 +15,7 @@ import java.nio.file.StandardCopyOption;
 import java.util.Map;
 
 public class JsonUtil {
+    private static final Logger LOGGER = LoggerFactory.getLogger("e-agent");
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create();
 
     public static <T> T fromJson(String json, Class<T> clazz) {
@@ -70,7 +73,7 @@ public class JsonUtil {
         try {
             writeToFile(path, obj);
         } catch (IOException e) {
-            e.printStackTrace();
+            LOGGER.warn("写入文件失败: {} — {}", path, e.getMessage());
         }
     }
 
@@ -97,8 +100,10 @@ public class JsonUtil {
         } catch (IOException e) {
             try {
                 Files.deleteIfExists(path.resolveSibling(path.getFileName() + ".tmp"));
-            } catch (IOException ignored) {}
-            e.printStackTrace();
+            } catch (IOException ex) {
+                LOGGER.warn("清理临时文件失败: {}", ex.getMessage());
+            }
+            LOGGER.warn("原子写入失败: {} — {}", path, e.getMessage());
         }
     }
 }

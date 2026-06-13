@@ -1,6 +1,7 @@
 package com.izimi.eagent.brainstem.bot;
 
 import com.izimi.eagent.api.WorldContext;
+import static com.izimi.eagent.amygdala.ReflexConstants.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import com.izimi.eagent.amygdala.BotParams;
@@ -235,14 +236,14 @@ public class BotManager {
             Map<String, Object> data = JsonUtil.readMapFromFileSafe(src);
             if (data == null) return;
 
-            data.put("status", "trial");
-            data.put("trialSuccesses", 0);
-            data.put("trialFailures", 0);
-            data.put("shortTermWeight", 0.5);
-            data.put("longTermBaseline", 0.5);
-            data.put("proficiency", 0.3);
-            data.put("executionCount", 0);
-            data.put("successRate", 0.0);
+            data.put(KEY_STATUS, STATUS_TRIAL);
+data.put(KEY_TRIAL_SUCCESSES, 0);
+data.put(KEY_TRIAL_FAILURES, 0);
+data.put(KEY_SHORT_TERM_WEIGHT, 0.5);
+data.put(KEY_LONG_TERM_BASELINE, 0.5);
+data.put(KEY_PROFICIENCY, 0.3);
+data.put(KEY_EXECUTION_COUNT, 0);
+data.put(KEY_SUCCESS_RATE, 0.0);
 
             resetAtomsToTrial(data);
 
@@ -254,12 +255,12 @@ public class BotManager {
 
     @SuppressWarnings("unchecked")
     private static void resetAtomsToTrial(Map<String, Object> data) {
-        List<Map<String, Object>> atoms = (List<Map<String, Object>>) data.get("atoms");
+        List<Map<String, Object>> atoms = (List<Map<String, Object>>) data.get(KEY_ATOMS);
         if (atoms == null) return;
         for (Map<String, Object> atom : atoms) {
-            atom.put("executionCount", 0);
-            atom.put("successRate", 0.0);
-            atom.put("proficiency", 0.1);
+            atom.put(KEY_EXECUTION_COUNT, 0);
+            atom.put(KEY_SUCCESS_RATE, 0.0);
+            atom.put(KEY_PROFICIENCY, 0.1);
         }
     }
 

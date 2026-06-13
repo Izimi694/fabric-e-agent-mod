@@ -35,17 +35,19 @@ L6  → 复杂语义分析 (以上全不命中)
 
 ## 2. MetaScheduler — 元调度器
 
-每 tick 的决策分五阶段：
+每 tick 的决策分五阶段（由 MotivationEngine 和 MetaScheduler 协作完成）：
 
 ```
 MetaScheduler.tick()
-  1. computeDrives()            ← 5通道驱力计算 (BotContext + WorldContext + 环境)
-                                   激素状态 + BotParams + 环境 → 5维 DriveState
-  2. select()                   ← 玻尔兹曼选择 + 交叉抑制 (BotContext)
-  3. labelProblem(perspective)  ← 贴标签: SURVIVAL/LEARNED_THREAT/TASK_ACTIVE/ROUTINE/FAMILIAR/NOVEL/TRIVIAL
+  1. MotivationEngine.computeDrives()  ← 5通道驱力计算 (BotContext + WorldContext + 环境)
+                                    激素状态 + BotParams + 环境 → 5维 DriveState
+  2. MotivationEngine.select()         ← 玻尔兹曼选择 + 交叉抑制 (BotContext)
+  3. labelProblem(perspective)   ← 贴标签: SURVIVAL/LEARNED_THREAT/TASK_ACTIVE/ROUTINE/FAMILIAR/NOVEL/TRIVIAL
   4. getFlowAdjustment(bot, state) ← 升降级: AUTOPILOT/NORMAL/OVERRIDE (BotContext + MetaState)
-  5. dispatch(label, flow)      ← 分派到对应执行层
+  5. fallbackDispatch(label, flow) ← 分派到对应执行层（inline 在内层循环）
 ```
+
+> 注：阶段 1 (`computeDrives`) 和阶段 2 (`select`) 实际实现在 `MotivationEngine` 中，MetaScheduler 的 `tick()` 调用 `MotivationEngine` 的对应方法。详见 `MotivationEngine.java`。
 
 ### 2.1 五大视角 (Perspective)
 
@@ -94,27 +96,36 @@ if (newTask.priority > currentTask.priority * (1 + (1.0 / Math.E))) {
 | 传递类型 | 时间尺度 | 载体 | 工程实现 |
 |---------|---------|------|---------|
 | **基因层** | 代际 | α, β, ltb | `BotParams` + 三规则继承 |
-| **激素层** | 秒~分钟 | 浓度 Map | `HormonalSystem` (stress/aggression/curiosity/intimacy) |
+| **神经调质层** | 秒~分钟 | 4 维向量 | `HormonalSystem` (NE/DA/5-HT/ACh + 独立 intimacy) |
 | **反射层** | 分钟~小时 | stw/ltb 固化 | `ConditionedReflex` + reinforce + solidify |
 
 三者形成闭环：
 
 ```
-执行反射 → 成功/失败 → 激素浓度变化 → 下次视角选择偏移
-    ↑                                        ↓
-    └──── 反复成功 → ltb ↑ (固化) ←───────────┘
-                                        ↓
-                                 死亡 → 三规则继承给后代
+执行反射 → 成功/失败 → 神经递质浓度变化 → 前额叶抑制调制
+    ↑                                              ↓
+    └──── 反复成功 → ltb ↑ (固化) ←─────────────────┘
+                                              ↓
+                                       死亡 → 三规则继承给后代
 ```
 
 ### 3.1 激素系统 (HormonalSystem)
 
-| 变量 | 触发方式 | 作用 |
-|------|---------|------|
-| stress | 受伤/失败 | 倾向生存行为 |
-| aggression | 战斗胜利 | 倾向攻击 |
-| curiosity | 新奇发现 | 倾向探索 (指数衰减，半衰期 ~30min) |
-| intimacy | 玩家表扬/批评 | 影响社交倾向 |
+当前状态：4 维神经递质向量模型 (NE/DA/5-HT/ACh) + 向下兼容的 stress/aggression/curiosity/intimacy 旧别名。
+
+| 变量 | 生物对应 | 触发方式 | 时间尺度 | 调制角色 |
+|------|---------|---------|:-------:|---------|
+| NE (去甲肾上腺素) | 警觉/唤醒 | 受伤/威胁/突发事件 | 快 (秒) | 情境门控：NE < 0.5 低威胁 / ≥ 0.5 高威胁 |
+| DA (多巴胺) | 奖赏/活力 | 战斗胜利/新奇发现/任务完成 | 中 (秒~分) | 攻击前提：DA < 0.4 时否决攻击候选 |
+| 5-HT (血清素) | 情境开关 | 连续失败/威胁持续 | 慢 (分) | 低NE→全局抑制；高NE→促逃抑攻 |
+| ACh (乙酰胆碱) | 注意力聚焦 | 专注任务/目标切换 | 中 (秒~分) | 高→攻击/挖矿（专注），低→探索（扫视） |
+| intimacy | 社交信任 (独立) | 玩家评价/互动 | 极慢 (时~天) | 社交候选门控乘数，不参与余弦匹配 |
+
+GABA (攻击刹车) 与 Glu (逃跑油门) 作为独立导出量，由 `NeuroDynamics` 工具类实时计算，不持久化存储。详见 §4.3。
+
+**迁移记录**：Phase 2 完成 4 维向量扩展（NE/DA/5-HT/ACh），旧字段 `stress/aggression/curiosity/intimacy` 保留为向下兼容别名。
+旧字段标 `@Deprecated`，新代码应使用 `getNE()/getDA()/getSerotonin()/getACh()` 原生接口。
+详见 `HormonalSystem.java` 和 `NeuroState.java`。
 
 激素对视角选择的影响：
 
@@ -155,18 +166,225 @@ public boolean shouldExplore() {
 
 | | 脑干 (brainstem/) | 杏仁核 (amygdala/) |
 |---|---|---|
-| 职责 | "怎么做" — 执行层 | "什么时候做" — 判断层 |
-| 内容 | 12 原子动作、寻路、Idle 动画 | 条件反射、社会镜像、评价 |
-| 不含 | 任何"是否应该做"的决策 | 任何"如何执行"的实现 |
-| 类比 | 伺服电机和机械臂 | 膝跳反射和痛觉神经 |
+| 职责 | "怎么做" — 执行层 + 唯一决策调度 | "什么时候做" — 判断层 |
+| 内容 | 调度器、12 原子动作、寻路、Idle 动画 | 条件反射、社会镜像、评价 |
+| 不含 | 任何"如何执行"的实现（除 MetaScheduler 外） | 任何"如何执行"的实现 |
+| 类比 | 伺服电机和机械臂（含一个 PLC） | 膝跳反射和痛觉神经 |
 
-### 4.2 前额叶抑制控制 (InhibitoryControl)
+> **实现注记**：MetaScheduler 为满足每 tick 的性能要求，直接引用了底层模块而非通过 API 门面（BrainstemAPI/AmygdalaAPI/CortexAPI）。这是一个有意的性能权衡，不视为架构偏离。此外，InhibitoryControl 历史位于 `cortex/inhibitor/` 路径下，逻辑归属 L2 调度层，该路径视为历史遗留，不改变功能。
 
-否决不适当行为：
+**骨架** 在 §4 表格的基础上扩展为：
+- 脑干内 `brainstem/scheduler/` 包含 MetaScheduler（系统唯一决策调度器）——它不执行动作，只做"是否做、做什么"的选择。这是整套系统中**唯一**进行"是否应该做"决策的模块，其余脑干模块不参与决策。
+- `brainstem/scheduler/` 还包含反射链、参数绑定、紧急分类、驱力计算（MotivationEngine），全部为决策调度服务。
+
+### 4.2 前额叶抑制控制 (InhibitoryControl + CognitiveControl)
+
+当前实现（InhibitoryControl）：硬否决 → 二进制 veto，静态阈值。
+已实现（Phase 3）：扩展为两层抑制模型（InhibitoryControl 硬门 + CognitiveControl 连续调制）。
+
+#### 当前结构 (InhibitoryControl)
+
+二进制否决硬规则：
 - 否决不必要的安全反射（误判危险不致命时抑制逃跑）
 - 否决不恰当的习惯反射
 - 否决不合适的模仿行为（如群体跳崖）
 - 否决 IdleBrain 泛词误判
+
+#### 已实现结构 (Phase 3: 四门决策流水线)
+
+```
+MetaScheduler.executeLoop():
+  ┌─────────────────────────────────────────────────────┐
+  │ 第一道门：InhibitoryControl 硬否决 (二进制)          │
+  │   if (shouldVetoJump(from lava)): return REJECT     │
+  │   if (shouldVetoAttack(villager)): return REJECT    │
+  │   → 安全关键约束，不做连续调制妥协                    │
+  └───────────────────┬─────────────────────────────────┘
+                      ↓ pass
+  ┌─────────────────────────────────────────────────────┐
+  │ 第二道门：候选生成 (原有逻辑)                         │
+  │   candidates = generateCandidates()                  │
+  │   → 激素粗筛 + 贝叶斯候选集 (≤5)                     │
+  └───────────────────┬─────────────────────────────────┘
+                      ↓
+  ┌─────────────────────────────────────────────────────┐
+  │ 第三道门：CognitiveControl 连续调制 (新)             │
+  │   inhibitedCandidates = apply(candidates, neuroState) │
+  │   │ ① 合取条件检查 (require da≥0.4, 5-HT≤0.3)      │
+  │   │    → 不满足条件 → 排除候选                        │
+  │   │ ② 5-HT 情境分支                                  │
+  │   │    → NE < 0.5: 高5-HT全局抑制                     │
+  │   │    → NE ≥ 0.5: 高5-HT促逃跑、抑攻击               │
+  │   │ ③ 余弦匹配反射配方 → 动态抑制权重                  │
+  │   │ ④ GABA/Glu 分别注入:                             │
+  │   │    → GABA → attack 刹车 (5-HT×0.5 + 失败×0.05)   │
+  │   │    → Glu  → flee 油门 (DA×0.3 + NE×0.5)          │
+  └───────────────────┬─────────────────────────────────┘
+                      ↓
+  ┌─────────────────────────────────────────────────────┐
+  │ 第四道门：玻尔兹曼 / 贝叶斯精筛                       │
+  │   selected = selectByBoltzmann(inhibitedCandidates)   │
+  │   → MotivationEngine 最终选择                         │
+  └─────────────────────────────────────────────────────┘
+```
+
+#### 阈值参数化规则 (InhibitoryControl → CognitiveControl)
+
+- 现有静态阈值（`SAFETY_DISTANCE_THRESHOLD` 等）改为从 CognitiveControl 接收调制
+- 调制方向约束：**只允许向安全方向调整**（更保守）
+- 公式：`effectiveThreshold = baseThreshold + |modulation|`
+- 不支持负数调制（不降低安全阈值）
+
+| 阈值 | 基值 | 调制来源 | 说明 |
+|------|:----:|---------|------|
+| 坠落高度 | 3 blocks | NE↑ 时 ↑ | 警觉时更保守 |
+| 熔岩距离 | 2 blocks | NE↑ 时 ↑ | 危险感知时更远 |
+| 村民攻击 | 禁止 | 永不调制 | 硬安全不妥协 |
+
+#### CognitiveControl 类设计 (已实现，见 `CognitiveControl.java`)
+
+```
+class CognitiveControl {
+  // 4 维向量余弦匹配
+  computeInhibition(NeuroState state, ReflexCandidate candidate) → float
+
+  // 候选集批量调制
+  modulateCandidates(Candidate[] candidates, NeuroState state) → Candidate[]
+    ├─ ① 合取条件检查 (meetsRequirements)
+    ├─ ② 5-HT 情境分支
+    │    if (state.ne() < THREAT_THRESHOLD):
+    │        ↓ state.serotonin() × INHIBIT_STRENGTH  // 全局抑制
+    │    else:
+    │        ↓ state.serotonin() → flee↑, attack↓
+    ├─ ③ 余弦匹配 + 权重调整
+    └─ ④ GABA/Glu 分别注入 (见 §4.3 NeuroDynamics)
+
+  // 合取条件检查 (require: DA min, 5-HT max 等)
+  meetsRequirements(NeuroState state, ReflexRecipe recipe) → boolean
+
+  // 阈值调制参数（仅向安全方向）
+  getModulation(String thresholdId, NeuroState state) → float
+}
+
+// ── 常量 ──
+THREAT_THRESHOLD = 0.5    // NE 阈值，区分低威胁/高威胁
+INHIBIT_STRENGTH  = 0.6   // 低威胁下 5-HT 全局抑制系数
+FLEE_BOOST        = 0.4   // 高威胁下 5-HT 促进逃跑系数
+ATTACK_SUPPRESS   = 0.5   // 高威胁下 5-HT 抑制攻击系数
+```
+
+**5-HT 情境分支伪代码：**
+
+```java
+private double computeSerotoninModulation(NeuroState state, String candidateType) {
+    if (state.ne() < THREAT_THRESHOLD) {
+        // 低威胁：5-HT 高 → 全局抑制（僵住/回避）
+        return -state.serotonin() * INHIBIT_STRENGTH;
+    } else {
+        // 高威胁：5-HT 高 → 促进逃跑，抑制攻击
+        if ("flee".equals(candidateType)) {
+            return +state.serotonin() * FLEE_BOOST;
+        } else if ("attack".equals(candidateType)) {
+            return -state.serotonin() * ATTACK_SUPPRESS;
+        }
+        return 0;
+    }
+}
+```
+
+#### 反射配方档案
+
+每个反射的行为配方存储在一个目标向量中：
+
+```json
+{
+  "reflexId": "attack_zombie",
+  "targetVector": {"ne": 0.7, "da": 0.6, "serotonin": 0.2, "ach": 0.8},
+  "require": {
+    "da": {"min": 0.4},
+    "serotonin": {"max": 0.3}
+  },
+  "safetyDistance": 3,
+  "neModulation": 1.5
+}
+```
+
+**余弦匹配** = 当前 `neuroState` 与目标向量的相似度，用于抑制/促进候选权重。
+3 维 (NE/DA/5-HT) 下 ATTACK vs EXPLORE 余弦 ≈ 0.76（难区分）；
+4 维 (+ACh) 下 ≈ 0.58（可区分）。
+
+**合取条件检查**：候选即使余弦匹配度高，也必须满足 `require` 字段的所有约束：
+```java
+private boolean meetsRequirements(NeuroState state, ReflexRecipe recipe) {
+    for (var req : recipe.require().entrySet()) {
+        double value = state.getValue(req.getKey());
+        if (req.getValue().hasMin() && value < req.getValue().getMin()) return false;
+        if (req.getValue().hasMax() && value > req.getValue().getMax()) return false;
+    }
+    return true;
+}
+```
+例如 `attack_zombie` 要求 `DA ≥ 0.4` 且 `serotonin ≤ 0.3`，即使余弦距离很低也不选中。(DA=0.8, 5-HT=0.8) 会被 `serotonin.max` 排除——防止"高 DA + 高 5-HT"错误激活攻击。
+
+---
+
+### 4.3 NeuroDynamics (GABA/Glu 推导工具类)
+
+依据外侧下丘脑 (LH) 双向开关的生物学发现，GABA 与 Glu 对攻击/逃跑有独立的控制通道：
+
+| 信号 | 生物对应 | 功能 | 工程角色 |
+|------|---------|------|---------|
+| GABA | LH GABA 能神经元 | 抑制攻击（攻击刹车） | `computeAttackInhibition()` |
+| Glu  | LH 谷氨酸能神经元 | 驱动逃跑（逃跑油门） | `computeFlightExcitation()` |
+
+两个值独立计算，分别注入 CognitiveControl 的候选调制阶段，不合并为单比值。
+
+#### 攻击刹车 (computeAttackInhibition)
+
+由 5-HT 水平、连续失败次数、收敛置信度共同决定：
+
+```java
+public static double computeAttackInhibition(double serotonin, int failureCount, double confidence) {
+    double inhibition = serotonin * 0.5;                      // 5-HT 刹车
+    inhibition += Math.min(0.3, failureCount * 0.05);         // 失败累积刹车
+    inhibition += (1.0 - confidence) * 0.2;                   // 低置信度刹车
+    return Math.min(0.9, inhibition);
+}
+```
+
+**输入**：serotonin (0-1), failureCount, convergence confidence (0-1)
+**输出范围**：[0, 0.9]
+
+CognitiveControl 中应用：`candidate.weight *= (1.0 - attackInhibition)`
+
+#### 逃跑油门 (computeFlightExcitation)
+
+由 DA（奖赏驱动）、NE（警觉激活）、新奇度共同决定：
+
+```java
+public static double computeFlightExcitation(double dopamine, double ne, double novelty) {
+    double excitation = dopamine * 0.3 + ne * 0.5;            // 警觉驱动
+    excitation += novelty * 0.2;                              // 新奇贡献
+    return Math.min(0.9, excitation);
+}
+```
+
+**输入**：dopamine (0-1), ne (0-1), novelty (0-1)
+**输出范围**：[0, 0.9]
+
+CognitiveControl 中应用：`candidate.type == FLEE ? candidate.weight += flightExcitation`
+
+#### CognitiveControl 调制流程整合
+
+```
+对于每个候选:
+  1. meetsRequirements(state, recipe) → 不满足则排除
+  2. 余弦匹配度 = cos(state.targetVector, recipe.targetVector)
+  3. serotoninModulation = computeSerotoninModulation(state, candidateType)
+  4. attackInhibition = NeuroDynamics.computeAttackInhibition(...)
+  5. flightExcitation = NeuroDynamics.computeFlightExcitation(...)
+  6. 最终权重 = 基线权重 × 余弦匹配度 × (1+serotoninModulation) × (1-attackInhibition) + flightExcitation
+```
 
 ---
 
@@ -318,7 +536,7 @@ PersonaManager 管理角色设定注入:
 | `chat(msg)` | 发送聊天 | void |
 | `jump()` | 跳跃 | boolean |
 
-> **注**：上表为 12 个核心原子动作。`BasicActionAdapter` 实际有 19 个方法，另有 7 个复合动作：`craft`、`flee`、`eat`、`retreat`、`avoidLava`、`seekShelter`、`collectItem`。
+> **注**：上表为 12 个核心原子动作。`BasicActionAdapter` 实际有 20 个方法（12 原子 + 8 复合）：原子动作同左表，复合动作包括 `craft`、`flee`、`eat`、`retreat`、`avoidLava`、`seekShelter`、`collectItem`、`sneak`。
 
 ---
 
@@ -501,7 +719,7 @@ copyReflexesFromMentor()
 | HormonalSystem | L1 | 内存 |
 | OneShotAlarmSystem | L2 | `alarms/*.json` |
 | DispatchReflex | L2 | `dispatch_weights.json` |
-| InhibitoryControl | L2 | 内存 |
+| InhibitoryControl | L2 (brainstem/scheduler) | 内存 |
 | KnowledgeBase | L3 | `knowledge_base.json` |
 | ThresholdConfig | L1 | `thresholds.json` |
 | BayesianModule | 骨架 | `bayesian/shared_prior.json` + per-bot posterior |
@@ -512,9 +730,11 @@ copyReflexesFromMentor()
 | ReflexPackManager | 骨架 (brainstem/bot) | 实例注入（botId + BayesianModule） `reflex_packs/*.json` |
 | WorldContext | 骨架 (api) | `WorldContext` 接口 / `WorldContextImpl` |
 | BotContext | 骨架 (api) | `BotContext` 接口 / `BotContextImpl` |
-| MetaState | 骨架 (api) | `MetaState` 类（每 tick 新建） |
+| MetaState | 骨架 (api) — 具体类，非接口 | `MetaState` 类（每 tick 新建，状态容器，不定义行为） |
 | BrainstemAPI | 骨架 (api) | 脑干门面接口（innateReflexes/basicActions/inhibitor） |
 | AmygdalaAPI | 骨架 (api) | 杏仁核门面接口（socialObserver/familiarityTracker） |
+| CognitiveBrainAPI | 骨架 (api) | 顶层脑门面（world/bot/botCount/config/executionLogger） |
+| CognitiveBrain | 骨架 (api/impl) | CognitiveBrainAPI 实现 |
 | CortexAPI | 骨架 (api) | 前额叶门面接口（localPlanner/chatHandler/templateManager/aiClient/chatAI） |
 | ReflexChain | L4 (时序/执行) | `dag/` 索引 + 反射节点间关系 |
 | TaskDAG | 骨架 | 内存 (cortex/planner) |
@@ -658,19 +878,22 @@ class ReflexNode {
 
 ---
 
-## 18. 环境可控性指数
+## 18. 环境可控性指数 (GatingArbiter)
 
 ### 18.1 计算公式
 
 ```java
-public double computeControllability(ReflexId reflexId, BotContext context) {
-    Posterior posterior = bayesian.getPosterior(reflexId, context);
-    double variance = posterior.variance;
+// GatingArbiter 封装此计算，与 BayesianModule 纯统计角色分离
+public double computeControllability(String reflexId, List<BayesianFeature> features) {
+    double confidence = bayesianModule.getConfidence(reflexId);
+    double variance = confidence * (1.0 - confidence); // Beta分布方差
     double controllability = 1.0 / (1.0 + variance / varianceScale);
-    if (envChangeRate > threshold) controllability *= 0.5;
+    if (features contains "environment_change") controllability *= 0.5;
     return clamp(controllability, 0, 1);
 }
 ```
+
+方差使用 `p*(1-p)` 公式，max=0.25 (p=0.5 最不确定)，min→0 (p→0或1 最确定)。对应 `VARIANCE_SCALE=0.25`。
 
 ### 18.2 分层仲裁
 

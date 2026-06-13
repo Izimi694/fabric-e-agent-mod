@@ -118,6 +118,38 @@ P(成功 | 环境) ∝ P(环境 | 成功) × P(成功)
 
 **前额叶三层次 (Grabenhorst & Rolls 2011)**：Tier1 识别特征 → Tier2 计算价值 → Tier3 做出选择（ACC 冲突仲裁）。
 
+### 洞察 10：神经递质 = 组合调制向量
+
+决策不是由单一激素水平决定的，而是由神经调质的组合模式调制。4 维向量 (NE/DA/5-HT/ACh) 通过余弦匹配 + 合取条件 + 情境分支选择与当前状态最匹配的行为配方。
+
+| 神经递质 | 生物对应 | 时间尺度 | 在本系统中的角色 |
+|---------|---------|:-------:|----------------|
+| NE (去甲肾上腺素) | 警觉/唤醒 | 快 (秒) | 威胁感知 → 安全阈值↑；区分低/高威胁情境 |
+| DA (多巴胺) | 奖赏/活力 | 中 (秒~分) | 任务驱动 → 攻击前提条件 (DA ≥ 0.4) |
+| 5-HT (血清素) | 情境开关 | 慢 (分) | 低NE→全局抑制；高NE→促逃跑+抑攻击 |
+| ACh (乙酰胆碱) | 注意力聚焦 | 中 (秒~分) | 专注 vs 扫视 → ATTACK vs EXPLORE 区分 |
+
+**5-HT 不是单向抑制，而是情境开关**（修正早期假设）：
+```
+if (NE < 0.5):  // 低威胁
+    5-HT ↑ → 僵住/回避（全局行为抑制）
+else:           // 高威胁
+    5-HT ↑ → 促进逃跑，抑制攻击
+```
+
+**外侧下丘脑 (LH) 双向开关**：GABA 能神经元控制攻击（攻击刹车），谷氨酸能神经元控制逃跑（逃跑油门）。两者独立运作，不是简单的抑制/兴奋比：
+
+| 信号 | 功能 | 工程公式 |
+|------|------|---------|
+| GABA | 攻击刹车 | `5-HT×0.5 + failures×0.05 + (1-confidence)×0.2` |
+| Glu  | 逃跑油门 | `DA×0.3 + NE×0.5 + novelty×0.2` |
+
+**攻击需要 DA↑且 5-HT↓ 的合取条件**：余弦匹配单独无法排除 (DA=0.8, 5-HT=0.8) 的组合——要求 `DA ≥ 0.4` 且 `serotonin ≤ 0.3` 才激活攻击候选。
+
+**3 维下 ATTACK 与 EXPLORE 余弦相似度 ≈ 0.76（难区分），4 维 +ACh 后 ≈ 0.58（可区分）。**
+
+**工程边界**：HormonalSystem（4 维向量存储+事件更新） vs CognitiveControl（余弦匹配+情境分支+合取检查） — 信号产生与决策应用分离。
+
 ### 洞察 9：有限步骤 = 微分 + 竞争 + 关系 + 刷新 + 锚定 + 适应
 
 在承认外部环境动态无限、内部有限步骤的条件下，想要以最低成本对外部拟合，需要六步：
@@ -234,6 +266,32 @@ P(成功 | 环境) ∝ P(环境 | 成功) × P(成功)
 16. **Grabenhorst, F. & Rolls, E. T. (2011).** Value, pleasure and choice in the orbitofrontal cortex. *Trends in Cognitive Sciences*.
     → 前额叶三层次：识别特征→计算价值→做出选择。价值计算与价值选择分离。
 
+### 第十组：神经调质与认知控制
+
+17. **Aston-Jones, G. & Cohen, J. D. (2005).** An integrative theory of locus coeruleus-norepinephrine function. *Annual Review of Neuroscience*.
+    → NE 调节警觉状态 (phasic vs tonic firing)，对应安全阈值调制。
+
+18. **Schultz, W. et al. (1997).** A neural substrate of prediction and reward. *Science*.
+    → DA 编码奖赏预测误差，对应任务驱动力。
+
+19. **Crockett, M. J. et al. (2009).** Serotonin modulates behavioral responses to unfairness. *Science*.
+    → 5-HT 升高增强冲动抑制，对应失败后风险回避。
+
+20. **Meyniel, F. et al. (2016).** The sense of confidence during probabilistic learning: a normative account. *PLOS Computational Biology*.
+    → ACh 调控注意力聚焦/扫视切换，对应 ATTACK vs EXPLORE 区分。
+
+21. **Dayan, P. (2012).** Twenty years of acetylcholine. *Nature Neuroscience*.
+    → ACh 的注意聚焦功能综述，支持 4 维向量模型。
+
+22. **MATE (2026).** Multi-agent task execution with cognitive control. *arXiv*.
+    → 连续抑制调制的前沿工作，CognitiveControl 参考基线。
+
+23. **EvoEmo (2025).** Evolutionary emotion-based decision-making. *IEEE Trans. Affective Computing*.
+    → 情绪/认知联合调制架构，4 维余弦匹配参考。
+
+24. **Hudlicka, E. (2004).** Beyond cognition: modeling emotions in cognitive architectures. *ICCM*.
+    → 情绪作为行为倾向调制的经典架构分析。
+
 ### 论文章节建议
 
 | 章节 | 引用论文 |
@@ -246,6 +304,8 @@ P(成功 | 环境) ∝ P(环境 | 成功) × P(成功)
 | 方法：探索/利用 | Lee & Zhang (2024), Brain Bandit (2025) |
 | 方法：任务分解 | Tomov et al. (2023), Treisman (1996) |
 | 方法：决策层次 | Grabenhorst & Rolls (2011) |
+| 方法：神经调质系统 | Aston-Jones & Cohen (2005), Schultz et al. (1997), Crockett et al. (2009), Meyniel et al. (2016), Dayan (2012) |
+| 方法：认知控制 | MATE (2026), EvoEmo (2025), Hudlicka (2004) |
 | 讨论：认知根源 | Tozzi & Peters (2019) |
 | 讨论：共享子空间 | Nature (2025) |
 
@@ -259,6 +319,8 @@ P(成功 | 环境) ∝ P(环境 | 成功) × P(成功)
 | 双权重学习 | TD(λ) / Dual-process RL | 简化工程实现 + 休眠机制 |
 | 情绪/激素调节 | EM-BDI / Homeostatic regulation | 绑定 Perspective 选择 |
 | LLM + 技能复用 | Voyager / Generative Agents | 反射固化，成本收敛到 0 |
+| 神经调质组合 | AES / Emotion-Modulated Architectures | 4 维向量余弦匹配 + 反射配方 |
+| 认知控制 | MATE (2026) / EvoEmo (2025) | InhibitoryControl 硬门 + CognitiveControl 连续调制 |
 
 ### 这是组合，不是发明
 
@@ -273,16 +335,17 @@ P(成功 | 环境) ∝ P(环境 | 成功) × P(成功)
 
 ### 生物学启发的声明
 
-本系统引用生物学概念（条件反射、激素、突触可塑性）作为**设计启发**，不是声称模拟神经系统。以下对应关系是**工程简化**：
+本系统引用生物学概念（条件反射、神经递质、突触可塑性）作为**设计启发**，不是声称模拟神经系统。以下对应关系是**工程简化**：
 
 - 双权重 (stw/ltb) ⇢ 类似突触可塑性的快/慢成分，但不模拟生物机制
-- 激素系统 ⇢ 类似神经调节的行为倾向调节，不是内分泌系统模型
+- 4 维神经递质向量 ⇢ 类似神经调质的组合调制，但不是真实神经递质浓度模型
+- 神经递质→事件触发衰减 ⇢ 简化生理动力学，不做 EC 耦合建模
 - 休眠/复活 ⇢ 类似记忆再巩固，但纯工程决策
 
 这些不是学术贡献，是工程上的简化。
 
 ---
 
-> 工程架构详细说明见 [ARCHITECTURE.md](./ARCHITECTURE.md) (含 §15-24: DAG/ReflexChain/Loop/可控性/死路/双向推理/回退/共享池/门控/参数绑定)
-> 开发状态与路线图见 [DEVELOPMENT.md](./DEVELOPMENT.md) (含 Phase G-M)
-> Agent 设计指南见 [AGENTS.md](./AGENTS.md) (含 §7-11: 贝叶斯仲裁/麦穗/共享池/连续信号/IDC)
+> 工程架构详细说明见 [ARCHITECTURE.md](./ARCHITECTURE.md) (含 §15-24: DAG/ReflexChain/Loop/可控性/死路/双向推理/回退/共享池/门控/参数绑定 + §3.1 神经调质系统 + §4.2 前额叶抑制控制)
+> 开发状态与路线图见 [DEVELOPMENT.md](./DEVELOPMENT.md) (含 Phase G-M + Phase 2-3 神经递质向量系统)
+> Agent 设计指南见 [AGENTS.md](./AGENTS.md) (含 §7-11: 贝叶斯仲裁/麦穗/共享池/连续信号/IDC + §2 神经调质系统)

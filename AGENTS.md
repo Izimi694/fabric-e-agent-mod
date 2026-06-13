@@ -31,6 +31,8 @@
 | 参数传递 | 参数绑定 (ParameterBinder) |
 | 进程门控 | 边界条件检查 (precondition guard) |
 | 认知网图/记忆关系 | 记忆关系图 (MemoryGraph) |
+| 抑制控制 | 前额叶抑制控制 (InhibitoryControl + CognitiveControl) |
+| 神经调质系统 | 4 维神经递质向量 (NE/DA/5-HT/ACh + GABA/Glu 推导) |
 
 ---
 
@@ -42,6 +44,7 @@
 | 反射链 = 参数化步骤 | 有限状态机 | ConditionedReflex atoms |
 | 贝叶斯 = 被动先验编码 | P(s\|f) ∝ P(f\|s)×P(s) ([事后统计，非实时门控](#2-核心抽象-os-内核视角)) | BayesianModule |
 | 激素 = 相对优先级 | 竞争性调度 | MotivationEngine boltzmann |
+| 神经递质 = 组合调制 | 情境开关 + 合取条件 + 余弦匹配 (NE/DA/5-HT/ACh) | HormonalSystem → CognitiveControl |
 | e = 自然切割 | 37% 探索 / 63% 利用 | 探索阈值/切换缓冲/收敛阈值 |
 
 **统一表述**：并发不是并行，是极速串行。复杂不是高维，是压扁后用 e 切割。
@@ -102,12 +105,12 @@
 
 | 概念 | 定义 | 工程实现 |
 |------|------|---------|
-| 环境可控性指数 | `1 / (1 + variance/varianceScale)` × envChangePenalty | BayesianModule.computeControllability() |
+| 环境可控性指数 | `1 / (1 + variance/varianceScale)` × envChangePenalty，variance = confidence×(1-confidence) | GatingArbiter.computeControllability() |
 | 方差低 | 后验集中 → 行动→结果确定 | L1/L3 需贝叶斯验证后固化 |
 | 方差高 | 后验分散 → 行动→结果随机 | L1/L3 允许直接生效 |
 | 阈值动态 | stress↑ → 执行阈值↑; curiosity↑ → 探索阈值↓ | HormonalSystem 调节 |
 
-**分层仲裁 (Go/NoGo 模型)**：L1/L3 不默认生效 → 先查贝叶斯的可控性指数 → 低于阈值才允许直接固化。
+**分层仲裁 (Go/NoGo 模型)**：L1/L3 不默认生效 → 先查 GatingArbiter（封装可空性指数计算的门控决策器）→ 低于阈值才允许直接固化。门控逻辑已从 BayesianModule 分离，保持统计与决策的模块边界。
 
 ---
 
@@ -171,6 +174,8 @@
 | 双权重学习 | TD(λ) / Dual-process RL | 简化工程实现 + 休眠 |
 | 激素调节 | EM-BDI / Homeostatic regulation | 绑定 Perspective 选择 |
 | LLM + 技能复用 | Voyager / Generative Agents | 反射固化，成本收敛到 0 |
+| 神经调质组合 | AES / Emotion-Modulated Architectures | 4 维向量余弦匹配 + 反射配方 |
+| 认知控制 | MATE (2026) / EvoEmo (2025) | InhibitoryControl 硬门 + CognitiveControl 连续调制 |
 
 ---
 

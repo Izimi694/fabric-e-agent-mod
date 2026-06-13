@@ -1,6 +1,8 @@
 package com.izimi.eagent.util;
 
 import net.fabricmc.loader.api.FabricLoader;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -9,7 +11,13 @@ import java.util.List;
 import java.util.UUID;
 
 public class FileUtil {
+    private static final Logger LOGGER = LoggerFactory.getLogger("e-agent");
     private static final String AI_MEMORY_DIR = "eagent";
+
+    public static final String JSON_EXT = ".json";
+    public static final String TMP_EXT = ".tmp";
+    public static final String MEM_EXT = ".mem";
+    public static final String SKILL_EXT = ".skill";
 
     public static Path getGameDir() {
         return FabricLoader.getInstance().getGameDir();
@@ -244,13 +252,17 @@ public class FileUtil {
             try (var stream = Files.list(dir)) {
                 stream.filter(p -> p.toString().endsWith(".tmp"))
                         .forEach(FileUtil::deleteQuietly);
-            } catch (IOException ignored) {}
+            } catch (IOException e) {
+                LOGGER.warn("清理临时文件目录失败: {} — {}", dir, e.getMessage());
+            }
         }
     }
 
     private static void deleteQuietly(Path p) {
         try {
             Files.delete(p);
-        } catch (IOException ignored) {}
+        } catch (IOException e) {
+            LOGGER.debug("删除文件失败(可能已被清理): {} — {}", p, e.getMessage());
+        }
     }
 }

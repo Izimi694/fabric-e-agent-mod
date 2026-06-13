@@ -7,7 +7,7 @@
 ## 1. 当前状态
 
 ```
-项目阶段: Phase MG — MemoryGraph 记忆关系图
+项目阶段: ✅ Phase 3 — CognitiveControl 集成 (四门决策流水线) 全部完成
 ```
 
 ### 完成情况
@@ -38,6 +38,10 @@
 | **Phase LLM (P0-P5)** | **四模板LLM调用重构: TemplateMatcher + CLARIFICATION/CHAT_RESPONSE + PersonaManager + MetaScheduler接入** | ✅ |
 | **Phase MG** | **MemoryGraph 记忆关系图 (inferEdges/遍历/持久化/贝叶斯排重)** | ✅ |
 | **Decoupling #7/#11/#12/#13** | **BotController/EAgent.LOGGER 全局替换/ConditionedReflex/MinecraftReflexEvaluator 解耦** | ✅ |
+| **Phase W2** | **底层修正: 贝叶斯角色分离 + MemoryGraph 结构性缺陷** | ✅ |
+| **Phase 2** | **神经递质向量系统: NeuroState + 4维 HormonalSystem + NeuroDynamics** | ✅ |
+| **Phase 3** | **CognitiveControl 集成: 余弦匹配/阈值参数化/四门决策流水线** | ✅ |
+
 
 ---
 
@@ -73,6 +77,24 @@ Phase MG (MemoryGraph 记忆关系图):
   │   └── ConditionedReflex 集成 (贝叶斯更新后调用)
   ├── MG7 — 扩散激活: traverse 重载(maxDepth/minWeight) + MetaScheduler 三路候选合并
   └── MG8 — 骨骼导出/导入: exportSkeleton + importSkeleton + ReflexPackManager 集成
+
+Phase W2 (底层修正 — 数据层正确性):
+  ├── W2.1 — BayesianModule 角色分离: `computeControllability()` 迁至新建 `GatingArbiter`
+  └── W2.2 — MemoryGraph 结构性缺陷修复: 禁止自环、重复边去重、deinstanceLabel 哈希ID
+
+Phase 2 (神经递质向量系统 — 架构升级):
+  ├── P2.1 — NeuroState record {ne, da, serotonin, ach} + 余弦距离方法
+  ├── P2.2 — HormonalSystem 扩展 4 维字段 + 事件触发更新 (保留旧别名)
+  ├── P2.3 — NeuroDynamics 工具类: computeAttackInhibition/computeFlightExcitation (对应 GABA 刹车/Glu 油门)
+  ├── P2.4 — 4 维各自衰减方程 (NE快/DA中/5-HT慢/ACh中) + 事件更新逻辑
+  └── P2.5 — 测试适配 (兼容旧 API + 新增向量测试)
+
+Phase 3 (CognitiveControl 集成 — 决策升级):
+  ├── P3.1 — CognitiveControl 类: computeInhibition/modulateCandidates 余弦匹配 ✅
+  ├── P3.2 — 反射配方档案 reflex_recipes.json (每个反射的目标4维向量) ✅
+  ├── P3.3 — InhibitoryControl 阈值参数化 (仅向安全方向: effectiveThreshold = base + |modulation|) ✅
+  ├── P3.4 — MetaScheduler 四门决策流水线集成 (硬门→候选→调制→玻尔兹曼) ✅
+  └── P3.5 — MotivationEngine 弃用旧 curiosity, 改用 NE/DA 驱动 shouldExplore() ✅
 ```
 
 ---
@@ -105,13 +127,25 @@ Phase MG (MemoryGraph 记忆关系图):
 ### P-6: MetaContext 已物理删除
 Phase 2 已将 MetaContext 物理删除（268 行代码 + 271 行测试移除）。`pendingChatMessage` 状态已合入 `BotInstance` 直管。`BotController.setMetaScheduler()` 的 `MetaContext` 参数也已移除。
 
+### ~~P-7: LLM熔断器永久锁死 + 并发安全 + 环境可控性公式 + 激素死结~~ ✅ 已修复 (Week 1)
+
+| 缺陷 | 文件 | 修复内容 |
+|------|------|---------|
+| LLM熔断器永久锁死 | `DeepSeekClient.java` | 指数退避重试(1s/2s/4s...最多5次)，Retry-After头处理，`resetCircuitBreaker()` 手动重置 |
+| `memoryCache` 并发读写 | `MemoryManager.java` | `ArrayList`→`CopyOnWriteArrayList`，所有 stream 加 `Objects::nonNull` |
+| `consecutiveFailures` 全局共享 | `ConditionedReflex.java` | `int`→`AtomicInteger`，`HashMap`→`ConcurrentHashMap`，`HashSet`→`ConcurrentHashMap.newKeySet()` |
+| 环境可控性方差硬编码 | `BayesianModule.java` | 移除 `Math.max(variance, 0.1)` floor，改用 `p*(1-p)` 计算后验方差，VARIANCE_SCALE=0.25 |
+| intimacy 永不衰减 | `HormonalSystem.java` | 每次tick乘0.999，低于0时移除 |
+| curiosity 可被压到0 | `HormonalSystem.java` | 增加 `CURIOSITY_FLOOR=0.1` 下界 |
+| stress>0.6 强制打断任务 | `HormonalSystem.java` | 改为作为候选加入，由玻尔兹曼竞争决定 |
+
 ---
 
 ## 4. 构建
 
 ```bash
 # 环境: JDK 21, Gradle 8+
-cd AIPlayerMod-1.21.1-Fabric
+cd EAgentMod-1.21.1-Fabric
 .\gradlew.bat build
 # 输出: build/libs/e-agent-1.21.1.jar
 ```
@@ -158,15 +192,18 @@ src/main/java/com/izimi/eagent/
 │   ├── MetaState.java                每 tick 可变状态
 │   ├── BrainstemAPI.java             脑干门面
 │   ├── AmygdalaAPI.java              杏仁核门面
-│   └── CortexAPI.java                前额叶门面
+│   ├── CortexAPI.java                前额叶门面
+│   └── CognitiveBrainAPI.java        顶层脑门面
 ├── api/impl/                         实现类
 │   ├── WorldContextImpl.java
-│   └── BotContextImpl.java
+│   ├── BotContextImpl.java
+│   └── CognitiveBrain.java           CognitiveBrainAPI 实现
 ├── bayesian/                         BayesianModule + value objects
 ├── hormonal/                         HormonalSystem (Phase F 移入)
 ├── cortex/                           前额叶
 │   ├── api/                          LLM 接口 + TemplateManager
-│   ├── planner/                      Plan/KnowledgeBase/LocalTaskDecomposer
+│   ├── planner/                      Plan/KnowledgeBase/LocalTaskDecomposer/KnowledgeBase
+│   ├── prefrontal/                   CognitiveControl + ReflexRecipe
 │   ├── chat/                         LocalChatHandler + ChatSessionManager
 │   └── task/                         Task/TaskManager/TaskExecutor
 ├── hippocampus/                      海马体
@@ -182,7 +219,7 @@ src/main/java/com/izimi/eagent/
 │   ├── adapter/                      12 原子动作 (MinecraftActionAdapter)
 │   ├── bot/                          BotManager/BotInstance/BotSpawner/BotController
 │   ├── innate/                       InnateReflexRegistry/9 先天技能 (含 sneak)
-│   ├── scheduler/                    MetaScheduler/MotivationEngine/UrgencyClassifier
+│   ├── scheduler/                    MetaScheduler/MotivationEngine/UrgencyClassifier/InhibitoryControl
 │   ├── skill/                        Skill + SkillManager
 │   ├── navigation/                   GreedyNavigator + NavigationController
 │   └── IdleBrain.java
@@ -238,17 +275,23 @@ minecraft/eagent/
 | `MemoryGraphTest.java` | 38 | 节点/边 CRUD、显著性门控、边推断、图遍历 BFS、因果链、持久化、贝叶斯重排、Hebbian 强化、扩散激活、骨骼导出/导入 |
 | `ChatSessionManagerTest.java` | 7 | 窗口限制/方向回退/null安全/防御拷贝 |
 | `TemplateMatcherTest.java` | 14 | 路由: CLARIFICATION/TASK_PLAN/REFLEX_CREATE/CHAT_RESPONSE/拦截 |
-| **合计 (含新增)** | **273** | **全部通过** |
+| **合计 (含新增)** | **325** | **全部通过** |
 
 **新增测试计划：**
 
 | Phase | 测试文件 | 数量 | 内容 |
 |:-----:|---------|:---:|------|
-| G | `ReflexChainTest.java` | 22 | DAG 构建/遍历/瓶颈检测/共享权重/链约束 |
-| H | `MetaSchedulerPhaseHTest.java` | 13 | 时间片/抢占/死路三条件/麦穗连续置信度 |
-| I | `BayesianModulePhaseITest.java` | 14 | 环境可控性计算/置信度/后验稳定性/BotState |
-| J | `SharedPoolConfigTest.java` + `BayesianModulePhaseJTest.java` | 12+7 | 共享池常量/inferForward/inferBackward/回退阶段 |
-| K | `TaskDAGTest.java` | 16 | LLM JSON 解析/DAG 遍历/瓶颈检测/格式校验 |
+| G | `ReflexChainTest.java` | 17 | DAG 构建/遍历/瓶颈检测/共享权重/链约束 |
+| H | `MetaSchedulerPhaseHTest.java` | 15 | 时间片/抢占/死路三条件/麦穗连续置信度 |
+| I | `BayesianModulePhaseITest.java` | 12 | 环境可控性计算/置信度/后验稳定性/BotState |
+| J | `SharedPoolConfigTest.java` + `BayesianModulePhaseJTest.java` | 7+8 | 共享池常量/inferForward/inferBackward/回退阶段 |
+| K | `TaskDAGTest.java` | 13 | LLM JSON 解析/DAG 遍历/瓶颈检测/格式校验 |
 | L | `ConditionedReflexPhaseLTest.java` | 4 | precondition guard skip/wait/defer |
 | M | `ParameterBinderTest.java` | 12 | bindings 绑定/transform/绑定失败→回退 |
 | | `AlarmGatingTest.java` | 11 | L1/L3 门控 (OneShotAlarmSystem/SocialObserver/HormonalSystem) |
+| 2 | `NeuroStateTest.java` | 11 | 4维向量/余弦距离/数值范围/with*方法 |
+| 2 | `HormonalSystemNeuroTest.java` | 17 | 4维字段/衰减/事件更新/旧别名兼容 |
+| 2 | `NeuroDynamicsTest.java` | 7 | GABA/Glu 推导/抑制兴奋比/NeuroState重载 |
+| 3 | `CognitiveControlTest.java` | 10 | 余弦匹配/候选调制/5-HT情境分支/require合取/阈值参数化 |
+| 3 | `MetaSchedulerCognitiveControlTest.java` | 7 | setCognitiveControl 安全性/checkReflex 全路径 (无配方/通过/否决/余弦过低/精确匹配) |
+| | **合计** | **325** | **全部通过** |

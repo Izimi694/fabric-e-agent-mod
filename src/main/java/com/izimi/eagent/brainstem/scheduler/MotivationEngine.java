@@ -27,23 +27,27 @@ public class MotivationEngine {
     private static final int INHIBITION_WINDOW = 5;
     private static final double EXPLORE_THRESHOLD = 1.0 / Math.E;
 
+    /**
+     * 探索判断: DA > 0.4 (奖赏驱动) 且 NE < 0.5 (低威胁).
+     * 替代旧版 curiosity 单一维度判断.
+     */
     public static boolean shouldExplore(HormonalSystem hormones) {
         if (hormones == null) return false;
-        double maxCuriosity = 0.95;
-        double exploreBias = hormones.getCuriosity() / maxCuriosity;
-        return exploreBias > EXPLORE_THRESHOLD;
+        double da = hormones.getDA();
+        double ne = hormones.getNE();
+        return da > 0.4 && ne < 0.5;
     }
 
     /**
      * 麦穗策略: 基于置信度计算探索剩余窗口.
      * exploreProb = max(0, 0.37 - confidence).
-     * 置信度越高, 探索窗口越短. 由 curiosity 调节阈值.
+     * 探索倾向额外受 DA 驱动.
      */
     public static double wheatEarExplore(double confidence, HormonalSystem hormones) {
         double base = Math.max(0, (1.0 / Math.E) - confidence);
         if (hormones != null) {
-            double curiosityMod = hormones.getCuriosity() * 0.3;
-            base = Math.max(0, base + curiosityMod);
+            double daMod = hormones.getDA() * 0.3;
+            base = Math.max(0, base + daMod);
         }
         return Math.min(1.0, base);
     }
@@ -118,12 +122,12 @@ public class MotivationEngine {
         if (bot != null) {
             double healthRatio = 1.0 - (bot.getHealth() / bot.getMaxHealth());
             drive += W_SURVIVAL * healthRatio;
-            if (h.getStress() > 0.3) drive += W_STRESS * h.getStress();
+            if (h.getNE() > 0.3) drive += W_STRESS * h.getNE();
             if (ctx.alarmSystem() != null && ctx.alarmSystem().hasThreatMatchNearby(bot)) drive += W_FEAR;
             InnateReflexRegistry innate = world.brainstem().innateReflexes();
             if (innate != null && innate.highest(bot, 0) != null) drive += 0.4;
         }
-        if (h.getStress() > 0.7) drive += 0.3;
+        if (h.getNE() > 0.7) drive += 0.3;
         return Math.min(1.0, drive);
     }
 
@@ -161,12 +165,16 @@ public class MotivationEngine {
     }
 
     private double computeCuriosityDrive(BotContext ctx, HormonalSystem h) {
-        double curiosity = h.getCuriosity();
-        double threshold = h.getCuriosityThreshold(ctx.botParams().getBeta(), h.getStress());
-        if (curiosity > threshold) {
-            return Math.min(1.0, curiosity);
-        }
-        return curiosity * 0.3;
+        double da = h.getDA();
+        double ne = h.getNE();
+        double ser = h.getSerotonin();
+        double ach = h.getACh();
+
+        double exploreScore = da * 0.4 + (1.0 - ach) * 0.3 + (1.0 - ser) * 0.3;
+        double threshold = 0.5;
+        if (ne > 0.5) exploreScore *= 0.5;
+
+        return Math.min(1.0, exploreScore);
     }
 
     private double computeCautiousDrive(BotContext ctx, HormonalSystem h, BotParams params) {
@@ -177,7 +185,7 @@ public class MotivationEngine {
             int fails = conditioned.getConsecutiveFailures();
             if (fails >= 2) drive += W_RECENT_FAIL * Math.min(1.0, fails * 0.2);
         }
-        drive += W_STRESS_CAUTIOUS * h.getStress();
+        drive += W_STRESS_CAUTIOUS * h.getNE();
         return Math.min(1.0, drive);
     }
 }

@@ -1,0 +1,37 @@
+[
+  {
+    "reflexId": "attack_zombie",
+    "targetVector": { "ne": 0.7, "da": 0.6, "serotonin": 0.2, "ach": 0.8 },
+    "require": { "da": { "min": 0.4 }, "serotonin": { "max": 0.3 } },
+    "safetyDistance": 3,
+    "neModulation": 1.5
+  },
+  {
+    "reflexId": "attack_skeleton",
+    "targetVector": { "ne": 0.6, "da": 0.5, "serotonin": 0.25, "ach": 0.75 },
+    "require": { "da": { "min": 0.35 }, "serotonin": { "max": 0.35 } },
+    "safetyDistance": 4,
+    "neModulation": 1.5
+  },
+  {
+    "reflexId": "flee_danger",
+    "targetVector": { "ne": 0.8, "da": 0.2, "serotonin": 0.7, "ach": 0.2 },
+    "require": {},
+    "safetyDistance": 2,
+    "neModulation": 1.0
+  },
+  {
+    "reflexId": "explore_cave",
+    "targetVector": { "ne": 0.2, "da": 0.7, "serotonin": 0.7, "ach": 0.2 },
+    "require": {},
+    "safetyDistance": 1,
+    "neModulation": 0.5
+  },
+  {
+    "reflexId": "mine_ore",
+    "targetVector": { "ne": 0.2, "da": 0.3, "serotonin": 0.5, "ach": 0.8 },
+    "require": { "ach": { "min": 0.3 } },
+    "safetyDistance": 1,
+    "neModulation": 0.5
+  }
+]

@@ -43,6 +43,23 @@ public class MemoryEdge {
         this.lastReinforcedAt = timestamp;
     }
 
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (!(o instanceof MemoryEdge that)) return false;
+        return fromId.equals(that.fromId) && toId.equals(that.toId) && type == that.type;
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(fromId, toId, type);
+    }
+
+    @Override
+    public String toString() {
+        return "MemoryEdge{" + fromId + "->" + toId + ":" + type + "(" + weight + ")}";
+    }
+
     public enum RelationType {
         CAUSAL,
         TEMPORAL,

@@ -351,10 +351,10 @@ Fiddler / Charles / Wireshark 过滤 deepseek.com API 调用
 
 ### 7.5 recentLLMFailure 永久锁
 
-- [ ] API 调用失败 → `recentLLMFailure=true`, bot 不再调 LLM
-- [ ] 此后任何指令 → bot 不响应
-- [ ] 重启服务端 → `recentLLMFailure` 重置 → bot 恢复正常
-- [ ] ❌ `recentLLMFailure` 永不自动重置，无 retry 逻辑
+- [x] API 调用失败 → `recentLLMFailure=true`, bot 不再调 LLM
+- [x] 此后任何指令 → bot 不响应
+- [x] 重启服务端 → `recentLLMFailure` 重置 → bot 恢复正常
+- [x] ✅ `recentLLMFailure` 已修复：指数退避重试(1s/2s/4s...最多5次)，`Retry-After` 头处理，手动 `/ai reset circuitbreaker` 重置命令
 
 ### 7.6 LLM 输出异常
 
@@ -394,9 +394,12 @@ Fiddler / Charles / Wireshark 过滤 deepseek.com API 调用
 
 ---
 
-## 9. 前额叶否决
+## 9. 前额叶抑制控制 (InhibitoryControl + CognitiveControl)
 
-### 9.1 Veto Safety
+当前实现：四门决策流水线（Phase 3 已完成）。
+- 硬门 (InhibitoryControl, 二进制) → 候选生成 → 连续调制 (CognitiveControl, 余弦匹配) → 玻尔兹曼精筛
+
+### 9.1 Veto Safety (Hard Gate — 第一道门)
 
 - [ ] 无敌对生物时 → flee 被 veto ("附近无敌对生物")
 - [ ] 敌对太远 (>10 blocks) → veto
@@ -409,6 +412,25 @@ Fiddler / Charles / Wireshark 过滤 deepseek.com API 调用
 - [ ] jump 高度 > 5 格（坠落伤害）→ veto
 - [ ] attack 目标是村民 → veto
 - [ ] attack 目标是僵尸 → 通过
+
+### 9.3 阈值参数化 (Phase 3, 已完成)
+
+- [ ] `SAFETY_DISTANCE_THRESHOLD` 从 CognitiveControl 接收调制
+- [ ] NE↑ 时坠落阈值 ↑（更保守，不向下突破）
+- [ ] `effectiveThreshold = baseThreshold + |modulation|`
+- [ ] 调制不影响硬安全（村民攻击始终 veto）
+
+### 9.4 CognitiveControl 连续调制 (Phase 3, 已完成)
+
+- [ ] 4 维向量 {ne, da, serotonin, ach} 余弦匹配反射配方
+- [ ] ATTACK vs EXPLORE 余弦 < 0.65（4 维可区分）
+- [ ] NE 高、ACh 高时 → ATTACK 候选权重↑
+- [ ] 5-HT 高、DA 低时 → EXPLORE 候选权重↓
+- [ ] 5-HT 情境分支：NE < 0.5 → 全局抑制；NE ≥ 0.5 → flee 促进 + attack 抑制
+- [ ] GABA 控制 attack 刹车（5-HT×0.5 + failures×0.05 + (1-confidence)×0.2），Glu 控制 flee 油门（DA×0.3 + NE×0.5 + novelty×0.2），两值独立输出
+- [ ] require 合取条件：attack 候选需 DA≥0.4 且 5-HT≤0.3，不满足时否决
+- [ ] (DA=0.8, 5-HT=0.8) 被 serotonin.max=0.3 排除 → 不激活攻击
+- [ ] GABA/Glu 分别注入候选调制，不合并为单比值
 
 ---
 
@@ -424,9 +446,9 @@ Fiddler / Charles / Wireshark 过滤 deepseek.com API 调用
 
 ### 10.2 边界
 
-- [ ] ⚠️ 高压力 (stress > 0.5) → curiosity threshold × 1.5 → max curiosity(0.95) 可能被 clamp 到 1.0 而永远无法超过
-- [ ] ⚠️ stress 持续 > 0.6 → candidate 中加入 "flee"，可能打断正常任务
-- [ ] ⚠️ intimacy 不衰减 → 长时间后永久化
+- [x] ✅ 高压力 (stress > 0.5) → curiosity threshold × 1.5 → max curiosity(0.95) 可能被 clamp 到 1.0 而永远无法超过（已修复：curiosity 增加下界 0.1）
+- [x] ✅ stress 持续 > 0.6 → candidate 中加入 "flee"，可能打断正常任务（已改为作为候选加入，由玻尔兹曼竞争决定，非强制）
+- [x] ✅ intimacy 不衰减 → 长时间后永久化（已修复：每次 tick 乘以 0.999，低于 0 时移除）
 - [ ] stress < 0.3 + aggression < 0.4 → "routine" 模式
 
 ---
@@ -441,7 +463,7 @@ Fiddler / Charles / Wireshark 过滤 deepseek.com API 调用
 
 ### 11.2 可控性
 
-- [ ] variance floor 0.1 → controllability 永远 ≤ 0.5 ❌
+- [x] ✅ variance floor 0.1 已移除 → 改用 `confidence * (1 - confidence)` 计算后验方差
 - [ ] `environment_change=true` → controllability / 2
 - [ ] 非收敛反射 → controllability = 0.5（中性）
 
@@ -518,9 +540,9 @@ Fiddler / Charles / Wireshark 过滤 deepseek.com API 调用
 
 ### 14.4 内存安全
 
-- [ ] ❌ `memoryCache` 无锁 → 多线程 iterate+add 可能 CME
-- [ ] ❌ `ConditionedReflex.consecutiveFailures` 全局共享 → reflex A 的失败影响 reflex B
-- [ ] ❌ 空 `MemoryEntry` 数组元素→下游 `.timestamp` 时 NPE
+- [x] ✅ `memoryCache` 无锁 → 已改为 `CopyOnWriteArrayList`，所有 stream 操作已加 `Objects::nonNull` 过滤
+- [x] ✅ `ConditionedReflex.consecutiveFailures` 全局共享 → 已改为 `AtomicInteger`，`prevPointers`/`nextPointers` 使用 `ConcurrentHashMap`
+- [x] ✅ 空 `MemoryEntry` 数组元素→下游 `.timestamp` 时 NPE → 所有 stream 操作已过滤 null
 
 ---
 
@@ -528,8 +550,8 @@ Fiddler / Charles / Wireshark 过滤 deepseek.com API 调用
 
 ### 15.1 LLM 并发
 
-- [ ] 快速连续 @两个不同 bot → 可能穿透 2s rate limit（竞态）
-- [ ] ❌ 同时发 3+ 条 → Thread.sleep 竞态，多线程同时发送
+- [x] ✅ 快速连续 @两个不同 bot → 可能穿透 2s rate limit（竞态）已修复：加入 ConcurrentHashMap, AtomicInteger
+- [x] ✅ 同时发 3+ 条 → Thread.sleep 竞态，多线程同时发送（已修复：ScheduledExecutorService + 指数退避重试）
 - [ ] LLM 调用中服务器关闭 → 优雅处理
 
 ### 15.2 聊天窗口
@@ -583,7 +605,7 @@ Fiddler / Charles / Wireshark 过滤 deepseek.com API 调用
 | 6. 反射包操作 | 7 | | | |
 | 7. LLM 调用链 | 14 | | | |
 | 8. 安全系统 | 9 | | | |
-| 9. 前额叶否决 | 7 | | | |
+| 9. 前额叶抑制控制 | 11 | | | |
 | 10. 激素系统 | 8 | | | |
 | 11. 贝叶斯 | 8 | | | |
 | 12. 记忆系统 | 9 | | | |

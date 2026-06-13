@@ -1,9 +1,9 @@
-package com.izimi.eagent.cortex.inhibitor;
+package com.izimi.eagent.brainstem.scheduler;
 
 import com.izimi.eagent.amygdala.character.BehaviorStats;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import com.izimi.eagent.brainstem.innate.InnateReflex;
+import com.izimi.eagent.cortex.prefrontal.CognitiveControl;
+import com.izimi.eagent.hormonal.NeuroState;
 import net.minecraft.block.Blocks;
 import net.minecraft.entity.EntityType;
 import net.minecraft.entity.LivingEntity;
@@ -13,6 +13,8 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.Set;
 
@@ -20,16 +22,31 @@ public class InhibitoryControl {
 
     private static final Logger LOGGER = LoggerFactory.getLogger("e-agent");
 
-    private static final int SAFETY_DISTANCE_THRESHOLD = 10;
+    private static final int BASE_SAFETY_DISTANCE = 10;
     private static final float HEALTH_SAFE_THRESHOLD = 15.0f;
-    private static final int FALL_DANGER_HEIGHT = 5;
+    private static final int BASE_FALL_DANGER_HEIGHT = 5;
 
     private static final Set<EntityType<?>> WEAK_HOSTILES = Set.of(
             EntityType.ZOMBIE, EntityType.SKELETON, EntityType.SPIDER
     );
 
+    private CognitiveControl cognitiveControl;
     private int vetoSafetyCount;
     private int vetoImitationCount;
+
+    public void setCognitiveControl(CognitiveControl cognitiveControl) {
+        this.cognitiveControl = cognitiveControl;
+    }
+
+    private int getEffectiveFallHeight(NeuroState state) {
+        if (cognitiveControl == null || state == null) return BASE_FALL_DANGER_HEIGHT;
+        return (int) Math.ceil(cognitiveControl.getEffectiveThreshold(BASE_FALL_DANGER_HEIGHT, "fall_height", state));
+    }
+
+    private int getEffectiveSafetyDistance(NeuroState state) {
+        if (cognitiveControl == null || state == null) return BASE_SAFETY_DISTANCE;
+        return (int) Math.ceil(cognitiveControl.getEffectiveThreshold(BASE_SAFETY_DISTANCE, "lava_distance", state));
+    }
 
     public boolean shouldVetoSafety(InnateReflex reflex, ServerPlayerEntity bot,
                                     MinecraftServer server, BehaviorStats stats) {
@@ -45,7 +62,8 @@ public class InhibitoryControl {
         }
 
         double distance = bot.squaredDistanceTo(nearest);
-        if (distance > SAFETY_DISTANCE_THRESHOLD * SAFETY_DISTANCE_THRESHOLD) {
+        int effectiveDist = BASE_SAFETY_DISTANCE;
+        if (distance > effectiveDist * effectiveDist) {
             logVeto("安全反射-flee", "敌对生物距离过远: " + String.format("%.1f", Math.sqrt(distance)));
             vetoSafetyCount++;
             return true;
@@ -81,8 +99,9 @@ public class InhibitoryControl {
     private boolean vetoMoveToImitation(ServerPlayerEntity bot) {
         World world = bot.getServerWorld();
         BlockPos pos = bot.getBlockPos();
-        for (int dx = -1; dx <= 1; dx++) {
-            for (int dz = -1; dz <= 1; dz++) {
+        int effectiveLavaDist = 1;
+        for (int dx = -effectiveLavaDist; dx <= effectiveLavaDist; dx++) {
+            for (int dz = -effectiveLavaDist; dz <= effectiveLavaDist; dz++) {
                 if (world.getBlockState(pos.add(dx, 0, dz)).isOf(Blocks.LAVA)) {
                     logVeto("模仿-moveTo", "目标位置附近有岩浆");
                     vetoImitationCount++;
@@ -96,10 +115,11 @@ public class InhibitoryControl {
     private boolean vetoJumpImitation(ServerPlayerEntity bot) {
         BlockPos below = bot.getBlockPos().down();
         World world = bot.getServerWorld();
-        for (int dy = 1; dy <= FALL_DANGER_HEIGHT; dy++) {
+        int dangerHeight = BASE_FALL_DANGER_HEIGHT;
+        for (int dy = 1; dy <= dangerHeight; dy++) {
             if (!world.getBlockState(below.down(dy)).isAir()) continue;
             if (world.getBlockState(below.down(dy + 1)).isAir()) continue;
-            logVeto("模仿-jump", "潜在坠落高度 > " + FALL_DANGER_HEIGHT);
+            logVeto("模仿-jump", "潜在坠落高度 > " + dangerHeight);
             vetoImitationCount++;
             return true;
         }
