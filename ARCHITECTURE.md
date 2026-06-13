@@ -1,6 +1,6 @@
-# CognitiveBrain — 架构详细说明
+# E-Agent — 架构详细说明
 
-> 本文件是 CognitiveBrain 技术架构的完整参考。设计原理见 [AGENTS.md](./AGENTS.md)，当前状态见 [DEVELOPMENT.md](./DEVELOPMENT.md)，理论背景见 [THEORY.md](./THEORY.md)。
+> 本文件是 E-Agent 技术架构的完整参考。设计原理见 [AGENTS.md](./AGENTS.md)，当前状态见 [DEVELOPMENT.md](./DEVELOPMENT.md)，理论背景见 [THEORY.md](./THEORY.md)。
 
 ---
 

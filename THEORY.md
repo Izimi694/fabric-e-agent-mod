@@ -1,4 +1,4 @@
-# CognitiveBrain — 理论背景与从零推导
+# E-Agent — 理论背景与从零推导
 
 ---
 

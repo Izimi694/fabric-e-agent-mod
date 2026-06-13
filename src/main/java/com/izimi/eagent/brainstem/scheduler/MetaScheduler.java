@@ -353,6 +353,8 @@ public class MetaScheduler {
     private boolean execute(DispatchReflex.DispatchAction action, BotContext botCtx, WorldContext worldCtx, ServerPlayerEntity bot, MetaState state, MinecraftServer server) {
         if (bot == null) return false;
 
+        LOGGER.debug("[MetaScheduler] Dispatch: {} ({})", action.layer(), action.reason());
+
         switch (action.layer()) {
             case "INSTINCT" -> {
                 return executeInstinctLayer(botCtx, worldCtx, bot);
@@ -385,6 +387,7 @@ public class MetaScheduler {
                         null, worldCtx.behaviorStats())) {
                     LOGGER.debug("[MetaScheduler] P0.5 veto safety: {}", safety.id());
                 } else {
+                    LOGGER.debug("[MetaScheduler] L0 reflex: {} critical={}", safety.id(), safety.critical());
                     dispatchReflexAction(bot, safety, worldCtx);
                     if (safety.critical()) return true;
                 }

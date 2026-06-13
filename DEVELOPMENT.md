@@ -1,4 +1,4 @@
-# CognitiveBrain — 开发 & 状态
+# E-Agent — 开发 & 状态
 
 > 本文件记录当前实施状态、路线图、已知问题。架构说明见 [ARCHITECTURE.md](./ARCHITECTURE.md)，设计原理见 [AGENTS.md](./AGENTS.md)。
 
