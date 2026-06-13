@@ -1,7 +1,8 @@
 package com.izimi.eagent.amygdala;
 
-import com.izimi.eagent.EAgent;
 import com.izimi.eagent.bayesian.BayesianModule;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import com.izimi.eagent.util.FileUtil;
 import com.izimi.eagent.util.JsonUtil;
 import net.minecraft.entity.LivingEntity;
@@ -13,6 +14,8 @@ import java.nio.file.Path;
 import java.util.*;
 
 public class OneShotAlarmSystem {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger("e-agent");
 
     private static final double CONTROLLABILITY_GATE = 0.3;
 
@@ -48,7 +51,7 @@ public class OneShotAlarmSystem {
                 DEFAULT_CONFIDENCE, true, source, System.currentTimeMillis(), 0, 0L);
         alarms.add(entry);
         save();
-        EAgent.LOGGER.info("[Alarm] 已标记: {} -> {} ({})", alarmId, type, action);
+        LOGGER.info("[Alarm] 已标记: {} -> {} ({})", alarmId, type, action);
     }
 
     public AlarmEntry matchNearest(ServerPlayerEntity bot) {
@@ -98,7 +101,7 @@ public class OneShotAlarmSystem {
         try {
             JsonUtil.writeToFileSafeAtomic(getPath(), alarms);
         } catch (Exception e) {
-            EAgent.LOGGER.debug("[Alarm] save skipped: {}", e.getMessage());
+            LOGGER.debug("[Alarm] save skipped: {}", e.getMessage());
         }
     }
 
@@ -116,7 +119,7 @@ public class OneShotAlarmSystem {
                 }
             }
         } catch (Exception e) {
-            EAgent.LOGGER.debug("[Alarm] load skipped: {}", e.getMessage());
+            LOGGER.debug("[Alarm] load skipped: {}", e.getMessage());
         }
     }
 

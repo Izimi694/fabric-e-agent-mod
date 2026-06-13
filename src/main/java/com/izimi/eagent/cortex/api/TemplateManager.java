@@ -10,9 +10,12 @@ import java.util.function.Consumer;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonSyntaxException;
-import com.izimi.eagent.EAgent;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class TemplateManager {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger("e-agent");
 
     public enum TemplateType {
         // 用户交互模板
@@ -69,7 +72,7 @@ public class TemplateManager {
                 }
                 return result;
             } catch (JsonSyntaxException | NullPointerException e) {
-                EAgent.LOGGER.warn("[TemplateManager] 填空解析失败: {} - {}", type, e.getMessage());
+                LOGGER.warn("[TemplateManager] 填空解析失败: {} - {}", type, e.getMessage());
                 return null;
             }
         });

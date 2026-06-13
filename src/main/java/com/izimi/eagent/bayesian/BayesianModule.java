@@ -11,6 +11,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
+import com.izimi.eagent.hippocampus.MemoryEntry;
 import com.izimi.eagent.util.FileUtil;
 import com.izimi.eagent.util.JsonUtil;
 import com.izimi.eagent.util.api.FileSystem;
@@ -228,6 +229,17 @@ public class BayesianModule {
         }
 
         return Math.max(0, Math.min(1, lexicalScore * 0.7 + bayesianBonus * 0.3));
+    }
+
+    // ── Public API: Memory-to-memory relevance (for MemoryGraph similarity) ──
+
+    public double predictRelevance(MemoryEntry a, MemoryEntry b) {
+        if (a == null || b == null) return 0.0;
+        String query = a.summary;
+        if (a.keyLearnings != null && !a.keyLearnings.isEmpty()) {
+            query = (query != null ? query + " " : "") + String.join(" ", a.keyLearnings);
+        }
+        return predictRelevance(query, b.summary);
     }
 
     // ── Public API: Anchoring ──

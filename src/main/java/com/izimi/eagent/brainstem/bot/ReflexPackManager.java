@@ -1,7 +1,8 @@
 package com.izimi.eagent.brainstem.bot;
 
-import com.izimi.eagent.EAgent;
 import com.izimi.eagent.bayesian.BayesianModule;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import com.izimi.eagent.util.FileUtil;
 import com.izimi.eagent.util.JsonUtil;
 
@@ -13,6 +14,8 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 public class ReflexPackManager {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger("e-agent");
 
     private static final int PACK_VERSION = 1;
 
@@ -29,7 +32,7 @@ public class ReflexPackManager {
         Path conditionedDir = FileUtil.getBotConditionedDir(botId);
 
         if (!Files.exists(conditionedDir)) {
-            EAgent.LOGGER.warn("[ReflexPack] 没有反射可以导出: bot={}", botId);
+            LOGGER.warn("[ReflexPack] 没有反射可以导出: bot={}", botId);
             return false;
         }
 
@@ -38,11 +41,11 @@ public class ReflexPackManager {
             JsonUtil.writeToFileSafeAtomic(packFile, pack);
             Object refs = pack.get("reflexes");
             int count = refs instanceof Map ? ((Map<?, ?>) refs).size() : 0;
-            EAgent.LOGGER.info("[ReflexPack] 导出成功: {} ({} 反射, includePrior={})",
+            LOGGER.info("[ReflexPack] 导出成功: {} ({} 反射, includePrior={})",
                     packName, count, includePrior);
             return true;
         } catch (IOException e) {
-            EAgent.LOGGER.error("[ReflexPack] 导出失败: {}", e.getMessage());
+            LOGGER.error("[ReflexPack] 导出失败: {}", e.getMessage());
             return false;
         }
     }
@@ -89,13 +92,13 @@ public class ReflexPackManager {
 
         Map<String, Object> pack = JsonUtil.readMapFromFileSafe(packFile);
         if (pack == null) {
-            EAgent.LOGGER.warn("[ReflexPack] 包不存在: {}", packName);
+            LOGGER.warn("[ReflexPack] 包不存在: {}", packName);
             return false;
         }
 
         Map<String, Object> incomingReflexes = (Map<String, Object>) pack.get("reflexes");
         if (incomingReflexes == null || incomingReflexes.isEmpty()) {
-            EAgent.LOGGER.warn("[ReflexPack] 包内没有反射: {}", packName);
+            LOGGER.warn("[ReflexPack] 包内没有反射: {}", packName);
             return false;
         }
 
@@ -137,11 +140,11 @@ public class ReflexPackManager {
                 }
             }
 
-            EAgent.LOGGER.info("[ReflexPack] 导入完成: {} ({} 个, 跳过 {} 个, reset={})",
+            LOGGER.info("[ReflexPack] 导入完成: {} ({} 个, 跳过 {} 个, reset={})",
                     packName, imported, skipped, reset);
             return true;
         } catch (IOException e) {
-            EAgent.LOGGER.error("[ReflexPack] 导入失败: {}", e.getMessage());
+            LOGGER.error("[ReflexPack] 导入失败: {}", e.getMessage());
             return false;
         }
     }
@@ -179,7 +182,7 @@ public class ReflexPackManager {
         if (!Files.exists(packFile)) return false;
         boolean deleted = FileUtil.deleteIfExists(packFile);
         if (deleted) {
-            EAgent.LOGGER.info("[ReflexPack] 删除成功: {}", packName);
+            LOGGER.info("[ReflexPack] 删除成功: {}", packName);
         }
         return deleted;
     }

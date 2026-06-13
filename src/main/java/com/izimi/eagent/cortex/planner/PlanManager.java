@@ -1,7 +1,8 @@
 package com.izimi.eagent.cortex.planner;
 
-import com.izimi.eagent.EAgent;
 import com.izimi.eagent.api.WorldContext;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import com.izimi.eagent.brainstem.bot.BotInstance;
 import com.izimi.eagent.cortex.api.AITaskPlanner;
 import com.izimi.eagent.cortex.task.Task;
@@ -13,6 +14,8 @@ import java.util.Map;
 import java.util.UUID;
 
 public class PlanManager {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger("e-agent");
 
     private Plan activePlan;
     private final AITaskPlanner aiTaskPlanner;
@@ -53,7 +56,7 @@ public class PlanManager {
 
         saveActivePlan();
 
-        EAgent.LOGGER.info("[PlanManager] 本地计划创建: {} → {}×{}", goal, count, action);
+        LOGGER.info("[PlanManager] 本地计划创建: {} → {}×{}", goal, count, action);
 
         if (aiTaskPlanner != null) {
             tryEnrichFromAPI(taskId, goal);
@@ -65,7 +68,7 @@ public class PlanManager {
     private void tryEnrichFromAPI(String taskId, String goal) {
         var aiClient = worldContext != null ? worldContext.cortex().aiClient() : null;
         if (aiClient == null || !aiClient.isConfigured()) {
-            EAgent.LOGGER.info("[PlanManager] API不可用，使用本地计划");
+            LOGGER.info("[PlanManager] API不可用，使用本地计划");
             return;
         }
 
@@ -81,7 +84,7 @@ public class PlanManager {
 
         aiTaskPlanner.planTask(goal, state, null, mems, null);
 
-        EAgent.LOGGER.info("[PlanManager] 已请求API计划富化: {}", goal);
+        LOGGER.info("[PlanManager] 已请求API计划富化: {}", goal);
     }
 
     public void integrateAIResult(Task enrichedTask) {
@@ -98,7 +101,7 @@ public class PlanManager {
                 activePlan.subSteps.add(step);
             }
             activePlan.source = "api";
-            EAgent.LOGGER.info("[PlanManager] API计划已集成: {} → {}子步骤",
+            LOGGER.info("[PlanManager] API计划已集成: {} → {}子步骤",
                     activePlan.goal, activePlan.subSteps.size());
         }
 
@@ -127,7 +130,7 @@ public class PlanManager {
         if (activePlan != null) {
             activePlan.status = "completed";
             saveActivePlan();
-            EAgent.LOGGER.info("[PlanManager] 计划完成: {}", activePlan.goal);
+            LOGGER.info("[PlanManager] 计划完成: {}", activePlan.goal);
         }
         activePlan = null;
         deleteActivePlan();
@@ -141,7 +144,7 @@ public class PlanManager {
             Path backup = getActivePlanPath().resolveSibling("last_plan_" + activePlan.taskId + ".json");
             saveTo(backup);
 
-            EAgent.LOGGER.info("[PlanManager] 计划取消: {}", activePlan.goal);
+            LOGGER.info("[PlanManager] 计划取消: {}", activePlan.goal);
         }
         activePlan = null;
         deleteActivePlan();

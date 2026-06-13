@@ -1,7 +1,8 @@
 package com.izimi.eagent.cortex.api;
 
-import com.izimi.eagent.EAgent;
 import com.izimi.eagent.hippocampus.MemoryEntry;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import com.izimi.eagent.state.PlayerState;
 import com.izimi.eagent.cortex.task.Task;
 
@@ -10,6 +11,8 @@ import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
 public class AIMemoryGenerator {
+    private static final Logger LOGGER = LoggerFactory.getLogger("e-agent");
+
     private final AIClient aiClient;
 
     public AIMemoryGenerator(AIClient aiClient) {
@@ -38,7 +41,7 @@ public class AIMemoryGenerator {
 
             return generateFallbackMemory(completedTask, state);
         } catch (Exception e) {
-            EAgent.LOGGER.error("[AIMemoryGenerator] AI记忆生成失败，使用回退: {}", e.getMessage());
+            LOGGER.error("[AIMemoryGenerator] AI记忆生成失败，使用回退: {}", e.getMessage());
             return generateFallbackMemory(completedTask, state);
         }
     }

@@ -1,7 +1,8 @@
 package com.izimi.eagent.amygdala.character;
 
-import com.izimi.eagent.EAgent;
 import com.izimi.eagent.amygdala.ConditionedReflex;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import com.izimi.eagent.cortex.api.AIClient;
 import com.izimi.eagent.cortex.api.AIMessage;
 
@@ -10,6 +11,8 @@ import java.util.List;
 import java.util.regex.Pattern;
 
 public class EvaluationCycle {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger("e-agent");
 
     private static final Pattern EVAL_PATTERN = Pattern.compile(
             "(?:你[很太真假好笨]|你真|你有点|你是个|你是)[^，。！？\n]{1,15}"
@@ -89,11 +92,11 @@ public class EvaluationCycle {
                         }
                     }
                 } catch (Exception e) {
-                    EAgent.LOGGER.warn("[EvaluationCycle] JSON解析失败: {}", e.getMessage());
+                    LOGGER.warn("[EvaluationCycle] JSON解析失败: {}", e.getMessage());
                 }
             });
         } catch (Exception e) {
-            EAgent.LOGGER.warn("[EvaluationCycle] 批量强化失败: {}", e.getMessage());
+            LOGGER.warn("[EvaluationCycle] 批量强化失败: {}", e.getMessage());
         }
     }
 

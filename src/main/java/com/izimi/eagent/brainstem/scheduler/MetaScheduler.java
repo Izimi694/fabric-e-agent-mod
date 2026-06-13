@@ -1,8 +1,9 @@
 package com.izimi.eagent.brainstem.scheduler;
 
 import com.google.gson.JsonObject;
-import com.izimi.eagent.EAgent;
 import com.izimi.eagent.api.BotContext;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import com.izimi.eagent.api.MetaState;
 import com.izimi.eagent.api.WorldContext;
 import com.izimi.eagent.amygdala.DispatchReflex;
@@ -29,6 +30,8 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
 public class MetaScheduler {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger("e-agent");
 
     private static final int LLM_COOLDOWN_TICKS = 400;
     private static final int TIME_ESCALATION_TICKS = 200;
@@ -191,7 +194,7 @@ public class MetaScheduler {
         }
 
         if (isLLMAction(action) && !shouldInvokeLLM(worldCtx, state, label, flow)) {
-            EAgent.LOGGER.debug("[MetaScheduler] LLM gate denied: {} {}, falling back to HABIT", label, flow);
+            LOGGER.debug("[MetaScheduler] LLM gate denied: {} {}, falling back to HABIT", label, flow);
             action = new DispatchReflex.DispatchAction("HABIT", "llm_gate");
         }
 
@@ -234,14 +237,14 @@ public class MetaScheduler {
             if (bayesian != null) {
                 double posterior = bayesian.predictSuccess(candidateReflex, conditioned.extractContextFeatures(bot));
                 if (posterior < 0.05) {
-                    EAgent.LOGGER.debug("[MetaScheduler] Loop: 贝叶斯预判提前返回 {} (posterior={})", candidateReflex, posterior);
+                    LOGGER.debug("[MetaScheduler] Loop: 贝叶斯预判提前返回 {} (posterior={})", candidateReflex, posterior);
                     break;
                 }
             }
 
             var precond = conditioned.checkPreconditions(candidateReflex, bot, botCtx.hormonalSystem());
             if (!precond.passed()) {
-                EAgent.LOGGER.debug("[MetaScheduler] Loop: 前置条件不通过 {} → {}", candidateReflex, precond.reason());
+                LOGGER.debug("[MetaScheduler] Loop: 前置条件不通过 {} → {}", candidateReflex, precond.reason());
                 break;
             }
 
@@ -255,9 +258,9 @@ public class MetaScheduler {
             // 死路检测
             DeadEndResult deadEnd = isDeadEnd(botCtx, worldCtx, bot, candidateReflex);
             if (deadEnd.isDeadEnd()) {
-                EAgent.LOGGER.warn("[MetaScheduler] Loop: 死路检测触发 {} → {}, 回退中...", candidateReflex, deadEnd.reason());
+                LOGGER.warn("[MetaScheduler] Loop: 死路检测触发 {} → {}, 回退中...", candidateReflex, deadEnd.reason());
                 RollbackStage rb = rollback(botCtx, worldCtx, bot, candidateReflex, 0, 0);
-                EAgent.LOGGER.info("[MetaScheduler] Loop: 回退阶段 {} → {}", rb.stage(), rb.action());
+                LOGGER.info("[MetaScheduler] Loop: 回退阶段 {} → {}", rb.stage(), rb.action());
                 if (rb.stage() >= 5) {
                     // LLM 兜底
                     executeCortexLLM(botCtx, worldCtx, state, bot);
@@ -269,7 +272,7 @@ public class MetaScheduler {
             double confidence = conditioned.getConfidence(candidateReflex);
             double exploreProb = MotivationEngine.wheatEarExplore(confidence, botCtx.hormonalSystem());
             if (exploreProb <= 0.01 && reflectionLoopCount > 1) {
-                EAgent.LOGGER.debug("[MetaScheduler] Loop: 麦穗探索窗口耗尽 (conf={}), 停止探索", confidence);
+                LOGGER.debug("[MetaScheduler] Loop: 麦穗探索窗口耗尽 (conf={}), 停止探索", confidence);
                 break;
             }
 
@@ -341,7 +344,7 @@ public class MetaScheduler {
             if (safety != null) {
                 if (inhibitor != null && inhibitor.shouldVetoSafety(safety, bot,
                         null, worldCtx.behaviorStats())) {
-                    EAgent.LOGGER.debug("[MetaScheduler] P0.5 veto safety: {}", safety.id());
+                    LOGGER.debug("[MetaScheduler] P0.5 veto safety: {}", safety.id());
                 } else {
                     dispatchReflexAction(bot, safety, worldCtx);
                     if (safety.critical()) return true;
@@ -352,7 +355,7 @@ public class MetaScheduler {
         if (alarms != null) {
             var threat = alarms.matchNearest(bot);
             if (threat != null && threat.type() == OneShotAlarmSystem.AlarmType.THREAT) {
-                EAgent.LOGGER.debug("[MetaScheduler] Level2 threat: {}", threat.alarmId());
+                LOGGER.debug("[MetaScheduler] Level2 threat: {}", threat.alarmId());
                 dispatchReflexAction(bot,
                         new InnateReflex("alarm_" + threat.alarmId(), 0, false,
                                 List.of(), new com.izimi.eagent.brainstem.innate.ReflexAction(threat.action(),
@@ -420,7 +423,7 @@ public class MetaScheduler {
                     var plan = planManager.getActivePlan();
                     if (plan != null && !plan.subSteps.isEmpty()) {
                         botCtx.taskManager().createTaskFromPlan(msg, plan);
-                        EAgent.LOGGER.info("[MetaScheduler] CortexLocal 从Plan创建任务: {} → {}步",
+                        LOGGER.info("[MetaScheduler] CortexLocal 从Plan创建任务: {} → {}步",
                                 msg, plan.subSteps.size());
                         return true;
                     }
@@ -436,7 +439,7 @@ public class MetaScheduler {
             String response = chatHandler.getResponse(msg, botCtx.hormonalSystem(), playerId);
             if (response != null) {
                 bot.sendMessage(Text.literal("§b[E-Agent] §f" + response));
-                EAgent.LOGGER.info("[MetaScheduler] CortexLocal 本地聊天: \"{}\" → \"{}\"",
+                LOGGER.info("[MetaScheduler] CortexLocal 本地聊天: \"{}\" → \"{}\"",
                         msg, response);
                 return true;
             }
@@ -457,7 +460,7 @@ public class MetaScheduler {
         TemplateManager.TemplateType templateType = templateMatcher.match(msg, botCtx, worldCtx);
         if (templateType == null) {
             // 已由 LocalChatHandler 或反射处理 — 返回成功
-            EAgent.LOGGER.debug("[MetaScheduler] 本地处理: {}", msg);
+            LOGGER.debug("[MetaScheduler] 本地处理: {}", msg);
             return true;
         }
 
@@ -491,14 +494,14 @@ public class MetaScheduler {
             CompletableFuture<JsonObject> future = templateManager.fill(templateType, context);
             // 如果被限速返回 null, 直接回退
             if (future == null) {
-                EAgent.LOGGER.warn("[MetaScheduler] 模板被限速 {}", templateType);
+                LOGGER.warn("[MetaScheduler] 模板被限速 {}", templateType);
                 return false;
             }
             state.setPendingTemplateResult(future, templateType, msg);
             state.setRecentLLMFailure(false);
             return true;
         } catch (Exception e) {
-            EAgent.LOGGER.warn("[MetaScheduler] LLM调用失败: {}", e.getMessage());
+            LOGGER.warn("[MetaScheduler] LLM调用失败: {}", e.getMessage());
             state.setRecentLLMFailure(true);
             return false;
         }
@@ -538,7 +541,7 @@ public class MetaScheduler {
         try {
             result = future.get();
         } catch (Exception e) {
-            EAgent.LOGGER.warn("[MetaScheduler] 模板结果获取失败: {}", e.getMessage());
+            LOGGER.warn("[MetaScheduler] 模板结果获取失败: {}", e.getMessage());
             return;
         }
         if (result == null) return;
@@ -563,7 +566,7 @@ public class MetaScheduler {
             case TASK_PLAN -> {
                 // 将 LLM 填的 DAG 固化为 TaskDAG + ReflexChain
                 String taskId = result.has("task_id") ? result.get("task_id").getAsString() : "task_" + System.currentTimeMillis();
-                EAgent.LOGGER.info("[MetaScheduler] 收到任务DAG: {} ({} subtasks)", taskId,
+                LOGGER.info("[MetaScheduler] 收到任务DAG: {} ({} subtasks)", taskId,
                     result.has("subtasks") ? result.getAsJsonArray("subtasks").size() : 0);
                 // TaskDAG.fromLLMJson() 将被调用来解析;
                 // 目前集成点在 TaskManager, 这里先创建普通任务
@@ -574,7 +577,7 @@ public class MetaScheduler {
             }
             case REFLEX_CREATE -> {
                 String reflexId = result.has("reflex_id") ? result.get("reflex_id").getAsString() : "";
-                EAgent.LOGGER.info("[MetaScheduler] 收到新反射: {}", reflexId);
+                LOGGER.info("[MetaScheduler] 收到新反射: {}", reflexId);
                 // 反射固化通过 ConditionedReflex.solidifySequence() 完成,
                 // 这里先记录日志, 具体固化由填坑 hook 处理
             }
@@ -651,13 +654,13 @@ public class MetaScheduler {
         switch (stage) {
             case 0: { // Stage 1: 本地重试
                 if (retryCount < MAX_RETRY_COUNT) {
-                    EAgent.LOGGER.debug("[MetaScheduler] Rollback Stage1: 本地重试 {} (retry={})", nodeId, retryCount);
+                    LOGGER.debug("[MetaScheduler] Rollback Stage1: 本地重试 {} (retry={})", nodeId, retryCount);
                     return new RollbackStage(1, "retry");
                 }
                 return rollback(botCtx, worldCtx, bot, nodeId, retryCount, 1);
             }
             case 1: { // Stage 2: 替代方案
-                EAgent.LOGGER.debug("[MetaScheduler] Rollback Stage2: 寻找替代 {}", nodeId);
+                LOGGER.debug("[MetaScheduler] Rollback Stage2: 寻找替代 {}", nodeId);
                 var bayesian = botCtx != null ? botCtx.bayesianModule() : null;
                 if (bayesian != null) {
                     var alternatives = bayesian.inferForward(
@@ -667,7 +670,7 @@ public class MetaScheduler {
                         String altId = alternatives.get(0).getKey();
                         double altScore = alternatives.get(0).getValue();
                         if (altScore > MIN_ALT_THRESHOLD) {
-                            EAgent.LOGGER.debug("[MetaScheduler] Rollback Stage2: 替代方案 {} (score={})", altId, altScore);
+                            LOGGER.debug("[MetaScheduler] Rollback Stage2: 替代方案 {} (score={})", altId, altScore);
                             return new RollbackStage(2, "alternative:" + altId);
                         }
                     }
@@ -675,20 +678,20 @@ public class MetaScheduler {
                 return rollback(botCtx, worldCtx, bot, nodeId, retryCount, 2);
             }
             case 2: { // Stage 3: 回溯上游
-                EAgent.LOGGER.debug("[MetaScheduler] Rollback Stage3: 回溯上游 {}", nodeId);
+                LOGGER.debug("[MetaScheduler] Rollback Stage3: 回溯上游 {}", nodeId);
             var bayesian = botCtx != null ? botCtx.bayesianModule() : null;
                 if (bayesian != null && lastExecutedNodeId != null) {
                     String upId = lastExecutedNodeId;
                     double upConfidence = bayesian.getConfidence(upId);
                     if (upConfidence < 0.3) {
-                        EAgent.LOGGER.debug("[MetaScheduler] Rollback Stage3: 回溯到 {} (conf={})", upId, upConfidence);
+                        LOGGER.debug("[MetaScheduler] Rollback Stage3: 回溯到 {} (conf={})", upId, upConfidence);
                         return new RollbackStage(3, "backtrack:" + upId);
                     }
                 }
                 return rollback(botCtx, worldCtx, bot, nodeId, retryCount, 3);
             }
             case 3: { // Stage 4: 麦穗探索
-                EAgent.LOGGER.debug("[MetaScheduler] Rollback Stage4: 麦穗探索 {}", nodeId);
+                LOGGER.debug("[MetaScheduler] Rollback Stage4: 麦穗探索 {}", nodeId);
                 HormonalSystem h = botCtx.hormonalSystem();
                 double exploreProb = MotivationEngine.wheatEarExplore(0.3, h);
                 if (exploreProb > Math.random()) {
@@ -698,7 +701,7 @@ public class MetaScheduler {
             }
             case 4: // Stage 5: LLM 重新规划
             default:
-                EAgent.LOGGER.warn("[MetaScheduler] Rollback Stage5: LLM重新规划 {}", nodeId);
+                LOGGER.warn("[MetaScheduler] Rollback Stage5: LLM重新规划 {}", nodeId);
                 return new RollbackStage(5, "llm_replan");
         }
     }

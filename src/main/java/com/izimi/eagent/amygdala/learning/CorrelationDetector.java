@@ -12,8 +12,9 @@ import java.util.Map;
 import java.util.Random;
 import java.util.Set;
 
-import com.izimi.eagent.EAgent;
 import com.izimi.eagent.amygdala.ConditionedReflex;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import com.izimi.eagent.api.WorldContext;
 import com.izimi.eagent.bayesian.BayesianModule;
 import com.izimi.eagent.brainstem.adapter.BasicActionAdapter;
@@ -29,6 +30,8 @@ import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
 
 public class CorrelationDetector {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger("e-agent");
 
     private static final int TRIAL_COOLDOWN_TICKS = 40;
     private static final int PATTERN_WINDOW = 12;
@@ -164,7 +167,7 @@ public class CorrelationDetector {
                             .filter(t -> !t.isEmpty())
                             .findFirst().orElse("");
 
-                    EAgent.LOGGER.info("[CorrelationDetector] 自组织固化: {} ({}次试验, {}次成功)",
+                    LOGGER.info("[CorrelationDetector] 自组织固化: {} ({}次试验, {}次成功)",
                             skillId, trials.size(), successCount);
                     solidateReflex(skillId, action, canonicalTarget, bot);
             }
@@ -202,7 +205,7 @@ public class CorrelationDetector {
         if (bot != null) {
             bot.sendMessage(net.minecraft.text.Text.literal("§b[E-Agent] §7我好像学会了" + action));
         }
-        EAgent.LOGGER.info("[CorrelationDetector] 自组织固化: {} (action={}, target={})", skillId, action, target);
+        LOGGER.info("[CorrelationDetector] 自组织固化: {} (action={}, target={})", skillId, action, target);
     }
 
     private boolean hasDiggableBlockNearby(ServerPlayerEntity bot) {

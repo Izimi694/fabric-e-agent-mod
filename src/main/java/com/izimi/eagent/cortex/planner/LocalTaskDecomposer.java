@@ -1,12 +1,15 @@
 package com.izimi.eagent.cortex.planner;
 
-import com.izimi.eagent.EAgent;
 import com.izimi.eagent.brainstem.scheduler.ILocalPlanner;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import com.izimi.eagent.cortex.api.AIResponse;
 
 import java.util.regex.Matcher;
 
 public class LocalTaskDecomposer implements ILocalPlanner {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger("e-agent");
 
     private final KnowledgeBase kb;
     private final PlanManager planManager;
@@ -61,7 +64,7 @@ public class LocalTaskDecomposer implements ILocalPlanner {
         plan.status = "active";
         plan.source = "local";
 
-        EAgent.LOGGER.info("[LocalTaskDecomposer] 模板匹配: {} → {}×{}步",
+        LOGGER.info("[LocalTaskDecomposer] 模板匹配: {} → {}×{}步",
                 tmpl.name(), count, plan.subSteps.size());
 
         AIResponse response = new AIResponse();

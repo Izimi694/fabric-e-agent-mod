@@ -1,12 +1,15 @@
 package com.izimi.eagent.cortex.api;
 
-import com.izimi.eagent.EAgent;
 import com.izimi.eagent.util.FileUtil;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import com.izimi.eagent.util.JsonUtil;
 
 import java.nio.file.Path;
 
 public class AIConfig {
+    private static final Logger LOGGER = LoggerFactory.getLogger("e-agent");
+
     private static final Path KEY_FILE = FileUtil.getConfigDir().resolve("api_key.json");
 
     public String apiEndpoint;
@@ -44,14 +47,14 @@ public class AIConfig {
         this.apiKey = key != null ? key.trim() : "";
         this.enabled = !this.apiKey.isEmpty();
         save();
-        EAgent.LOGGER.info("[AIConfig] API Key 已{}", enabled ? "设置" : "清除");
+        LOGGER.info("[AIConfig] API Key 已{}", enabled ? "设置" : "清除");
     }
 
     public void setApiModel(String model) {
         if (model != null && !model.trim().isEmpty()) {
             this.apiModel = model.trim();
             save();
-            EAgent.LOGGER.info("[AIConfig] AI模型已设置为: {}", this.apiModel);
+            LOGGER.info("[AIConfig] AI模型已设置为: {}", this.apiModel);
         }
     }
 

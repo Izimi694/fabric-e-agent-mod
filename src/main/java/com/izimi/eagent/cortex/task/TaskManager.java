@@ -2,6 +2,8 @@ package com.izimi.eagent.cortex.task;
 
 import com.izimi.eagent.EAgent;
 import com.izimi.eagent.cortex.planner.Plan;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import com.izimi.eagent.util.FileUtil;
 import com.izimi.eagent.util.JsonUtil;
 
@@ -13,6 +15,8 @@ import java.util.UUID;
 
 @SuppressWarnings("deprecation")
 public class TaskManager {
+    private static final Logger LOGGER = LoggerFactory.getLogger("e-agent");
+
     private Task activeTask;
     private Task lastTask;
     private final UUID botId;
@@ -52,7 +56,7 @@ public class TaskManager {
         activeTask = new Task(taskId, type, goal);
         decomposeTask(activeTask);
         saveActiveTask();
-        EAgent.LOGGER.info("[TaskManager] 任务创建: {} - {} ({}子任务)", taskId, goal, activeTask.subTasks.size());
+        LOGGER.info("[TaskManager] 任务创建: {} - {} ({}子任务)", taskId, goal, activeTask.subTasks.size());
         return taskId;
     }
 
@@ -70,7 +74,7 @@ public class TaskManager {
         }
 
         saveActivePlanToTask();
-        EAgent.LOGGER.info("[TaskManager] 从Plan创建任务: {} → {}步", goal, plan.subSteps.size());
+        LOGGER.info("[TaskManager] 从Plan创建任务: {} → {}步", goal, plan.subSteps.size());
         return taskId;
     }
 
@@ -98,7 +102,7 @@ public class TaskManager {
             task.subTasks.add(new Task.SubTask(subGoal, action));
         }
 
-        EAgent.LOGGER.info("[TaskManager] 任务拆解: {} → {}×{} ({})",
+        LOGGER.info("[TaskManager] 任务拆解: {} → {}×{} ({})",
                 task.goal, count, task.subTasks.get(0).goal,
                 task.subTasks.get(0).skillId);
     }
@@ -115,7 +119,7 @@ public class TaskManager {
             saveLastTask();
             activeTask = null;
             saveActiveTask();
-            EAgent.LOGGER.info("[TaskManager] 任务已中断");
+            LOGGER.info("[TaskManager] 任务已中断");
         }
     }
 
@@ -129,14 +133,14 @@ public class TaskManager {
         lastTask = null;
         saveActiveTask();
         saveLastTask();
-        EAgent.LOGGER.info("[TaskManager] 任务已恢复: {}", activeTask.getGoal());
+        LOGGER.info("[TaskManager] 任务已恢复: {}", activeTask.getGoal());
         return true;
     }
 
     public void completeTask() {
         if (activeTask == null) return;
         activeTask.status = "completed";
-        EAgent.LOGGER.info("[TaskManager] 任务完成: {}", activeTask.getGoal());
+        LOGGER.info("[TaskManager] 任务完成: {}", activeTask.getGoal());
 
         var memoryManager = EAgent.getMemoryManager();
         if (memoryManager != null) {

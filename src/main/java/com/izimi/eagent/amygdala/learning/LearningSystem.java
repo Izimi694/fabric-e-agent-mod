@@ -1,7 +1,8 @@
 package com.izimi.eagent.amygdala.learning;
 
-import com.izimi.eagent.EAgent;
 import com.izimi.eagent.amygdala.ConditionedReflex;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import com.izimi.eagent.brainstem.skill.SkillManager;
 import com.izimi.eagent.util.FileUtil;
 import com.izimi.eagent.util.JsonUtil;
@@ -9,6 +10,8 @@ import com.izimi.eagent.util.JsonUtil;
 import java.util.*;
 
 public class LearningSystem {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger("e-agent");
 
     private static final long WINDOW_MS = 60_000;
     private static final long SCAN_INTERVAL_MS = 60_000;
@@ -71,13 +74,13 @@ public class LearningSystem {
 
             if (skillManager.getSkill(skillId) != null) {
                 conditionedReflex.incrementProficiency(skillId);
-                EAgent.LOGGER.info("[LearningSystem] 分类强化: {} → proficiency+ ({}次观察)",
+                LOGGER.info("[LearningSystem] 分类强化: {} → proficiency+ ({}次观察)",
                         CategoryMapper.getCategoryName(category), events.size());
             } else {
                 ObservedSequence sequence = ObservedSequence.create(representativeTarget, events,
                         nearbyBlocks, inventory, timeOfDay);
                 conditionedReflex.solidifySequence(sequence, category);
-                EAgent.LOGGER.info("[LearningSystem] 分类固化: {} → {} ({}次观察)",
+                LOGGER.info("[LearningSystem] 分类固化: {} → {} ({}次观察)",
                         CategoryMapper.getCategoryName(category), skillId, events.size());
             }
         }
@@ -94,7 +97,7 @@ public class LearningSystem {
                 + System.currentTimeMillis() / 1000 + ".json";
         JsonUtil.writeToFileSafeAtomic(FileUtil.getTrialsDir().resolve(filename), sequence);
 
-        EAgent.LOGGER.debug("[LearningSystem] 保存trial: {} ({}次观察)",
+        LOGGER.debug("[LearningSystem] 保存trial: {} ({}次观察)",
                 CategoryMapper.getCategoryName(category), events.size());
     }
 

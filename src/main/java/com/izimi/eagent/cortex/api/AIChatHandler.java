@@ -1,7 +1,8 @@
 package com.izimi.eagent.cortex.api;
 
-import com.izimi.eagent.EAgent;
 import com.izimi.eagent.hippocampus.MemoryEntry;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import com.izimi.eagent.state.PlayerState;
 import com.izimi.eagent.cortex.task.Task;
 
@@ -9,6 +10,8 @@ import java.util.*;
 import java.util.concurrent.CompletableFuture;
 
 public class AIChatHandler {
+    private static final Logger LOGGER = LoggerFactory.getLogger("e-agent");
+
     private final AIClient aiClient;
     private final Deque<AIResponse> pendingResponses = new ArrayDeque<>();
     private CompletableFuture<AIResponse> currentRequest = null;
@@ -32,7 +35,7 @@ public class AIChatHandler {
                 }
             }
         }).exceptionally(e -> {
-            EAgent.LOGGER.error("[AIChatHandler] 对话失败: {}", e.getMessage());
+            LOGGER.error("[AIChatHandler] 对话失败: {}", e.getMessage());
             return null;
         });
     }

@@ -141,7 +141,8 @@ public class EAgent implements ModInitializer {
         taskManager = new TaskManager();
         skillManager = new SkillManager();
         executionLogger = new ExecutionLogger();
-        reflexRegistry = new InnateReflexRegistry(new MinecraftReflexEvaluator());
+        var reflexEvaluator = new MinecraftReflexEvaluator();
+        reflexRegistry = new InnateReflexRegistry(reflexEvaluator);
         var reflexesPath = FileUtil.getInnateReflexesPath();
         reflexRegistry.loadFromJson(reflexesPath);
         if (reflexRegistry.size() == 0) {
@@ -150,6 +151,11 @@ public class EAgent implements ModInitializer {
             LOGGER.info("[E-Agent] 已创建默认先天反射配置: {}", reflexesPath);
         }
         LOGGER.info("[E-Agent] 先天反射注册表已初始化, {} 个反射", reflexRegistry.size());
+        reflexEvaluator.setPendingChatChecker((bot, timeout) -> {
+            if (pendingChat == null) return false;
+            long elapsed = (System.currentTimeMillis() - pendingChatTime) / 1000;
+            return elapsed < (timeout > 0 ? timeout : 30);
+        });
         actionAdapter = new MinecraftActionAdapter();
         conditionedReflex = new ConditionedReflex(skillManager, config, actionAdapter);
         taskExecutor = new TaskExecutor(taskManager, skillManager, executionLogger);
@@ -180,7 +186,7 @@ public class EAgent implements ModInitializer {
 
         botController = new BotController(botSpawner, taskManager, taskExecutor, stateManager,
                 conditionedReflex, aiChatHandler, aiClient, idleBrain,
-                socialClassifier, reflexRegistry, inhibitor);
+                socialClassifier, reflexRegistry, inhibitor, memoryManager);
         botController.setWorldContext(worldContext);
 
         MotivationEngine motivationEngine = new MotivationEngine();
@@ -306,6 +312,9 @@ public class EAgent implements ModInitializer {
                 if (chatTarget != null) {
                     chatTarget.setPendingChat(content);
                 } else {
+                    if (botController != null) {
+                        botController.setPendingChatMessage(content);
+                    }
                     pendingChat = new PendingChat(content, "", "", "");
                     pendingChatTime = System.currentTimeMillis();
                 }

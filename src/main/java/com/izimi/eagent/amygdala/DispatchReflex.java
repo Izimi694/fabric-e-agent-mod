@@ -1,7 +1,8 @@
 package com.izimi.eagent.amygdala;
 
-import com.izimi.eagent.EAgent;
 import com.izimi.eagent.brainstem.scheduler.FlowLevel;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import com.izimi.eagent.brainstem.scheduler.ProblemLabel;
 import com.izimi.eagent.util.FileUtil;
 import com.izimi.eagent.util.JsonUtil;
@@ -10,6 +11,8 @@ import java.nio.file.Path;
 import java.util.*;
 
 public class DispatchReflex {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger("e-agent");
 
     private static final double DEFAULT_WEIGHT = 0.5;
     private static final double WEIGHT_MIN = -1.0;
@@ -101,7 +104,7 @@ public class DispatchReflex {
             }
             JsonUtil.writeToFileSafeAtomic(getPath(), data);
         } catch (Exception e) {
-            EAgent.LOGGER.debug("[DispatchReflex] save skipped: {}", e.getMessage());
+            LOGGER.debug("[DispatchReflex] save skipped: {}", e.getMessage());
         }
     }
 
@@ -124,7 +127,7 @@ public class DispatchReflex {
                 }
             }
         } catch (Exception e) {
-            EAgent.LOGGER.debug("[DispatchReflex] load skipped: {}", e.getMessage());
+            LOGGER.debug("[DispatchReflex] load skipped: {}", e.getMessage());
         }
     }
 

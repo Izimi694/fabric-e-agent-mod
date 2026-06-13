@@ -11,8 +11,15 @@ import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
 
 import java.util.List;
+import java.util.function.BiPredicate;
 
 public class MinecraftReflexEvaluator {
+
+    private BiPredicate<ServerPlayerEntity, Double> pendingChatChecker = (bot, timeout) -> false;
+
+    public void setPendingChatChecker(BiPredicate<ServerPlayerEntity, Double> checker) {
+        this.pendingChatChecker = checker;
+    }
 
     public boolean matchesAll(List<ReflexTrigger> triggers, ServerPlayerEntity bot) {
         if (bot == null) return false;
@@ -98,7 +105,7 @@ public class MinecraftReflexEvaluator {
     }
 
     private boolean checkChatPending(ServerPlayerEntity bot, double timeoutSecs) {
-        return com.izimi.eagent.EAgent.hasPendingChat(timeoutSecs);
+        return pendingChatChecker.test(bot, timeoutSecs);
     }
 
     public boolean hasFoodInHotbar(ServerPlayerEntity bot) {

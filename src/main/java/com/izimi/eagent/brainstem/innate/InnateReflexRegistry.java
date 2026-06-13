@@ -1,8 +1,9 @@
 package com.izimi.eagent.brainstem.innate;
 
 import com.google.gson.reflect.TypeToken;
-import com.izimi.eagent.EAgent;
 import com.izimi.eagent.amygdala.BotParams;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import com.izimi.eagent.util.FileUtil;
 import com.izimi.eagent.util.JsonUtil;
 import net.minecraft.server.network.ServerPlayerEntity;
@@ -16,6 +17,8 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 public class InnateReflexRegistry {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger("e-agent");
 
     private static final double DEFAULT_WEIGHT = 0.5;
     private static final double WEIGHT_MIN = -1.0;
@@ -141,7 +144,7 @@ public class InnateReflexRegistry {
     public void reinforceOnDispatch(String reflexId, boolean success) {
         double delta = success ? SELF_REINFORCE_DELTA : -SELF_REINFORCE_DELTA * 0.5;
         reinforce(reflexId, delta);
-        EAgent.LOGGER.debug("[InnateReflex] 强化: {} delta={:.3f} stw={:.2f} ltb={:.2f}",
+        LOGGER.debug("[InnateReflex] 强化: {} delta={:.3f} stw={:.2f} ltb={:.2f}",
                 reflexId, delta, getStw(reflexId), getLtb(reflexId));
     }
 
@@ -173,7 +176,7 @@ public class InnateReflexRegistry {
                 }
             }
         } catch (Exception e) {
-            EAgent.LOGGER.debug("[InnateReflexRegistry] 权重加载跳过 (测试环境): {}", e.getMessage());
+            LOGGER.debug("[InnateReflexRegistry] 权重加载跳过 (测试环境): {}", e.getMessage());
         }
     }
 
@@ -188,7 +191,7 @@ public class InnateReflexRegistry {
             }
             JsonUtil.writeToFileSafeAtomic(FileUtil.getInnateReflexWeightsPath(), data);
         } catch (Exception e) {
-            EAgent.LOGGER.debug("[InnateReflexRegistry] 权重保存跳过 (测试环境): {}", e.getMessage());
+            LOGGER.debug("[InnateReflexRegistry] 权重保存跳过 (测试环境): {}", e.getMessage());
         }
     }
 }

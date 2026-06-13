@@ -1,7 +1,8 @@
 package com.izimi.eagent.cortex.planner;
 
-import com.izimi.eagent.EAgent;
 import com.izimi.eagent.util.FileUtil;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import com.izimi.eagent.util.JsonUtil;
 
 import java.nio.file.Files;
@@ -10,6 +11,8 @@ import java.util.*;
 import java.util.regex.Pattern;
 
 public class KnowledgeBase {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger("e-agent");
 
     private final Map<String, Map<String, Object>> recipes;
     private final Map<String, Map<String, Object>> entities;
@@ -72,7 +75,7 @@ public class KnowledgeBase {
         if (data == null) {
             data = JsonUtil.fromJson(DEFAULT_JSON, Map.class);
             JsonUtil.writeToFileSafeAtomic(path, data);
-            EAgent.LOGGER.info("[KnowledgeBase] 已创建默认知识库: {}", path);
+            LOGGER.info("[KnowledgeBase] 已创建默认知识库: {}", path);
         }
         return fromMap(data);
     }

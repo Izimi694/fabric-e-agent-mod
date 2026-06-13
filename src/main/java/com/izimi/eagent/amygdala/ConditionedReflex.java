@@ -6,7 +6,6 @@ import com.izimi.eagent.brainstem.adapter.ActionResult;
 import com.izimi.eagent.brainstem.adapter.BasicActionAdapter;
 import com.izimi.eagent.brainstem.skill.Skill;
 import com.izimi.eagent.brainstem.skill.SkillManager;
-import com.izimi.eagent.EAgent;
 import com.izimi.eagent.brainstem.bot.BotInstance;
 import com.izimi.eagent.config.ModConfig;
 import com.izimi.eagent.amygdala.learning.CategoryMapper;
@@ -14,6 +13,8 @@ import com.izimi.eagent.amygdala.learning.ObservedSequence;
 import com.izimi.eagent.cortex.task.Task;
 import com.izimi.eagent.util.FileUtil;
 import com.izimi.eagent.util.JsonUtil;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.minecraft.entity.LivingEntity;
@@ -26,6 +27,7 @@ import java.nio.file.Path;
 import java.util.*;
 
 public class ConditionedReflex {
+    private static final Logger LOGGER = LoggerFactory.getLogger("e-agent");
     private static final double SELF_REINFORCE_SUCCESS = 0.05;
     private static final double SELF_REINFORCE_FAIL = -0.03;
     private static final double DEFAULT_WEIGHT = 0.5;
@@ -546,7 +548,7 @@ public class ConditionedReflex {
             String atomStatus = (String) atom.getOrDefault("status", "healthy");
 
             if ("impossible".equals(atomStatus)) {
-                EAgent.LOGGER.debug("[ConditionedReflex] 原子已标记不可能，跳过: {} [{}]",
+                LOGGER.debug("[ConditionedReflex] 原子已标记不可能，跳过: {} [{}]",
                         skillId, atom.get("action"));
                 return;
             }
@@ -569,7 +571,7 @@ public class ConditionedReflex {
                 }
             }
 
-            EAgent.LOGGER.debug("[ConditionedReflex] 原子{}/{}: {} {} → executed={} success={}",
+            LOGGER.debug("[ConditionedReflex] 原子{}/{}: {} {} → executed={} success={}",
                     atomIdx + 1, atoms.size(), atom.get("action"), atom.get("target"),
                     result.executed(), result.success());
 
@@ -593,8 +595,13 @@ public class ConditionedReflex {
         }
 
         if (result.success()) {
-            EAgent.LOGGER.info("[ConditionedReflex] 成功: {}", skillId);
-            EAgent.onReflexSuccess(bot, skillId);
+            LOGGER.info("[ConditionedReflex] 成功: {}", skillId);
+            if (botInstance != null) {
+                String category = getReflexCategoryPublic(skillId);
+                if (category != null) {
+                    botInstance.getBotContext().world().botManager().notifyReflexSuccess(bot, category);
+                }
+            }
         } else {
             handleReflexFailure(skillId, bot, atoms, atomIdx);
         }
@@ -663,7 +670,7 @@ public class ConditionedReflex {
             data.put("trialSuccesses", 0);
             data.put("trialFailures", 0);
             JsonUtil.writeToFileSafeAtomic(path, data);
-            EAgent.LOGGER.info("[ConditionedReflex] 试炼通过: {} ({}成功/{}失败), 正式加入",
+            LOGGER.info("[ConditionedReflex] 试炼通过: {} ({}成功/{}失败), 正式加入",
                     skillId, trialSuccesses, trialFailures);
             return;
         }
@@ -673,7 +680,7 @@ public class ConditionedReflex {
             data.put("proficiency", 0.1);
             JsonUtil.writeToFileSafeAtomic(path, data);
             moveToArchived(skillId, data);
-            EAgent.LOGGER.info("[ConditionedReflex] 试炼失败: {} ({}成功/{}失败), 休眠",
+            LOGGER.info("[ConditionedReflex] 试炼失败: {} ({}成功/{}失败), 休眠",
                     skillId, trialSuccesses, trialFailures);
             return;
         }
@@ -698,19 +705,19 @@ public class ConditionedReflex {
         boolean converged = bayesianModule.isConverged(skillId);
 
         if (!converged) {
-            EAgent.LOGGER.debug("[ConditionedReflex] 样本不足(未收敛)，重试: {}", skillId);
+            LOGGER.debug("[ConditionedReflex] 样本不足(未收敛)，重试: {}", skillId);
             return;
         }
 
         if (posterior > 0.4) {
-            EAgent.LOGGER.debug("[ConditionedReflex] 概率性失败: {} (posterior={:.2f})", skillId, posterior);
+            LOGGER.debug("[ConditionedReflex] 概率性失败: {} (posterior={:.2f})", skillId, posterior);
             return;
         }
 
         if (posterior > 0.2 && !"watching".equals(currentStatus)) {
             data.put("status", "watching");
             JsonUtil.writeToFileSafeAtomic(path, data);
-            EAgent.LOGGER.warn("[ConditionedReflex] 标记观察: {} (posterior={:.2f})", skillId, posterior);
+            LOGGER.warn("[ConditionedReflex] 标记观察: {} (posterior={:.2f})", skillId, posterior);
             return;
         }
 
@@ -721,7 +728,7 @@ public class ConditionedReflex {
                 atom.put("status", "impossible");
                 data.put("atoms", atoms);
                 JsonUtil.writeToFileSafeAtomic(path, data);
-                EAgent.LOGGER.warn("[ConditionedReflex] 原子永久跳过: {} [{}] (posterior={:.2f})",
+                LOGGER.warn("[ConditionedReflex] 原子永久跳过: {} [{}] (posterior={:.2f})",
                         skillId, aTarget, posterior);
                 if (bot != null) {
                     bot.sendMessage(Text.literal("§c[E-Agent] §7" + aTarget +
@@ -734,7 +741,7 @@ public class ConditionedReflex {
                 data.put("status", "dormant");
                 JsonUtil.writeToFileSafeAtomic(path, data);
                 moveToArchived(skillId, data);
-                EAgent.LOGGER.warn("[ConditionedReflex] 标记休眠并归档: {} (posterior={:.2f})",
+                LOGGER.warn("[ConditionedReflex] 标记休眠并归档: {} (posterior={:.2f})",
                         skillId, posterior);
                 if (bot != null) {
                     bot.sendMessage(Text.literal("§c[E-Agent] §7这个" +
@@ -776,7 +783,7 @@ public class ConditionedReflex {
 
         if (skillManager.getSkill(skillId) != null) {
             incrementProficiency(skillId);
-            EAgent.LOGGER.info("[ConditionedReflex] 分类已有反射，强化熟练度: {} -> {}", category, skillId);
+            LOGGER.info("[ConditionedReflex] 分类已有反射，强化熟练度: {} -> {}", category, skillId);
             return;
         }
 
@@ -818,7 +825,7 @@ public class ConditionedReflex {
         Path path = conditionedDir().resolve(skillId + ".json");
         JsonUtil.writeToFileSafeAtomic(path, reflexData);
 
-        EAgent.LOGGER.info("[ConditionedReflex] 条件反射已固化: {} (category={}, 观察{}次, proficiency={})",
+        LOGGER.info("[ConditionedReflex] 条件反射已固化: {} (category={}, 观察{}次, proficiency={})",
                 skillId, category, sequence.occurrences(), String.format("%.2f", sequence.proficiency()));
     }
 
@@ -837,7 +844,7 @@ public class ConditionedReflex {
 
         JsonUtil.writeToFileSafeAtomic(path, data);
 
-        EAgent.LOGGER.info("[ConditionedReflex] 熟练度提升: {} -> proficiency={} (观察{}次)",
+        LOGGER.info("[ConditionedReflex] 熟练度提升: {} -> proficiency={} (观察{}次)",
                 skillId, String.format("%.2f", proficiency), observed + 1);
 
         if (bayesianModule != null && bayesianModule.isConverged(skillId) && botInstance != null) {
@@ -918,7 +925,7 @@ public class ConditionedReflex {
                 }
             }
         } catch (Exception e) {
-            EAgent.LOGGER.debug("[ConditionedReflex] getHighestProficiency: {}", e.getMessage());
+            LOGGER.debug("[ConditionedReflex] getHighestProficiency: {}", e.getMessage());
         }
         return max;
     }
@@ -946,7 +953,7 @@ public class ConditionedReflex {
         try {
             java.nio.file.Files.deleteIfExists(src);
         } catch (java.io.IOException e) {
-            EAgent.LOGGER.warn("[ConditionedReflex] 删除原反射文件失败: {}", skillId);
+            LOGGER.warn("[ConditionedReflex] 删除原反射文件失败: {}", skillId);
         }
     }
 
@@ -962,9 +969,9 @@ public class ConditionedReflex {
         try {
             java.nio.file.Files.deleteIfExists(archivedPath);
         } catch (java.io.IOException e) {
-            EAgent.LOGGER.warn("[ConditionedReflex] 删除归档文件失败: {}", skillId);
+            LOGGER.warn("[ConditionedReflex] 删除归档文件失败: {}", skillId);
         }
-        EAgent.LOGGER.info("[ConditionedReflex] 反射复活: {}", skillId);
+        LOGGER.info("[ConditionedReflex] 反射复活: {}", skillId);
         return true;
     }
 
@@ -972,14 +979,14 @@ public class ConditionedReflex {
         if (hint == null || hint.isEmpty()) return null;
 
         if (skillManager.getSkill(hint) != null) {
-            EAgent.LOGGER.debug("[ConditionedReflex] 精确匹配: {}", hint);
+            LOGGER.debug("[ConditionedReflex] 精确匹配: {}", hint);
             return hint;
         }
 
         String lower = hint.toLowerCase();
 
         if (lastExecutedReflexId != null && lastExecutedReflexId.toLowerCase().contains(lower)) {
-            EAgent.LOGGER.debug("[ConditionedReflex] 最近执行匹配: {} <- {}", lastExecutedReflexId, hint);
+            LOGGER.debug("[ConditionedReflex] 最近执行匹配: {} <- {}", lastExecutedReflexId, hint);
             return lastExecutedReflexId;
         }
 
@@ -990,7 +997,7 @@ public class ConditionedReflex {
                     if (id.equals(lastExecutedReflexId)) continue;
                     String cat = getReflexCategory(id);
                     if (lastCategory.equals(cat) && id.toLowerCase().contains(lower)) {
-                        EAgent.LOGGER.debug("[ConditionedReflex] 同category匹配: {} <- {} (cat={})", id, hint, lastCategory);
+                        LOGGER.debug("[ConditionedReflex] 同category匹配: {} <- {} (cat={})", id, hint, lastCategory);
                         return id;
                     }
                 }
@@ -999,12 +1006,12 @@ public class ConditionedReflex {
 
         for (String id : skillManager.getSkills().keySet()) {
             if (id.toLowerCase().contains(lower)) {
-                EAgent.LOGGER.warn("[ConditionedReflex] 兜底子串匹配(LLM输出可能不够精确): {} <- {}", id, hint);
+                LOGGER.warn("[ConditionedReflex] 兜底子串匹配(LLM输出可能不够精确): {} <- {}", id, hint);
                 return id;
             }
         }
 
-        EAgent.LOGGER.warn("[ConditionedReflex] 无匹配反射: hint={}", hint);
+        LOGGER.warn("[ConditionedReflex] 无匹配反射: hint={}", hint);
         return null;
     }
 
@@ -1036,13 +1043,13 @@ public class ConditionedReflex {
             }
         }
         if (count > 0) {
-            EAgent.LOGGER.debug("[ConditionedReflex] 社交观察学习: category={} 提升 {} 个反射", category, count);
+            LOGGER.debug("[ConditionedReflex] 社交观察学习: category={} 提升 {} 个反射", category, count);
         }
     }
 
     public void reinforceWithSpill(String skillId, double delta) {
         reinforce(skillId, delta);
-        EAgent.LOGGER.info("[ConditionedReflex] 反射强化: {} delta={}", skillId, delta);
+        LOGGER.info("[ConditionedReflex] 反射强化: {} delta={}", skillId, delta);
 
         String category = getReflexCategory(skillId);
         if (category == null) return;
@@ -1058,7 +1065,7 @@ public class ConditionedReflex {
             }
         }
         if (count > 0) {
-            EAgent.LOGGER.debug("[ConditionedReflex] 溢出强化: {}个同category反射 x{:.3f} (cat={})", count, spill, category);
+            LOGGER.debug("[ConditionedReflex] 溢出强化: {}个同category反射 x{:.3f} (cat={})", count, spill, category);
         }
     }
 
@@ -1075,7 +1082,7 @@ public class ConditionedReflex {
             if (successes >= config.reflexMinSuccesses && avg >= config.reflexThreshold) {
                 ConditionedSkill newSkill = new ConditionedSkill("reflex_" + skillId, "条件反射_" + skillId);
                 skillManager.registerConditionedSkill(newSkill);
-                EAgent.LOGGER.info("[ConditionedReflex] 生成条件反射: {}", skillId);
+                LOGGER.info("[ConditionedReflex] 生成条件反射: {}", skillId);
             }
         }
         actionHistory.clear();

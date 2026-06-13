@@ -1,7 +1,8 @@
 package com.izimi.eagent.hippocampus;
 
-import com.izimi.eagent.EAgent;
 import com.izimi.eagent.bayesian.BayesianModule;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import com.izimi.eagent.hormonal.HormonalSystem;
 import com.izimi.eagent.config.ModConfig;
 import com.izimi.eagent.cortex.task.Task;
@@ -15,12 +16,15 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 public class MemoryManager {
+    private static final Logger LOGGER = LoggerFactory.getLogger("e-agent");
+
     private final ModConfig config;
     private final UUID botId;
     private final List<MemoryEntry> memoryCache = new ArrayList<>();
     private long lastCacheUpdate = 0;
     private static final long CACHE_REFRESH_MS = 60000;
     private int currentGameDay = 1;
+    private MemoryGraph memoryGraph;
 
     public MemoryManager(ModConfig config) {
         this(config, null);
@@ -46,6 +50,13 @@ public class MemoryManager {
         this.currentGameDay = day;
     }
 
+    public void setMemoryGraph(MemoryGraph memoryGraph) {
+        this.memoryGraph = memoryGraph;
+        if (memoryGraph != null) {
+            memoryGraph.load(memoriesDir().resolve("memory_graph.json"));
+        }
+    }
+
     public MemoryEntry generateMemory(Task task) {
         if (task == null) return null;
 
@@ -60,7 +71,14 @@ public class MemoryManager {
         memoryCache.add(0, memory);
         updateLatest(memory);
 
-        EAgent.LOGGER.info("[MemoryManager] 记忆已生成: {}", id);
+        if (memoryGraph != null) {
+            memoryGraph.addNode(memory);
+            memoryGraph.updateTimestamps(memory.timestamp);
+            memoryGraph.inferEdges(getRecentMemories(), memory, null);
+            memoryGraph.save(memoriesDir().resolve("memory_graph.json"));
+        }
+
+        LOGGER.info("[MemoryManager] 记忆已生成: {}", id);
         return memory;
     }
 
@@ -71,7 +89,11 @@ public class MemoryManager {
             entries.removeIf(m -> m.id.equals(id));
             JsonUtil.writeToFile(dayFile, entries);
             memoryCache.removeIf(m -> m.id.equals(id));
-            EAgent.LOGGER.info("[MemoryManager] 记忆已删除: {}", id);
+            if (memoryGraph != null) {
+                memoryGraph.removeNode(id);
+                memoryGraph.save(memoriesDir().resolve("memory_graph.json"));
+            }
+            LOGGER.info("[MemoryManager] 记忆已删除: {}", id);
             return true;
         } catch (IOException e) {
             return false;
@@ -161,7 +183,7 @@ public class MemoryManager {
             entries.add(memory);
             JsonUtil.writeToFile(dayFile, entries);
         } catch (IOException e) {
-            EAgent.LOGGER.error("[MemoryManager] 保存记忆失败", e);
+            LOGGER.error("[MemoryManager] 保存记忆失败", e);
         }
     }
 

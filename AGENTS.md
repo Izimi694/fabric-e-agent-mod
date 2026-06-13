@@ -30,6 +30,7 @@
 | 进程执行链 | 时序/执行链表 (ReflexChain) |
 | 参数传递 | 参数绑定 (ParameterBinder) |
 | 进程门控 | 边界条件检查 (precondition guard) |
+| 认知网图/记忆关系 | 记忆关系图 (MemoryGraph) |
 
 ---
 

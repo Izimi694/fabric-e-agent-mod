@@ -1,7 +1,8 @@
 package com.izimi.eagent.cortex.task;
 
-import com.izimi.eagent.EAgent;
 import com.izimi.eagent.log.ExecutionLogger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import com.izimi.eagent.brainstem.skill.Skill;
 import com.izimi.eagent.brainstem.skill.SkillManager;
 import net.minecraft.server.network.ServerPlayerEntity;
@@ -10,6 +11,8 @@ import java.util.HashMap;
 import java.util.Map;
 
 public class TaskExecutor {
+    private static final Logger LOGGER = LoggerFactory.getLogger("e-agent");
+
     private final TaskManager taskManager;
     private final SkillManager skillManager;
     private final ExecutionLogger executionLogger;
@@ -30,7 +33,7 @@ public class TaskExecutor {
         executionTick++;
 
         if (executionTick > SKILL_TIMEOUT_TICKS) {
-            EAgent.LOGGER.warn("[TaskExecutor] 任务超时: {}", task.getGoal());
+            LOGGER.warn("[TaskExecutor] 任务超时: {}", task.getGoal());
             taskManager.cancelActiveTask();
             executionTick = 0;
             return;
@@ -38,7 +41,7 @@ public class TaskExecutor {
 
         Task.SubTask current = getCurrentSubTask(task);
         if (current == null) {
-            EAgent.LOGGER.warn("[TaskExecutor] 无待处理子任务: {}", task.getGoal());
+            LOGGER.warn("[TaskExecutor] 无待处理子任务: {}", task.getGoal());
             taskManager.completeTask();
             executionTick = 0;
             return;
@@ -46,7 +49,7 @@ public class TaskExecutor {
 
         Skill skill = skillManager.getSkill(current.skillId);
         if (skill == null) {
-            EAgent.LOGGER.warn("[TaskExecutor] 技能未找到: {}", current.skillId);
+            LOGGER.warn("[TaskExecutor] 技能未找到: {}", current.skillId);
             current.status = "skipped";
             return;
         }
@@ -70,7 +73,7 @@ public class TaskExecutor {
                 task.progress.completedCount++;
                 taskManager.saveActiveTask();
 
-                EAgent.LOGGER.info("[TaskExecutor] 子任务完成: {} ({}/{})",
+                LOGGER.info("[TaskExecutor] 子任务完成: {} ({}/{})",
                         current.goal, task.progress.completedCount, task.progress.targetCount);
 
                 if (task.progress.completedCount >= task.progress.targetCount) {
@@ -81,7 +84,7 @@ public class TaskExecutor {
                 current.attemptCount++;
 
                 if (!result.executed()) {
-                    EAgent.LOGGER.warn("[TaskExecutor] 确定无法执行，跳过: {} (goal={})",
+                    LOGGER.warn("[TaskExecutor] 确定无法执行，跳过: {} (goal={})",
                             current.skillId, current.goal);
                     current.status = "skipped";
                     return;
@@ -89,13 +92,13 @@ public class TaskExecutor {
 
                 int maxRetries = getMaxRetries();
                 if (current.attemptCount >= maxRetries) {
-                    EAgent.LOGGER.warn("[TaskExecutor] 子任务失败{}次: {} (goal={})",
+                    LOGGER.warn("[TaskExecutor] 子任务失败{}次: {} (goal={})",
                             maxRetries, current.skillId, current.goal);
                     current.status = "skipped";
                 }
             }
         } catch (Exception e) {
-            EAgent.LOGGER.error("[TaskExecutor] 技能执行异常: " + current.skillId, e);
+            LOGGER.error("[TaskExecutor] 技能执行异常: " + current.skillId, e);
             executionLogger.logAction(current.skillId, context, "error", 0.0);
         }
     }

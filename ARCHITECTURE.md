@@ -145,7 +145,7 @@ public boolean shouldExplore() {
 | 脑区 | 模块 | 职责 |
 |------|------|------|
 | **前额叶** | `cortex/` | 规划、复杂决策、语义理解 |
-| **海马体** | `hippocampus/` | 记忆存储、高光回忆 |
+| **海马体** | `hippocampus/` | 记忆存储、高光回忆、记忆关系图 (MemoryGraph) |
 | **杏仁核** | `amygdala/` | 评价、条件反射、学习、情绪 |
 | **脑干** | `brainstem/` | 先天反射、基础动作、生存本能 |
 
@@ -520,6 +520,37 @@ copyReflexesFromMentor()
 | TaskDAG | 骨架 | 内存 (cortex/planner) |
 | ParameterBinder | 骨架 | 内存 |
 | SharedPoolConfig | 骨架 (config) | `config/` |
+| MemoryGraph | L4 (hippocampus) | `memory_graph.json` |
+| MemoryNode / MemoryEdge | L4 (hippocampus) | 内存 + `memory_graph.json` |
+| MemoryQuery | L4 (hippocampus) | 内存 |
+| LearningSystem | L4 (amygdala/learning) | `memory/trials/observed_*.json` |
+| TrialStorage | L4 (hippocampus/storage) | `memory/trials/` |
+| HighlightStorage | L4 (hippocampus/storage) | `memory/highlights/` |
+| BehaviorEventHandler | L2 (amygdala/character) | 内存 |
+| EvaluationCycle | L2 (amygdala/character) | 内存 |
+| CategoryMapper | L3 (amygdala/learning) | 硬编码 |
+| NaiveBayesClassifier | L3 (amygdala) | 内存 |
+| PlanManager | L5 (cortex/planner) | `active_plan.json` |
+| Plan | L5 (cortex/planner) | `active_plan.json` |
+| AITaskPlanner | L6 (cortex/api) | 内存 |
+| AIClient / AIConfig / AIResponse | L6 (cortex/api) | 内存 + `config/api_key.json` |
+| DeepSeekClient | L6 (cortex/api) | 内存 |
+| AIChatHandler | L6 (cortex/api) | 内存 |
+| TemplateMatcher | L6 (cortex/api) | 内存 |
+| AIMemoryGenerator | L6 (cortex/api) | 内存 |
+| LocalChatHandler | L5 (cortex/chat) | 内存 |
+| ChatSessionManager | 骨架 (cortex/chat) | 内存窗口 |
+| KnowledgeBase | L3 (cortex/planner) | `config/knowledge_base.json` |
+| UrgencyClassifier | L2 (brainstem/scheduler) | 内存 |
+| ReflexChain | L4 (brainstem/scheduler) | `dag/` 索引 + 反射节点间关系 |
+| TaskDAG | 骨架 (cortex/planner) | 内存 |
+| ParameterBinder | 骨架 (brainstem/scheduler) | 内存 |
+| BotSpawner | L2 (brainstem/bot) | 内存 |
+| BotPlayer | L2 (brainstem/bot) | 内存 (Minecraft 假人) |
+| GreedyNavigator | L3 (brainstem/navigation) | 内存 |
+| NavigationController | L3 (brainstem/navigation) | 内存 |
+| Skill / SkillManager | L2 (brainstem/skill) | 内存 |
+| InnateReflex | L0 (brainstem/innate) | 硬编码 + `innate_reflex_weights.json` |
 
 ---
 
@@ -829,6 +860,82 @@ public Map<String, Object> bindParameters(SubtaskNode node, Map<String, Object> 
     return params;
 }
 ```
+
+---
+
+## 25. 记忆关系图 (MemoryGraph)
+
+MemoryGraph 是陈述性记忆的关系层，与 MemoryManager 的切片存储分层独立。它只记录记忆之间的**关系**，不记录记忆内容本身。
+
+### 25.1 数据模型
+
+```java
+// 节点：轻量引用，不污染 MemoryEntry
+record MemoryNode(String memoryId, String summary, long timestamp, int gameDay) {}
+
+// 边：带类型的加权有向边
+record MemoryEdge(String fromId, String toId, RelationType type, double weight) {}
+
+enum RelationType { CAUSAL, TEMPORAL, SIMILARITY, CONTRAST }
+```
+
+### 25.2 存储格式
+
+独立文件 `eagent/bots/{uuid}/memory/memory_graph.json`：
+
+```json
+{
+  "version": "1.0",
+  "lastSavedDay": 42,
+  "nodes": [
+    {"memoryId": "mem_001", "summary": "挖了5个铁矿", "timestamp": 1718300000, "gameDay": 1}
+  ],
+  "edges": [
+    {"fromId": "mem_001", "toId": "mem_002", "type": "CAUSAL", "weight": 0.85}
+  ]
+}
+```
+
+### 25.3 边推断 (inferEdges)
+
+每次创建新记忆时同步推断，但受显著性门控：
+
+| 推断条件 | 结果类型 | 权重公式 |
+|---------|---------|---------|
+| 同 gameDay，时间相邻 | TEMPORAL | `1.0 - gap / avgInterval` |
+| 新 learning 含已有 skill | CAUSAL | `0.5 + overlap * 0.15` |
+| 贝叶斯相似度 > 0.7 | SIMILARITY | `bayes.predictRelevance(a, b)` |
+| 含"成功"/"失败"冲突词 | CONTRAST | `0.3`（固定） |
+
+新记忆必须先过显著性门控（`computeSalience() >= 0.6`）：
+
+| 显著性来源 | 加分 | 条件 |
+|-----------|:---:|------|
+| keyLearnings 非空 | +0.3 | 有学习内容 = 重要性信号 |
+| relatedSkills 数量 | +0.1/个，上限 +0.2 | 技能跨越多类别 |
+| preferencesUpdated 非空 | +0.2 | 偏好变更 = 结果显著性 |
+| 时间间隔 > 2× 平均间隔 | +0.3 | 长时间无记忆后突发 = 重大事件 |
+
+### 25.4 图遍历 API
+
+| 方法 | 说明 | 用途 |
+|------|------|------|
+| `traverse(startId, type, maxDepth)` | BFS 沿指定关系类型游走 | 记忆穿梭 |
+| `traceCausalChain(memoryId, upstream)` | 因果链追溯（前因/后果） | 归因分析 |
+| `findSimilar(memoryId, topK)` | 按相似边权重排序 | 相关推荐 |
+| `getTimeline(gameDay)` | 某天时间线（按时间戳排序） | 日回顾 |
+| `rankEdges(edges, queryContext, bayes)` | 贝叶斯对边关联节点重排 | 上下文排序 |
+
+### 25.5 与 MemoryManager 的关系
+
+```
+MemoryManager              MemoryGraph
+  ├── day_*.mem (切片)      ├── memory_graph.json (关系)
+  ├── 高光片段存储           ├── 零侵入（不修改 MemoryEntry）
+  └── 负责读写内容           └── 只记录节点间关系
+```
+
+MemoryGraph 通过 `setMemoryGraph()` 注入 MemoryManager，`enabled=false` 时完全降级。
 
 ---
 

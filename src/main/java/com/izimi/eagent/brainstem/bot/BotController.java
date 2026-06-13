@@ -1,6 +1,5 @@
 package com.izimi.eagent.brainstem.bot;
 
-import com.izimi.eagent.EAgent;
 import com.izimi.eagent.api.WorldContext;
 import com.izimi.eagent.brainstem.innate.InnateReflex;
 import com.izimi.eagent.brainstem.innate.InnateReflexRegistry;
@@ -18,12 +17,16 @@ import com.izimi.eagent.cortex.inhibitor.InhibitoryControl;
 import com.izimi.eagent.state.StateManager;
 import com.izimi.eagent.cortex.task.TaskExecutor;
 import com.izimi.eagent.cortex.task.TaskManager;
+import com.izimi.eagent.hippocampus.MemoryManager;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.text.Text;
 import net.minecraft.util.math.Vec3d;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class BotController {
+    private static final Logger LOGGER = LoggerFactory.getLogger("e-agent");
     private final BotSpawner botSpawner;
     private final TaskManager taskManager;
     private final TaskExecutor taskExecutor;
@@ -35,6 +38,7 @@ public class BotController {
     private final NaiveBayesClassifier socialClassifier;
     private final InnateReflexRegistry reflexRegistry;
     private final InhibitoryControl inhibitor;
+    private final MemoryManager memoryManager;
 
     private MetaScheduler metaScheduler;
     private WorldContext worldContext;
@@ -43,6 +47,7 @@ public class BotController {
     private int stateSaveInterval = 200;
     private int aiPollInterval = 20;
     private int p3Cooldown = 0;
+    private String pendingChatMessage;
 
     public BotController(BotSpawner botSpawner, TaskManager taskManager,
                          TaskExecutor taskExecutor, StateManager stateManager,
@@ -51,7 +56,8 @@ public class BotController {
                          AIClient aiClient, IdleBrain idleBrain,
                           NaiveBayesClassifier socialClassifier,
                           InnateReflexRegistry reflexRegistry,
-                          InhibitoryControl inhibitor) {
+                          InhibitoryControl inhibitor,
+                          MemoryManager memoryManager) {
         this.botSpawner = botSpawner;
         this.taskManager = taskManager;
         this.taskExecutor = taskExecutor;
@@ -63,6 +69,7 @@ public class BotController {
         this.socialClassifier = socialClassifier;
         this.reflexRegistry = reflexRegistry;
         this.inhibitor = inhibitor;
+        this.memoryManager = memoryManager;
     }
 
     public void onTick(MinecraftServer server) {
@@ -91,16 +98,16 @@ public class BotController {
                 if (inhibitor != null) {
                     BehaviorStats stats = worldContext.behaviorStats();
                     if (inhibitor.shouldVetoSafety(safety, bot, server, stats)) {
-                        EAgent.LOGGER.debug("[BotController] P0.5前额叶否决安全反射: {}", safety.id());
+                        LOGGER.debug("[BotController] P0.5前额叶否决安全反射: {}", safety.id());
                     } else {
-                        EAgent.LOGGER.debug("[BotController] P0安全反射: {} critical={}", safety.id(), safety.critical());
+                        LOGGER.debug("[BotController] P0安全反射: {} critical={}", safety.id(), safety.critical());
                         dispatchReflexAction(bot, safety);
                         if (safety.critical()) {
                             return;
                         }
                     }
                 } else {
-                    EAgent.LOGGER.debug("[BotController] P0安全反射: {} critical={}", safety.id(), safety.critical());
+                    LOGGER.debug("[BotController] P0安全反射: {} critical={}", safety.id(), safety.critical());
                     dispatchReflexAction(bot, safety);
                     if (safety.critical()) {
                         return;
@@ -114,13 +121,13 @@ public class BotController {
         if (activeTask != null && "running".equals(activeTask.getStatus())) {
             var reflexSkill = conditionedReflex.match(activeTask);
             if (reflexSkill != null) {
-                EAgent.LOGGER.debug("[BotController] P1固化反射: {}", reflexSkill.getSkillId());
+                LOGGER.debug("[BotController] P1固化反射: {}", reflexSkill.getSkillId());
                 conditionedReflex.executeReflex(reflexSkill, bot);
                 return;
             }
 
             // P2: 玩家任务 → 子任务迭代 → 无匹配反射 → 走 TaskExecutor, 0 API
-            EAgent.LOGGER.debug("[BotController] P2子任务执行: {} (子任务进度 {}/{})",
+            LOGGER.debug("[BotController] P2子任务执行: {} (子任务进度 {}/{})",
                     activeTask.getGoal(),
                     activeTask.progress.completedCount,
                     activeTask.progress.targetCount);
@@ -135,7 +142,7 @@ public class BotController {
             p3Cooldown = 100;
             Skill autoReflex = conditionedReflex.scanAndTrigger(bot);
             if (autoReflex != null) {
-                EAgent.LOGGER.info("[BotController] P3条件反射自动触发: {}", autoReflex.getSkillId());
+                LOGGER.info("[BotController] P3条件反射自动触发: {}", autoReflex.getSkillId());
                 conditionedReflex.executeReflex(autoReflex, bot);
                 return;
             }
@@ -157,7 +164,7 @@ public class BotController {
                     .filter(r -> r.priority() > 0)
                     .findFirst().orElse(null);
             if (nonSafety != null) {
-                EAgent.LOGGER.debug("[BotController] P4非安全反射: {}", nonSafety.id());
+                LOGGER.debug("[BotController] P4非安全反射: {}", nonSafety.id());
                 dispatchReflexAction(bot, nonSafety);
                 return;
             }
@@ -182,16 +189,16 @@ public class BotController {
             case "collectItem" -> { var r = adapter.collectItem(bot, action.getDouble("speed", 0.15)); executed = r.executed(); success = r.success(); }
             case "sneak" -> { adapter.sneak(bot, true); executed = true; }
             case "invokeLLM" -> {
-                var pc = EAgent.consumePendingChat();
-                if (pc != null && aiChatHandler != null && aiClient.isConfigured()) {
+                if (pendingChatMessage != null && aiChatHandler != null && aiClient.isConfigured()) {
                     var state = stateManager.loadState();
                     var task = taskManager.getActiveTask();
-                    var mems = EAgent.getMemoryManager().getRecentMemories();
-                    aiChatHandler.handleChat(pc.message(), state, task, mems);
+                    var mems = memoryManager.getRecentMemories();
+                    aiChatHandler.handleChat(pendingChatMessage, state, task, mems);
+                    pendingChatMessage = null;
                     executed = true;
                 }
             }
-            default -> EAgent.LOGGER.warn("[BotController] 未知反射动作: {}", action.type());
+            default -> LOGGER.warn("[BotController] 未知反射动作: {}", action.type());
         }
         if (executed && reflexRegistry != null) {
             reflexRegistry.reinforceOnDispatch(reflex.id(), success);
@@ -249,9 +256,8 @@ public class BotController {
             if (response != null && response.isChat() && !response.getMessage().isEmpty()) {
                 bot.sendMessage(Text.literal("§b[E-Agent] §f" + response.getMessage()));
                 if (response.getMemoryNote() != null && !response.getMemoryNote().isEmpty()) {
-                    var mem = EAgent.getMemoryManager();
-                    if (mem != null) {
-                        mem.generateMemory(new com.izimi.eagent.cortex.task.Task(
+                    if (memoryManager != null) {
+                        memoryManager.generateMemory(new com.izimi.eagent.cortex.task.Task(
                                 "chat", "instant", response.getMemoryNote()));
                     }
                 }
@@ -309,4 +315,6 @@ public class BotController {
     }
 
     public MetaScheduler getMetaScheduler() { return metaScheduler; }
+
+    public void setPendingChatMessage(String message) { this.pendingChatMessage = message; }
 }

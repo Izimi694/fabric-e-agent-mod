@@ -1,7 +1,8 @@
 package com.izimi.eagent.brainstem.bot;
 
-import com.izimi.eagent.EAgent;
 import com.mojang.authlib.GameProfile;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.PlayerManager;
 import net.minecraft.server.network.ServerPlayerEntity;
@@ -12,6 +13,8 @@ import net.minecraft.util.math.Vec3d;
 import java.util.UUID;
 
 public class BotSpawner {
+    private static final Logger LOGGER = LoggerFactory.getLogger("e-agent");
+
     private static final UUID BOT_UUID = UUID.fromString("a1b2c3d4-e5f6-7890-abcd-ef1234567890");
     private static final String BOT_NAME = "E-Agent";
 
@@ -51,10 +54,10 @@ public class BotSpawner {
             entity.getHungerManager().setFoodLevel(20);
 
             isSpawned = true;
-            EAgent.LOGGER.info("[BotSpawner] Bot已生成在 ({}, {}, {})", position.x, position.y, position.z);
+            LOGGER.info("[BotSpawner] Bot已生成在 ({}, {}, {})", position.x, position.y, position.z);
             return true;
         } catch (Exception e) {
-            EAgent.LOGGER.error("[BotSpawner] Bot生成失败", e);
+            LOGGER.error("[BotSpawner] Bot生成失败", e);
             isSpawned = false;
             bot = null;
             return false;
@@ -72,10 +75,10 @@ public class BotSpawner {
             bot.setRemoved(net.minecraft.entity.Entity.RemovalReason.DISCARDED);
             bot = null;
             isSpawned = false;
-            EAgent.LOGGER.info("[BotSpawner] Bot已移除");
+            LOGGER.info("[BotSpawner] Bot已移除");
             return true;
         } catch (Exception e) {
-            EAgent.LOGGER.error("[BotSpawner] Bot移除失败", e);
+            LOGGER.error("[BotSpawner] Bot移除失败", e);
             return false;
         }
     }

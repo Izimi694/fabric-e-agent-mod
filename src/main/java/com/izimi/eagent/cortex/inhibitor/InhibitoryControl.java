@@ -1,7 +1,8 @@
 package com.izimi.eagent.cortex.inhibitor;
 
-import com.izimi.eagent.EAgent;
 import com.izimi.eagent.amygdala.character.BehaviorStats;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import com.izimi.eagent.brainstem.innate.InnateReflex;
 import net.minecraft.block.Blocks;
 import net.minecraft.entity.EntityType;
@@ -16,6 +17,8 @@ import net.minecraft.world.World;
 import java.util.Set;
 
 public class InhibitoryControl {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger("e-agent");
 
     private static final int SAFETY_DISTANCE_THRESHOLD = 10;
     private static final float HEALTH_SAFE_THRESHOLD = 15.0f;
@@ -176,6 +179,6 @@ public class InhibitoryControl {
     }
 
     private void logVeto(String category, String reason) {
-        EAgent.LOGGER.info("[InhibitoryControl] 否决-{}: {}", category, reason);
+        LOGGER.info("[InhibitoryControl] 否决-{}: {}", category, reason);
     }
 }

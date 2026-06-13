@@ -1,7 +1,8 @@
 package com.izimi.eagent.brainstem.bot;
 
-import com.izimi.eagent.EAgent;
 import com.izimi.eagent.amygdala.BotParams;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import com.izimi.eagent.util.FileUtil;
 import com.izimi.eagent.util.JsonUtil;
 
@@ -12,6 +13,8 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 public class GenomeArchivist {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger("e-agent");
 
     public static void saveGenome(UUID botId, BotParams params, String name, String cause) {
         Path genomeFile = FileUtil.getBotGenomeDir().resolve(botId + ".json");
@@ -26,7 +29,7 @@ public class GenomeArchivist {
         genome.put("cause", cause);
         genome.put("diedAt", System.currentTimeMillis());
         JsonUtil.writeToFileSafeAtomic(genomeFile, genome);
-        EAgent.LOGGER.info("[Genome] 存档基因组: {} ({}, gen={}, cause={})", name, botId, params.getGeneration(), cause);
+        LOGGER.info("[Genome] 存档基因组: {} ({}, gen={}, cause={})", name, botId, params.getGeneration(), cause);
     }
 
     public static List<GenomeRecord> listGenomes() {

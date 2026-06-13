@@ -15,13 +15,16 @@ import net.minecraft.util.ActionResult;
 import net.minecraft.util.TypedActionResult;
 import net.minecraft.world.World;
 
-import com.izimi.eagent.EAgent;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.function.Consumer;
 
 public class BehaviorEventHandler {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger("e-agent");
 
     private final BehaviorStats stats;
     private final List<Consumer<BehaviorEvent>> learningListeners = new ArrayList<>();
@@ -93,7 +96,7 @@ public class BehaviorEventHandler {
             onChatMessage(message.getSignedContent());
         });
 
-        EAgent.LOGGER.info("[BehaviorEventHandler] 行为观察器已注册 (blockBreak + attack + useItem + placeBlock + chat)");
+        LOGGER.info("[BehaviorEventHandler] 行为观察器已注册 (blockBreak + attack + useItem + placeBlock + chat)");
     }
 
     private void onChatMessage(String message) {

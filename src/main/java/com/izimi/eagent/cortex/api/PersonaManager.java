@@ -1,13 +1,16 @@
 package com.izimi.eagent.cortex.api;
 
-import com.izimi.eagent.EAgent;
 import com.izimi.eagent.util.FileUtil;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
 public class PersonaManager {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger("e-agent");
 
     private volatile String activePersona = "";
     private static final String DEFAULT_PERSONA = "你是一个Minecraft AI助手。";
@@ -24,7 +27,7 @@ public class PersonaManager {
         this.activePersona = personaDescription != null ? personaDescription : "";
         templateManager.setActivePersona(activePersona);
         savePersona();
-        EAgent.LOGGER.info("[Persona] 角色设定已更新: {}", activePersona.substring(0, Math.min(activePersona.length(), 50)));
+        LOGGER.info("[Persona] 角色设定已更新: {}", activePersona.substring(0, Math.min(activePersona.length(), 50)));
     }
 
     public String getPersona() { return activePersona; }
@@ -45,7 +48,7 @@ public class PersonaManager {
             Files.createDirectories(dir);
             Files.writeString(dir.resolve(PERSONA_FILE), activePersona);
         } catch (IOException e) {
-            EAgent.LOGGER.warn("[Persona] 保存失败: {}", e.getMessage());
+            LOGGER.warn("[Persona] 保存失败: {}", e.getMessage());
         }
     }
 
@@ -56,11 +59,11 @@ public class PersonaManager {
                 activePersona = Files.readString(path).trim();
                 templateManager.setActivePersona(activePersona);
                 if (!activePersona.isEmpty()) {
-                    EAgent.LOGGER.info("[Persona] 已加载角色设定");
+                    LOGGER.info("[Persona] 已加载角色设定");
                 }
             }
         } catch (IOException e) {
-            EAgent.LOGGER.warn("[Persona] 加载失败: {}", e.getMessage());
+            LOGGER.warn("[Persona] 加载失败: {}", e.getMessage());
         }
     }
 }

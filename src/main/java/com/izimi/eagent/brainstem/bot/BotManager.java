@@ -1,7 +1,8 @@
 package com.izimi.eagent.brainstem.bot;
 
-import com.izimi.eagent.EAgent;
 import com.izimi.eagent.api.WorldContext;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import com.izimi.eagent.amygdala.BotParams;
 import com.izimi.eagent.brainstem.adapter.TemporalScaler;
 import com.izimi.eagent.util.FileUtil;
@@ -20,6 +21,8 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 public class BotManager {
+    private static final Logger LOGGER = LoggerFactory.getLogger("e-agent");
+
     private final Map<UUID, BotInstance> bots = new LinkedHashMap<>();
     private WorldContext worldContext;
 
@@ -56,7 +59,7 @@ public class BotManager {
             if (parent != null) {
                 BotParams p2 = getSecondParent(parent);
                 childParams = p2 != null ? BotParams.inherit(parent, p2) : BotParams.inherit(parent);
-                EAgent.LOGGER.info("[BotManager] 继承参数: {} (gen {}) -> {} (gen {})",
+                LOGGER.info("[BotManager] 继承参数: {} (gen {}) -> {} (gen {})",
                         parent.getGeneration(), parent.getGeneration() + 1, name, childParams.getGeneration());
             }
         }
@@ -68,7 +71,7 @@ public class BotManager {
         copyReflexesFromMentor(instance);
 
         bots.put(botId, instance);
-        EAgent.LOGGER.info("[BotManager] Bot已生成: {} ({})", name, botId);
+        LOGGER.info("[BotManager] Bot已生成: {} ({})", name, botId);
         return instance;
     }
 
@@ -99,10 +102,10 @@ public class BotManager {
             }
             instance.getBotPlayer().setRemoved(net.minecraft.entity.Entity.RemovalReason.DISCARDED);
             bots.remove(botId);
-            EAgent.LOGGER.info("[BotManager] Bot已移除: {} ({})", instance.getBotName(), botId);
+            LOGGER.info("[BotManager] Bot已移除: {} ({})", instance.getBotName(), botId);
             return true;
         } catch (Exception e) {
-            EAgent.LOGGER.error("[BotManager] Bot移除失败: {}", botId, e);
+            LOGGER.error("[BotManager] Bot移除失败: {}", botId, e);
             return false;
         }
     }
@@ -245,14 +248,14 @@ public class BotManager {
 
                                 JsonUtil.writeToFileSafeAtomic(dest, data);
                             } catch (Exception e) {
-                                EAgent.LOGGER.warn("[BotManager] 复制反射失败: {}", src, e);
+                                LOGGER.warn("[BotManager] 复制反射失败: {}", src, e);
                             }
                         });
             }
-            EAgent.LOGGER.info("[BotManager] 从 {} 继承反射到 {} (trial-first)",
+            LOGGER.info("[BotManager] 从 {} 继承反射到 {} (trial-first)",
                     mentor.getBotName(), newBot.getBotName());
         } catch (IOException e) {
-            EAgent.LOGGER.warn("[BotManager] 冷启动反射复制失败", e);
+            LOGGER.warn("[BotManager] 冷启动反射复制失败", e);
         }
     }
 

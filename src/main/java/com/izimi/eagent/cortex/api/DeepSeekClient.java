@@ -3,11 +3,12 @@ package com.izimi.eagent.cortex.api;
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
-import com.izimi.eagent.EAgent;
 import com.izimi.eagent.hippocampus.MemoryEntry;
 import com.izimi.eagent.state.PlayerState;
 import com.izimi.eagent.cortex.task.Task;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -18,6 +19,7 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
 public class DeepSeekClient implements AIClient {
+    private static final Logger LOGGER = LoggerFactory.getLogger("e-agent");
     private static final Gson GSON = new Gson();
     private final HttpClient httpClient;
     private final AIConfig config;
@@ -45,7 +47,7 @@ public class DeepSeekClient implements AIClient {
             )).get(10, java.util.concurrent.TimeUnit.SECONDS);
             return response != null && !response.isEmpty();
         } catch (Exception e) {
-            EAgent.LOGGER.warn("[DeepSeekClient] 连接测试失败: {}", e.getMessage());
+            LOGGER.warn("[DeepSeekClient] 连接测试失败: {}", e.getMessage());
             return false;
         }
     }
@@ -117,7 +119,7 @@ public class DeepSeekClient implements AIClient {
                         HttpResponse.BodyHandlers.ofString());
 
                 if (response.statusCode() != 200) {
-                    EAgent.LOGGER.error("[DeepSeekClient] API 返回错误 {}: {}", response.statusCode(), response.body());
+                    LOGGER.error("[DeepSeekClient] API 返回错误 {}: {}", response.statusCode(), response.body());
                     return AIResponse.empty();
                 }
 
@@ -126,7 +128,7 @@ public class DeepSeekClient implements AIClient {
                 Thread.currentThread().interrupt();
                 return AIResponse.empty();
             } catch (Exception e) {
-                EAgent.LOGGER.error("[DeepSeekClient] 请求失败: {}", e.getMessage());
+                LOGGER.error("[DeepSeekClient] 请求失败: {}", e.getMessage());
                 return AIResponse.empty();
             }
         });
@@ -137,7 +139,7 @@ public class DeepSeekClient implements AIClient {
             JsonObject root = GSON.fromJson(body, JsonObject.class);
             JsonArray choices = root.getAsJsonArray("choices");
             if (choices == null || choices.isEmpty()) {
-                EAgent.LOGGER.warn("[DeepSeekClient] 响应无choices");
+                LOGGER.warn("[DeepSeekClient] 响应无choices");
                 return AIResponse.empty();
             }
 
@@ -159,7 +161,7 @@ public class DeepSeekClient implements AIClient {
 
             return GSON.fromJson(content, AIResponse.class);
         } catch (Exception e) {
-            EAgent.LOGGER.error("[DeepSeekClient] 解析响应失败: {} -- body: {}",
+            LOGGER.error("[DeepSeekClient] 解析响应失败: {} -- body: {}",
                     e.getMessage(), body.substring(0, Math.min(200, body.length())));
             return AIResponse.empty();
         }
