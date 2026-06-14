@@ -11,6 +11,8 @@ import com.izimi.eagent.util.FileUtil;
 import com.izimi.eagent.util.JsonUtil;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.StringArgumentType;
+import com.mojang.brigadier.suggestion.Suggestions;
+import com.mojang.brigadier.suggestion.SuggestionsBuilder;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.text.Text;
@@ -130,12 +132,28 @@ public class AICommand {
                         }))
                 )
                 .then(literal("apikey").executes(ctx -> showApiKeyStatus(ctx.getSource())))
+                .then(literal("nick")
+                        .then(argument("name", StringArgumentType.word())
+                                .then(argument("nickname", StringArgumentType.greedyString()).executes(ctx -> {
+                                    String name = StringArgumentType.getString(ctx, "name");
+                                    String nickname = StringArgumentType.getString(ctx, "nickname");
+                                    return setNickname(ctx.getSource(), name, nickname);
+                                }))
+                        )
+                )
                 .then(literal("model")
                         .executes(ctx -> showCurrentModel(ctx.getSource()))
-                        .then(argument("name", StringArgumentType.word()).executes(ctx -> {
-                            String modelName = StringArgumentType.getString(ctx, "name");
-                            return setApiModel(ctx.getSource(), modelName);
-                        }))
+                        .then(argument("name", StringArgumentType.word())
+                                .suggests((ctx, builder) -> {
+                                    builder.suggest("deepseek-chat");
+                                    builder.suggest("deepseek-v4-flash");
+                                    builder.suggest("deepseek-reasoner");
+                                    return builder.buildFuture();
+                                })
+                                .executes(ctx -> {
+                                    String modelName = StringArgumentType.getString(ctx, "name");
+                                    return setApiModel(ctx.getSource(), modelName);
+                                }))
                 )
                 .then(literal("reflexpack")
                         .then(literal("export")
@@ -251,6 +269,7 @@ public class AICommand {
         source.sendFeedback(() -> Text.literal("§e/ai persona §7- 查看当前角色"), false);
         source.sendFeedback(() -> Text.literal("§e/ai model [name] §7- 查看/设置AI模型 (如 deepseek-chat)"), false);
         source.sendFeedback(() -> Text.literal("§e/ai bot <名字> <指令> §7- 指定AI执行指令"), false);
+        source.sendFeedback(() -> Text.literal("§e/ai nick <名字> <小名> §7- 设置AI的小名/昵称"), false);
         source.sendFeedback(() -> Text.literal("§e/ai reflexpack export <机器人> <包名> §7- 导出反射 (默认含先验)"), false);
         source.sendFeedback(() -> Text.literal("§e/ai reflexpack export <机器人> <包名> noprior §7- 导出反射 (不含先验)"), false);
         source.sendFeedback(() -> Text.literal("§e/ai reflexpack import <机器人> <包名> [reset] §7- 导入反射 (合并/冷启动)"), false);
@@ -844,6 +863,26 @@ public class AICommand {
             source.sendFeedback(() -> Text.literal("§e已学习反射: §f" + reflexCount + " 个"), false);
         } catch (Exception e) {
             source.sendFeedback(() -> Text.literal("§c[Playstyle] 查询失败: " + e.getMessage()), false);
+        }
+        return 1;
+    }
+
+    private static int setNickname(ServerCommandSource source, String name, String nickname) {
+        try {
+            BotManager mgr = getManager();
+            if (mgr == null || mgr.isEmpty()) {
+                source.sendFeedback(() -> Text.literal("§7[E-Agent] 没有活动的AI"), false);
+                return 0;
+            }
+            BotInstance bot = mgr.getByName(name);
+            if (bot == null) {
+                source.sendFeedback(() -> Text.literal("§7[E-Agent] 未找到AI: " + name), false);
+                return 0;
+            }
+            bot.setNickname(nickname);
+            source.sendFeedback(() -> Text.literal("§a[E-Agent] " + bot.getBotName() + " 的小名已设置为: " + nickname), false);
+        } catch (Exception e) {
+            source.sendFeedback(() -> Text.literal("§c[E-Agent] 设置小名失败: " + e.getMessage()), false);
         }
         return 1;
     }

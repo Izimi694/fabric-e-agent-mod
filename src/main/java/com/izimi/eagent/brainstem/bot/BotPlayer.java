@@ -17,7 +17,9 @@ import net.minecraft.server.network.ServerPlayNetworkHandler;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.text.Text;
+import net.minecraft.entity.MovementType;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
 
 import java.util.Map;
@@ -119,33 +121,81 @@ public class BotPlayer {
     }
 
     public void tick() {
-        // Inject stored navigation input right before entity tick
-        // (counters potential internal reset in ServerPlayerEntity.tick())
-        if (storedForward != 0f || storedStrafe != 0f || storedJump) {
-            playerEntity.updateInput(storedForward, storedStrafe, storedJump, false);
-        }
-
-        Vec3d oldPos = playerEntity.getPos();
-        playerEntity.tick();
-
-        // Log position changes
-        if (!oldPos.equals(playerEntity.getPos())) {
-            LOGGER.info("[BotPlayer] moved: ({:.2f},{:.2f},{:.2f}) -> ({:.2f},{:.2f},{:.2f}), delta=({:.4f},{:.4f},{:.4f})",
-                    oldPos.x, oldPos.y, oldPos.z,
-                    playerEntity.getX(), playerEntity.getY(), playerEntity.getZ(),
-                    playerEntity.getX() - oldPos.x,
-                    playerEntity.getY() - oldPos.y,
-                    playerEntity.getZ() - oldPos.z);
-        }
-
         tickCounter++;
-        if (tickCounter % LOG_TICK_INTERVAL == 0) {
-            LOGGER.info("[BotPlayer] tick={}, pos=({:.1f},{:.1f},{:.1f}), isOnGround={}, yaw={}",
-                    tickCounter,
-                    playerEntity.getX(), playerEntity.getY(), playerEntity.getZ(),
-                    playerEntity.isOnGround(),
-                    playerEntity.getYaw());
+
+        boolean hasInput = storedForward != 0f || storedStrafe != 0f || storedJump;
+
+        // 1. Read current velocity
+        Vec3d vel = playerEntity.getVelocity();
+
+        // 2. Apply gravity (0.08 blocks/tick²)
+        if (!playerEntity.isOnGround()) {
+            vel = vel.subtract(0, 0.08, 0);
         }
+
+        // 3. Apply friction
+        if (playerEntity.isOnGround()) {
+            vel = new Vec3d(vel.x * 0.6, vel.y * 0.98, vel.z * 0.6);
+        } else {
+            vel = new Vec3d(vel.x * 0.91, vel.y * 0.98, vel.z * 0.91);
+        }
+
+        // 4. Apply input-based velocity
+        if (hasInput) {
+            float yawRad = playerEntity.getYaw() * 0.017453292f;
+            float speed = playerEntity.getMovementSpeed();
+
+            double vx = (-MathHelper.sin(yawRad) * storedForward + MathHelper.cos(yawRad) * storedStrafe) * speed;
+            double vz = (MathHelper.cos(yawRad) * storedForward + MathHelper.sin(yawRad) * storedStrafe) * speed;
+            vel = vel.add(vx, 0, vz);
+
+            if (storedJump && playerEntity.isOnGround()) {
+                vel = vel.add(0, 0.42, 0);
+            }
+        }
+
+        playerEntity.setVelocity(vel);
+        playerEntity.velocityModified = true;
+
+        // 5. Move entity (collision-aware)
+        double oldX = playerEntity.getX();
+        double oldY = playerEntity.getY();
+        double oldZ = playerEntity.getZ();
+
+        playerEntity.move(MovementType.SELF, vel);
+
+        double moved = Math.sqrt(
+                Math.pow(playerEntity.getX() - oldX, 2) +
+                Math.pow(playerEntity.getY() - oldY, 2) +
+                Math.pow(playerEntity.getZ() - oldZ, 2));
+
+        // 6. Zero out downward velocity when on ground
+        if (playerEntity.isOnGround() && playerEntity.getVelocity().y < 0) {
+            Vec3d v = playerEntity.getVelocity();
+            playerEntity.setVelocity(v.x, 0, v.z);
+            playerEntity.velocityModified = true;
+        }
+
+        // 7. Log every 60 ticks (or if input but no movement)
+        if (tickCounter % LOG_TICK_INTERVAL == 0 || (hasInput && moved < 0.001)) {
+            LOGGER.info("[BotPlayer] tick={}, pos=({},{},{}), onGround={}, yaw={}, vel=({},{},{}), input=({},{},{}), moved={}",
+                    tickCounter,
+                    String.format("%.1f", playerEntity.getX()),
+                    String.format("%.1f", playerEntity.getY()),
+                    String.format("%.1f", playerEntity.getZ()),
+                    playerEntity.isOnGround(),
+                    String.format("%.1f", playerEntity.getYaw()),
+                    String.format("%.3f", playerEntity.getVelocity().x),
+                    String.format("%.3f", playerEntity.getVelocity().y),
+                    String.format("%.3f", playerEntity.getVelocity().z),
+                    storedForward, storedStrafe, storedJump ? 1 : 0,
+                    String.format("%.4f", moved));
+        }
+
+        // 8. Reset stored input for next tick
+        storedForward = 0;
+        storedStrafe = 0;
+        storedJump = false;
     }
 
     public MinecraftServer getServer() {

@@ -52,7 +52,7 @@ class DeepSeekClientTest {
                 }
                 """;
         AIResponse response = DeepSeekClient.parseResponse(body);
-        assertEquals("wait", response.action);
+        assertTrue(response.isEmpty());
     }
 
     @Test
@@ -60,14 +60,14 @@ class DeepSeekClientTest {
     void parseResponseMissingChoices() {
         String body = "{}";
         AIResponse response = DeepSeekClient.parseResponse(body);
-        assertEquals("wait", response.action);
+        assertTrue(response.isEmpty());
     }
 
     @Test
     @DisplayName("parseResponse returns empty sentinel on malformed JSON")
     void parseResponseMalformedJson() {
         AIResponse response = DeepSeekClient.parseResponse("not json");
-        assertEquals("wait", response.action);
+        assertTrue(response.isEmpty());
     }
 
     @Test

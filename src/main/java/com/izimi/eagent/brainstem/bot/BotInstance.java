@@ -67,6 +67,7 @@ public class BotInstance {
     private final MemoryManager memoryManager;
     private final PlanManager planManager;
 
+    private String nickname;
     private String pendingChatMessage;
     private int tickCounter = 0;
     private static final int STATE_SAVE_INTERVAL = 200;
@@ -179,7 +180,8 @@ public class BotInstance {
 
     public void sendMessage(String message) {
         if (botPlayer != null && !botPlayer.isRemoved()) {
-            botPlayer.asEntity().sendMessage(Text.literal("§b[" + botName + "] §f" + message));
+            String display = (nickname != null && !nickname.isEmpty()) ? nickname : botName;
+            botPlayer.asEntity().sendMessage(Text.literal("§b[" + display + "] §f" + message));
         }
     }
 
@@ -187,6 +189,8 @@ public class BotInstance {
     public BotContext getBotContext() { return botContext; }
     public UUID getBotId() { return botId; }
     public String getBotName() { return botName; }
+    public String getNickname() { return nickname; }
+    public void setNickname(String nickname) { this.nickname = nickname; }
     public BotPlayer getBotPlayer() { return botPlayer; }
     public ServerPlayerEntity asEntity() { return botPlayer != null ? botPlayer.asEntity() : null; }
     public BotParams getBotParams() { return botParams; }

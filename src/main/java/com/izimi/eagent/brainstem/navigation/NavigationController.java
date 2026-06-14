@@ -49,8 +49,8 @@ public class NavigationController {
                 bp.setMoveInput(1.0f, 0, shouldJump);
             }
 
-            LOGGER.info("[Navigation] moveToward -> updateInput(1.0, 0, jump={}), pos={}, isOnGround={}, y={}",
-                    shouldJump, bot.getBlockPos(), bot.isOnGround(), bot.getY());
+            LOGGER.info("[Navigation] moveToward -> updateInput(1.0, 0, jump={}), pos={}, onGround={}, y={}, waypoint={}",
+                    shouldJump, bot.getBlockPos(), bot.isOnGround(), String.format("%.1f", bot.getY()), waypoint);
 
             if (shouldJump) {
                 bot.jump();

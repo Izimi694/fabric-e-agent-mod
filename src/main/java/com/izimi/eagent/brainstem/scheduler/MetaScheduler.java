@@ -219,10 +219,12 @@ public class MetaScheduler {
         if (activeTask != null && "running".equals(activeTask.getStatus())) {
             var reflexSkill = conditioned.match(activeTask);
             if (reflexSkill != null) {
+                LOGGER.info("[MetaScheduler] HABIT execute reflex: {}", reflexSkill.getSkillId());
                 if (tryExecuteReflex(botCtx, bot, reflexSkill.getSkillId(), reflexSkill)) return true;
             }
             var taskExecutor = botCtx.taskExecutor();
             if (taskExecutor != null) {
+                LOGGER.info("[MetaScheduler] HABIT execute task: {}", activeTask.getGoal());
                 taskExecutor.executeTask(bot, activeTask);
                 return true;
             }
@@ -315,7 +317,7 @@ public class MetaScheduler {
     private boolean execute(DispatchReflex.DispatchAction action, BotContext botCtx, WorldContext worldCtx, ServerPlayerEntity bot, MetaState state, MinecraftServer server) {
         if (bot == null) return false;
 
-        LOGGER.debug("[MetaScheduler] Dispatch: {} ({})", action.layer(), action.reason());
+        LOGGER.info("[MetaScheduler] Dispatch: {} ({})", action.layer(), action.reason());
 
         return switch (action.layer()) {
             case "INSTINCT" -> LowLevelDispatcher.executeInstinctLayer(botCtx, worldCtx, bot, temporalScaler);
@@ -371,6 +373,7 @@ public class MetaScheduler {
 
         state.resetTickSinceLastLLM();
         try {
+            LOGGER.info("[LLM] L6 dispatch: template={}, msg={}", templateType, msg.length() > 60 ? msg.substring(0, 60) + "..." : msg);
             CompletableFuture<JsonObject> future = templateManager.fill(templateType, context);
             // 如果被限速返回 null, 直接回退
             if (future == null) {

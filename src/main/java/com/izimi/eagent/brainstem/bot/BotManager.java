@@ -67,7 +67,8 @@ public class BotManager {
         entity.setHealth(20.0f);
         entity.getHungerManager().setFoodLevel(20);
 
-        // Initialize abilities for entity physics
+        world.spawnEntity(entity);
+
         entity.getAbilities().flying = false;
         entity.getAbilities().allowFlying = false;
         entity.getAbilities().invulnerable = false;
@@ -149,16 +150,17 @@ public class BotManager {
 
     public BotInstance getByName(String name) {
         String lower = name.toLowerCase();
+        // Exact match on botName or nickname
         for (BotInstance instance : bots.values()) {
-            if (instance.getBotName().toLowerCase().equals(lower)) {
-                return instance;
-            }
+            if (instance.getBotName().toLowerCase().equals(lower)) return instance;
+            String nick = instance.getNickname();
+            if (nick != null && nick.toLowerCase().equals(lower)) return instance;
         }
         // Partial match fallback
         for (BotInstance instance : bots.values()) {
-            if (instance.getBotName().toLowerCase().contains(lower)) {
-                return instance;
-            }
+            if (instance.getBotName().toLowerCase().contains(lower)) return instance;
+            String nick = instance.getNickname();
+            if (nick != null && nick.toLowerCase().contains(lower)) return instance;
         }
         return null;
     }

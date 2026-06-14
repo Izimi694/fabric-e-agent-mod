@@ -72,7 +72,7 @@ public class DeepSeekClient implements AIClient {
             var response = sendMessage(List.of(
                     AIMessage.system("回复'ok'"),
                     AIMessage.user("ping")
-            )).get(10, java.util.concurrent.TimeUnit.SECONDS);
+            ), false).get(10, java.util.concurrent.TimeUnit.SECONDS);
             return response != null && !response.isEmpty();
         } catch (Exception e) {
             LOGGER.warn("[DeepSeekClient] 连接测试失败: {}", e.getMessage());
@@ -96,27 +96,31 @@ public class DeepSeekClient implements AIClient {
                                                    Map<String, Double> preferences) {
         List<AIMessage> messages = AIRequest.buildPlanningRequest(
                 playerMessage, state, activeTask, recentMemories, preferences);
-        return sendMessage(messages);
+        return sendMessage(messages, true);
     }
 
     @Override
     public CompletableFuture<AIResponse> generateMemory(Task completedTask, PlayerState state) {
         List<AIMessage> messages = AIRequest.buildMemoryRequest(completedTask, state);
-        return sendMessage(messages);
+        return sendMessage(messages, true);
     }
 
     @Override
     public CompletableFuture<AIResponse> sendMessage(List<AIMessage> messages) {
+        return sendMessage(messages, true);
+    }
+
+    public CompletableFuture<AIResponse> sendMessage(List<AIMessage> messages, boolean jsonMode) {
         return CompletableFuture.supplyAsync(() -> {
             if (circuitOpen.get()) {
                 LOGGER.warn("[DeepSeekClient] Circuit breaker open, skipping LLM call");
                 return AIResponse.empty();
             }
-            return sendWithRetry(messages, 0);
+            return sendWithRetry(messages, 0, jsonMode);
         }, retryExecutor);
     }
 
-    private AIResponse sendWithRetry(List<AIMessage> messages, int attempt) {
+    private AIResponse sendWithRetry(List<AIMessage> messages, int attempt, boolean jsonMode) {
         try {
             long now = System.currentTimeMillis();
             long waitTime = MIN_CALL_INTERVAL_MS - (now - lastCallTime);
@@ -137,9 +141,11 @@ public class DeepSeekClient implements AIClient {
             }
             body.add("messages", msgArray);
 
-            JsonObject responseFormat = new JsonObject();
-            responseFormat.addProperty("type", "json_object");
-            body.add("response_format", responseFormat);
+            if (jsonMode) {
+                JsonObject responseFormat = new JsonObject();
+                responseFormat.addProperty("type", "json_object");
+                body.add("response_format", responseFormat);
+            }
 
             body.addProperty("temperature", 0.7);
             body.addProperty("max_tokens", 1024);
@@ -165,26 +171,34 @@ public class DeepSeekClient implements AIClient {
                         LOGGER.warn("Retry-After 头解析失败: '{}' — {}", retryAfter, e.getMessage());
                     }
                 }
-                return handleRetry(messages, attempt, delayMs);
+                return handleRetry(messages, attempt, delayMs, jsonMode);
             }
 
             if (response.statusCode() != 200) {
                 LOGGER.error("[DeepSeekClient] API 返回错误 {}: {}", response.statusCode(), response.body());
-                return handleRetry(messages, attempt, BASE_RETRY_DELAY_MS * (1L << attempt));
+                return handleRetry(messages, attempt, BASE_RETRY_DELAY_MS * (1L << attempt), jsonMode);
             }
 
             consecutiveFailures.set(0);
-            return parseResponse(response.body());
+            AIResponse result = parseResponse(response.body());
+            if (result != null && result.usage != null) {
+                LOGGER.info("[LLM] tokens: prompt={}, completion={}, total={}, cost=¥{}",
+                        result.usage.promptTokens(),
+                        result.usage.completionTokens(),
+                        result.usage.totalTokens(),
+                        String.format("%.6f", result.usage.estimatedCostYuan(config.apiModel)));
+            }
+            return result;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return AIResponse.empty();
         } catch (Exception e) {
             LOGGER.error("[DeepSeekClient] 请求失败: {}", e.getMessage());
-            return handleRetry(messages, attempt, BASE_RETRY_DELAY_MS * (1L << attempt));
+            return handleRetry(messages, attempt, BASE_RETRY_DELAY_MS * (1L << attempt), jsonMode);
         }
     }
 
-    private AIResponse handleRetry(List<AIMessage> messages, int attempt, long delayMs) {
+    private AIResponse handleRetry(List<AIMessage> messages, int attempt, long delayMs, boolean jsonMode) {
         int failures = consecutiveFailures.incrementAndGet();
         if (attempt >= MAX_RETRIES || failures >= MAX_RETRIES) {
             circuitOpen.set(true);
@@ -197,12 +211,27 @@ public class DeepSeekClient implements AIClient {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
-        return sendWithRetry(messages, attempt + 1);
+        return sendWithRetry(messages, attempt + 1, jsonMode);
     }
 
     static AIResponse parseResponse(String body) {
         try {
             JsonObject root = GSON.fromJson(body, JsonObject.class);
+
+            if (root.has("usage")) {
+                JsonObject usage = root.getAsJsonObject("usage");
+                int prompt = usage.has("prompt_tokens") ? usage.get("prompt_tokens").getAsInt() : 0;
+                int completion = usage.has("completion_tokens") ? usage.get("completion_tokens").getAsInt() : 0;
+                int total = usage.has("total_tokens") ? usage.get("total_tokens").getAsInt() : 0;
+                AIResponse emptyWithUsage = AIResponse.empty();
+                emptyWithUsage.usage = new AIResponse.TokenUsage(prompt, completion, total);
+                // If no choices, still return empty with usage info
+                if (!root.has("choices")) {
+                    return emptyWithUsage;
+                }
+                // Continue parsing normally — we'll attach usage later
+            }
+
             JsonArray choices = root.getAsJsonArray("choices");
             if (choices == null || choices.isEmpty()) {
                 LOGGER.warn("[DeepSeekClient] 响应无choices");
@@ -225,7 +254,17 @@ public class DeepSeekClient implements AIClient {
             }
             content = content.trim();
 
-            return GSON.fromJson(content, AIResponse.class);
+            AIResponse result = GSON.fromJson(content, AIResponse.class);
+
+            if (root.has("usage")) {
+                JsonObject usage = root.getAsJsonObject("usage");
+                result.usage = new AIResponse.TokenUsage(
+                        usage.has("prompt_tokens") ? usage.get("prompt_tokens").getAsInt() : 0,
+                        usage.has("completion_tokens") ? usage.get("completion_tokens").getAsInt() : 0,
+                        usage.has("total_tokens") ? usage.get("total_tokens").getAsInt() : 0);
+            }
+
+            return result;
         } catch (Exception e) {
             LOGGER.error("[DeepSeekClient] 解析响应失败: {} -- body: {}",
                     e.getMessage(), body.substring(0, Math.min(200, body.length())));

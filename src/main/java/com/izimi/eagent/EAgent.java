@@ -224,14 +224,14 @@ public class EAgent implements ModInitializer {
             LOGGER.info("[E-Agent] 世界已加载");
         });
 
-        ServerTickEvents.START_SERVER_TICK.register(server -> {
+        ServerTickEvents.END_SERVER_TICK.register(server -> {
             if (botManager != null) {
                 botManager.tickAll(server);
             }
             if (botController != null) {
                 botController.onTick(server);
             }
-            if (evaluationCycle != null) {
+            if (evaluationCycle != null && botManager != null && !botManager.isEmpty()) {
                 evaluationCycle.onTick();
             }
             updateNearbyPlayers(server);
@@ -317,7 +317,7 @@ public class EAgent implements ModInitializer {
     }
 
     private static void handleFallbackRoute(String content, ServerPlayerEntity sender) {
-        if (evaluationCycle != null) {
+        if (evaluationCycle != null && botManager != null && !botManager.isEmpty()) {
             evaluationCycle.checkMessage(content);
         }
 

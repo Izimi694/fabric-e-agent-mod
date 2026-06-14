@@ -12,6 +12,20 @@ public class AIResponse {
     @SerializedName("personality_delta")
     public java.util.Map<String, Double> personalityDelta;
 
+    public TokenUsage usage;
+
+    public record TokenUsage(int promptTokens, int completionTokens, int totalTokens) {
+        public double estimatedCostYuan(String model) {
+            double promptPrice = 1.0;
+            double completionPrice = 2.0;
+            if (model != null && model.contains("flash")) {
+                promptPrice = 0.5;
+                completionPrice = 1.0;
+            }
+            return (promptTokens * promptPrice + completionTokens * completionPrice) / 1_000_000.0;
+        }
+    }
+
     public static class AIResponseParams {
         public String target;
         public int amount;
@@ -40,7 +54,7 @@ public class AIResponse {
 
     public static AIResponse empty() {
         AIResponse r = new AIResponse();
-        r.action = "wait";
+        r.action = null;
         r.message = "";
         return r;
     }
