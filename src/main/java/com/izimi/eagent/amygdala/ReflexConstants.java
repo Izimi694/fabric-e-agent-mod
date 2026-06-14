@@ -31,4 +31,9 @@ public final class ReflexConstants {
     public static final String KEY_SUCCESS_RATE = "successRate";
     public static final String KEY_TRIAL_SUCCESSES = "trialSuccesses";
     public static final String KEY_TRIAL_FAILURES = "trialFailures";
+    public static final String KEY_LAST_ACCESSED = "lastAccessedAt";
+
+    // ── Decay ──
+    public static final double DECAY_RATE_PER_HOUR = 0.0003;
+    public static final double DECAY_MIN = 0.3;
 }

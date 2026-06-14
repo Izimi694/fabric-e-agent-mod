@@ -1,0 +1,29 @@
+{
+  "version": 2,
+  "packName": "explorer",
+  "description": "探索型玩法包 — 好奇心驱动，偏好地图遍历与资源发现",
+  "profile": {
+    "alpha": 0.45,
+    "beta": 0.005,
+    "temperature": 0.50,
+    "hormonal_preset": {
+      "stress": 0.10,
+      "aggression": 0.15,
+      "curiosity": 0.75,
+      "ne": 0.08,
+      "da": 0.50,
+      "serotonin": 0.35,
+      "ach": 0.60
+    },
+    "perspective_weights": {
+      "SURVIVAL": 0.6,
+      "TASK": 0.4,
+      "SOCIAL": 0.3,
+      "CURIOUS": 1.0,
+      "CAUTIOUS": 0.3
+    }
+  },
+  "reflexes": {},
+  "knowledge": {},
+  "config": {}
+}

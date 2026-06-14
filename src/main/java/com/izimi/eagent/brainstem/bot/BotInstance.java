@@ -1,7 +1,10 @@
 package com.izimi.eagent.brainstem.bot;
 
+import java.util.Map;
 import java.util.UUID;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import com.izimi.eagent.api.BotContext;
 import com.izimi.eagent.api.MetaState;
 import com.izimi.eagent.api.WorldContext;
@@ -13,13 +16,16 @@ import com.izimi.eagent.amygdala.OneShotAlarmSystem;
 import com.izimi.eagent.amygdala.learning.CorrelationDetector;
 import com.izimi.eagent.amygdala.learning.LearningSystem;
 import com.izimi.eagent.bayesian.BayesianModule;
+import com.izimi.eagent.cortex.api.PlaystylePack;
 import com.izimi.eagent.hormonal.HormonalSystem;
 import com.izimi.eagent.brainstem.IdleBrain;
 import com.izimi.eagent.brainstem.adapter.TemporalScaler;
 import com.izimi.eagent.brainstem.scheduler.MetaScheduler;
 import com.izimi.eagent.brainstem.scheduler.MotivationEngine;
+import com.izimi.eagent.brainstem.scheduler.Perspective;
 import com.izimi.eagent.cortex.api.AITaskPlanner;
 import com.izimi.eagent.cortex.chat.ChatSessionManager;
+import com.izimi.eagent.cortex.planner.KnowledgeBase;
 import com.izimi.eagent.cortex.planner.PlanManager;
 import com.izimi.eagent.cortex.task.TaskExecutor;
 import com.izimi.eagent.cortex.task.TaskManager;
@@ -32,6 +38,8 @@ import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.text.Text;
 
 public class BotInstance {
+    private static final Logger LOGGER = LoggerFactory.getLogger("e-agent");
+
     private final UUID botId;
     private final String botName;
     private final BotPlayer botPlayer;
@@ -94,6 +102,7 @@ public class BotInstance {
         this.temporalScaler = this.metaScheduler.getTemporalScaler();
         this.dispatchReflex = new DispatchReflex(botParams, botId);
         this.bayesianModule = new BayesianModule(botId);
+        this.alarms.setBayesianModule(bayesianModule);
         this.conditionedReflex.setBayesianModule(bayesianModule);
         this.taskManager = new TaskManager(botId);
         this.taskExecutor = new TaskExecutor(taskManager, skillManager, worldContext.executionLogger());
@@ -106,6 +115,7 @@ public class BotInstance {
 
         this.idleBrain = new IdleBrain(taskManager, skillManager);
         this.reflexPackManager = new ReflexPackManager(botId, bayesianModule);
+        this.reflexPackManager.setBotInstance(this);
         this.metaScheduler.setCorrelationDetector(correlationDetector);
 
         if (worldContext != null) {
@@ -136,12 +146,22 @@ public class BotInstance {
             saveDeathGenome("killed");
         }
 
+        // Auto-respawn: restore health so entity tick processes physics (travel/gravity/input)
+        if (bot.getHealth() <= 0) {
+            bot.setHealth(20.0f);
+            bot.deathTime = 0;
+            LOGGER.info("[BotInstance] 自动复活 {}", botName);
+        }
+
         tickCounter++;
 
         MetaState state = new MetaState();
         String pendingChat = consumePendingChat();
         if (pendingChat != null) state.setPendingChat(pendingChat);
         metaScheduler.tick(botContext, worldContext, bot, state, server);
+
+        // Drive entity tick (physics/gravity/movement)
+        botPlayer.tick();
 
         hormonalSystem.tick();
 
@@ -187,6 +207,73 @@ public class BotInstance {
     public MemoryManager getMemoryManager() { return memoryManager; }
     public PlanManager getPlanManager() { return planManager; }
     public ReflexPackManager getReflexPackManager() { return reflexPackManager; }
+
+    /**
+     * Apply a V2 PlaystylePack to this bot instance.
+     * Chains: BotParams override → HormonalPreset → Perspective weights
+     *         → KnowledgeBase playstyle switch → reflex pack import
+     */
+    public boolean applyPlaystylePack(PlaystylePack pack) {
+        if (pack == null) return false;
+
+        // 1. Profile: BotParams + HormonalPreset
+        if (pack.profile() != null) {
+            var p = pack.profile();
+            botParams.override(p.alpha(), p.beta(), p.temperature());
+            hormonalSystem.applyPreset(p.hormonalPreset());
+            if (p.perspectiveWeights() != null && !p.perspectiveWeights().isEmpty()) {
+                Map<Perspective, Double> weights = new java.util.HashMap<>();
+                for (var e : p.perspectiveWeights().entrySet()) {
+                    try {
+                        weights.put(Perspective.valueOf(e.getKey().toUpperCase()), e.getValue());
+                    } catch (IllegalArgumentException ignored) {}
+                }
+                motivationEngine.setPerspectiveWeights(weights);
+            }
+        }
+
+        // 2. KnowledgeBase playstyle switch
+        KnowledgeBase kb = worldContext != null ? worldContext.cortex().knowledgeBase() : null;
+        if (kb != null && pack.knowledge() != null && !pack.knowledge().isEmpty()) {
+            kb.setPlaystyleKnowledge(pack.packName(), pack.knowledge());
+            kb.switchPlaystyle(pack.packName());
+        }
+
+        // 3. Reflexes (delegate to ReflexPackManager)
+        if (pack.reflexes() != null && !pack.reflexes().isEmpty()) {
+            try {
+                java.nio.file.Path conditionedDir = FileUtil.getBotConditionedDir(botId);
+                java.nio.file.Files.createDirectories(conditionedDir);
+                int imported = 0;
+                for (var entry : pack.reflexes().entrySet()) {
+                    String reflexId = entry.getKey();
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> data = entry.getValue() instanceof Map
+                        ? (Map<String, Object>) entry.getValue() : null;
+                    if (data != null) {
+                        java.nio.file.Path rf = conditionedDir.resolve(reflexId + ".json");
+                        com.izimi.eagent.util.JsonUtil.writeToFileSafeAtomic(rf, data);
+                        imported++;
+                    }
+                }
+                LOGGER.info("[BotInstance] playstyle {}: 已导入 {} 个反射", pack.packName(), imported);
+            } catch (java.io.IOException e) {
+                LOGGER.warn("[BotInstance] playstyle {}: 反射导入失败: {}", pack.packName(), e.getMessage());
+            }
+        }
+
+        // 4. Config overrides (shared pool constraints — logged for future runtime support)
+        if (pack.config() != null && !pack.config().isEmpty()) {
+            LOGGER.info("[BotInstance] playstyle {}: 配置覆盖 {} 项", pack.packName(), pack.config().size());
+        }
+
+        LOGGER.info("[BotInstance] playstyle {} 已应用: alpha={} beta={} temp={}",
+                pack.packName(),
+                String.format("%.3f", botParams.getAlpha()),
+                String.format("%.4f", botParams.getBeta()),
+                String.format("%.3f", botParams.getTemperature()));
+        return true;
+    }
 
     public void setPendingChat(String message) { this.pendingChatMessage = message; }
     public String consumePendingChat() {

@@ -1,7 +1,6 @@
 package com.izimi.eagent.amygdala;
 
 import com.izimi.eagent.amygdala.learning.BehaviorEvent;
-import com.izimi.eagent.bayesian.GatingArbiter;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -9,29 +8,13 @@ import java.util.concurrent.ConcurrentHashMap;
 public class SocialObserver {
 
     private static final long WINDOW_MS = 60_000;
-    private static final double CONTROLLABILITY_GATE = 0.3;
 
     private final Map<String, Deque<BehaviorEvent>> playerWindows = new ConcurrentHashMap<>();
     private final Set<String> nearbyPlayers = ConcurrentHashMap.newKeySet();
     private final FamiliarityTracker familiarityTracker;
-    private GatingArbiter gatingArbiter;
 
     public SocialObserver(FamiliarityTracker familiarityTracker) {
         this.familiarityTracker = familiarityTracker;
-    }
-
-    public void setGatingArbiter(GatingArbiter gatingArbiter) {
-        this.gatingArbiter = gatingArbiter;
-    }
-
-    /**
-     * 环境可控性门控: 低于阈值 → 观察到的行为可直接固化(环境不可控),
-     * 否则需要贝叶斯验证后才能固化.
-     */
-    public boolean shouldDirectConsolidate(String reflexId) {
-        if (gatingArbiter == null) return false;
-        double controllability = gatingArbiter.computeControllability(reflexId, null);
-        return controllability < CONTROLLABILITY_GATE;
     }
 
     public void onEvent(BehaviorEvent event) {

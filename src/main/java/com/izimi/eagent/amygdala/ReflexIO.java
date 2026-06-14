@@ -6,7 +6,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.nio.file.Path;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -135,6 +134,7 @@ public final class ReflexIO {
         data.put(KEY_PROFICIENCY, 0.1);
         data.put(KEY_SHORT_TERM_WEIGHT, 0.5);
         data.put(KEY_LONG_TERM_BASELINE, 0.5);
+        data.put(KEY_LAST_ACCESSED, System.currentTimeMillis());
         saveData(reflexId, botId, data);
         try {
             java.nio.file.Files.deleteIfExists(archivePath);

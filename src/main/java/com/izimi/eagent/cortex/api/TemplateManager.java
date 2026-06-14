@@ -87,8 +87,6 @@ public class TemplateManager {
         return true;
     }
 
-    private final String defaultPersona = "你是一个Minecraft AI助手。";
-
     /** 注入当前角色设定到系统提示 */
     public String injectPersona(String basePrompt, String persona) {
         if (persona == null || persona.isBlank()) return basePrompt;
@@ -176,15 +174,17 @@ public class TemplateManager {
             case CHAT_RESPONSE -> {
                 String playerMsg = (String) context.getOrDefault("playerMessage", "");
                 String contextInfo = (String) context.getOrDefault("contextInfo", "");
+                String formatHint = (String) context.getOrDefault("formatHint", "");
+                String formatSection = formatHint.isEmpty() ? "" : "格式提示: " + formatHint + "\n";
                 yield String.format("""
                         玩家消息: "%s"
                         上下文: %s
-                        填空以下JSON:
+                        %s填空以下JSON:
                         {
                           "reply_text": "{回复文本}",
                           "suggested_emote": "{可选动作}",
                           "tone": "warm|neutral|cold"
-                        }""", playerMsg, contextInfo);
+                        }""", playerMsg, contextInfo, formatSection);
             }
             case EVALUATION_BATCH -> {
                 String evaluations = (String) context.getOrDefault("evaluations", "");

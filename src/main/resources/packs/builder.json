@@ -1,0 +1,29 @@
+{
+  "version": 2,
+  "packName": "builder",
+  "description": "建筑型玩法包 — 偏好建设与规划，耐心收集材料和搭建结构",
+  "profile": {
+    "alpha": 0.30,
+    "beta": 0.015,
+    "temperature": 0.35,
+    "hormonal_preset": {
+      "stress": 0.08,
+      "aggression": 0.10,
+      "curiosity": 0.40,
+      "ne": 0.06,
+      "da": 0.40,
+      "serotonin": 0.55,
+      "ach": 0.45
+    },
+    "perspective_weights": {
+      "SURVIVAL": 0.4,
+      "TASK": 1.0,
+      "SOCIAL": 0.2,
+      "CURIOUS": 0.5,
+      "CAUTIOUS": 0.6
+    }
+  },
+  "reflexes": {},
+  "knowledge": {},
+  "config": {}
+}

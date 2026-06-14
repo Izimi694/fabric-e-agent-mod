@@ -1,5 +1,6 @@
 package com.izimi.eagent.amygdala;
 
+import com.izimi.eagent.bayesian.BayesianModule;
 import com.izimi.eagent.bayesian.GatingArbiter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -17,20 +18,18 @@ public class OneShotAlarmSystem {
 
     private static final Logger LOGGER = LoggerFactory.getLogger("e-agent");
 
-    private static final double CONTROLLABILITY_GATE = 0.3;
-
     private final UUID botId;
     private final List<AlarmEntry> alarms = new ArrayList<>();
     private static final double DEFAULT_CONFIDENCE = 1.0;
-    private GatingArbiter gatingArbiter;
+    private BayesianModule bayesianModule;
 
     public OneShotAlarmSystem(UUID botId) {
         this.botId = botId;
         load();
     }
 
-    public void setGatingArbiter(GatingArbiter gatingArbiter) {
-        this.gatingArbiter = gatingArbiter;
+    public void setBayesianModule(BayesianModule bayesianModule) {
+        this.bayesianModule = bayesianModule;
     }
 
     /**
@@ -38,9 +37,7 @@ public class OneShotAlarmSystem {
      * 否则需要贝叶斯验证后才能固化.
      */
     public boolean shouldDirectConsolidate(String alarmId) {
-        if (gatingArbiter == null) return false;
-        double controllability = gatingArbiter.computeControllability(alarmId, null);
-        return controllability < CONTROLLABILITY_GATE;
+        return GatingArbiter.shouldDirectConsolidate(bayesianModule, alarmId);
     }
 
     public void labelEntity(String entityMatcher, AlarmType type, String action, String source) {

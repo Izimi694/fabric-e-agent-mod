@@ -5,7 +5,6 @@ import com.izimi.eagent.util.JsonUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
@@ -575,7 +574,6 @@ public class MemoryGraph {
         return result;
     }
 
-    @SuppressWarnings("unchecked")
     public void importSkeleton(Map<String, Object> skeleton) {
         if (skeleton == null) return;
 

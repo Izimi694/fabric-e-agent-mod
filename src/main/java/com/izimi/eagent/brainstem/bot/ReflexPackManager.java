@@ -1,6 +1,9 @@
 package com.izimi.eagent.brainstem.bot;
 
+import com.izimi.eagent.amygdala.ReflexConstants;
 import com.izimi.eagent.bayesian.BayesianModule;
+import com.izimi.eagent.cortex.api.HormonalPreset;
+import com.izimi.eagent.cortex.api.PlaystylePack;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import com.izimi.eagent.util.FileUtil;
@@ -18,11 +21,16 @@ public class ReflexPackManager {
 
     private static final Logger LOGGER = LoggerFactory.getLogger("e-agent");
 
-    private static final int PACK_VERSION = 1;
+    private static final int PACK_VERSION = 2;
 
     private final UUID botId;
     private final BayesianModule bayesianModule;
+    private BotInstance botInstance;
     private MemoryGraph memoryGraph;
+
+    public void setBotInstance(BotInstance instance) {
+        this.botInstance = instance;
+    }
 
     public ReflexPackManager(UUID botId, BayesianModule bayesianModule) {
         this.botId = botId;
@@ -93,12 +101,75 @@ public class ReflexPackManager {
             pack.put("memory_graph", memoryGraph.exportSkeleton());
         }
 
+        if (botInstance != null) {
+            var params = botInstance.getBotParams();
+            Map<String, Object> profile = new LinkedHashMap<>();
+            profile.put("alpha", params.getAlpha());
+            profile.put("beta", params.getBeta());
+            profile.put("temperature", params.getTemperature());
+            var h = botInstance.getHormonalSystem();
+            Map<String, Object> hp = new LinkedHashMap<>();
+            hp.put("stress", h.getStress());
+            hp.put("aggression", h.getAggression());
+            hp.put("curiosity", h.getCuriosity());
+            hp.put("ne", h.getNE());
+            hp.put("da", h.getDA());
+            hp.put("serotonin", h.getSerotonin());
+            hp.put("ach", h.getACh());
+            profile.put("hormonal_preset", hp);
+            var w = botInstance.getMotivationEngine().getPerspectiveWeights();
+            if (w != null) profile.put("perspective_weights", w);
+            pack.put("profile", profile);
+        }
+
         return pack;
+    }
+
+    /** Parse a V2 profile section from the pack into a PlaystylePack.PackProfile record */
+    @SuppressWarnings("unchecked")
+    public static PlaystylePack.PackProfile parseProfile(Map<String, Object> profileData) {
+        if (profileData == null) return null;
+        double alpha = ((Number) profileData.getOrDefault("alpha", 0.0)).doubleValue();
+        double beta = ((Number) profileData.getOrDefault("beta", 0.0)).doubleValue();
+        double temp = ((Number) profileData.getOrDefault("temperature", 0.4)).doubleValue();
+        Map<String, Object> hp = (Map<String, Object>) profileData.get("hormonal_preset");
+        HormonalPreset preset = HormonalPreset.DEFAULT;
+        if (hp != null) {
+            preset = new HormonalPreset(
+                ((Number) hp.getOrDefault("stress", 0.1)).doubleValue(),
+                ((Number) hp.getOrDefault("aggression", 0.2)).doubleValue(),
+                ((Number) hp.getOrDefault("curiosity", 0.3)).doubleValue(),
+                ((Number) hp.getOrDefault("ne", 0.1)).doubleValue(),
+                ((Number) hp.getOrDefault("da", 0.2)).doubleValue(),
+                ((Number) hp.getOrDefault("serotonin", 0.3)).doubleValue(),
+                ((Number) hp.getOrDefault("ach", 0.3)).doubleValue()
+            );
+        }
+        Map<String, Double> weights = null;
+        if (profileData.containsKey("perspective_weights")) {
+            Map<String, Object> raw = (Map<String, Object>) profileData.get("perspective_weights");
+            weights = new HashMap<>();
+            for (var e : raw.entrySet()) {
+                weights.put(e.getKey(), ((Number) e.getValue()).doubleValue());
+            }
+        }
+        return new PlaystylePack.PackProfile(alpha, beta, temp, preset, weights != null ? weights : Collections.emptyMap());
     }
 
     @SuppressWarnings("unchecked")
     public boolean importPack(String packName, boolean reset) {
-        Path packFile = FileUtil.getReflexPacksDir().resolve(packName + ".json");
+        Path packsDir = FileUtil.getReflexPacksDir();
+        Path packFile = packsDir.resolve(packName + ".json");
+        if (!Files.exists(packFile)) {
+            try (var stream = Files.walk(packsDir, 1)) {
+                packFile = stream
+                        .filter(p -> p.toString().endsWith(".json"))
+                        .filter(p -> p.getFileName().toString().replace(".json", "").equals(packName))
+                        .findFirst().orElse(packFile);
+            } catch (IOException e) {
+                LOGGER.warn("[ReflexPack] 扫描子目录失败: {}", e.getMessage());
+            }
+        }
         Path conditionedDir = FileUtil.getBotConditionedDir(botId);
 
         Map<String, Object> pack = JsonUtil.readMapFromFileSafe(packFile);
@@ -137,6 +208,7 @@ public class ReflexPackManager {
                     }
                 }
 
+                incomingData.put(ReflexConstants.KEY_LAST_ACCESSED, System.currentTimeMillis());
                 JsonUtil.writeToFileSafeAtomic(reflexFile, incomingData);
                 imported++;
             }
@@ -152,7 +224,6 @@ public class ReflexPackManager {
             }
 
             if (pack.containsKey("memory_graph") && memoryGraph != null) {
-                @SuppressWarnings("unchecked")
                 Map<String, Object> skeleton = (Map<String, Object>) pack.get("memory_graph");
                 memoryGraph.importSkeleton(skeleton);
             }
@@ -170,7 +241,7 @@ public class ReflexPackManager {
         Path packsDir = FileUtil.getReflexPacksDir();
         if (!Files.exists(packsDir)) return Collections.emptyList();
 
-        try (var stream = Files.list(packsDir)) {
+        try (var stream = Files.walk(packsDir, 1)) {
             return stream
                     .filter(p -> p.toString().endsWith(".json"))
                     .map(p -> describePack(p))
@@ -186,12 +257,15 @@ public class ReflexPackManager {
         String name = path.getFileName().toString().replace(".json", "");
         Map<String, Object> meta = JsonUtil.readMapFromFileSafe(path);
         if (meta == null) return name + " (无法读取)";
+        int ver = meta.containsKey("version") ? ((Number) meta.get("version")).intValue() : 1;
         Object refs = meta.get("reflexes");
         int count = refs instanceof Map ? ((Map<String, Object>) refs).size() : 0;
         boolean hasPrior = meta.containsKey("bayesian_prior")
                 && meta.get("bayesian_prior") instanceof Map
                 && !((Map<String, Object>) meta.get("bayesian_prior")).isEmpty();
-        return name + " (" + count + " 反射" + (hasPrior ? ", 含先验" : "") + ")";
+        boolean hasProfile = meta.containsKey("profile");
+        String extra = hasProfile ? ", 含参数配置" : "";
+        return name + " (v" + ver + ", " + count + " 反射" + (hasPrior ? ", 含先验" : "") + extra + ")";
     }
 
     public static boolean deletePack(String packName) {

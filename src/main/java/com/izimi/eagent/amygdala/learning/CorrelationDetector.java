@@ -42,7 +42,6 @@ public class CorrelationDetector {
     private final SkillManager skillManager;
     private final BasicActionAdapter adapter;
     private final Deque<TrialRecord> recentTrials = new ArrayDeque<>();
-    private BayesianModule bayesian;
     private int cooldown = 0;
 
     record TrialRecord(String action, String target, String contextFingerprint, boolean success) {}
@@ -53,7 +52,6 @@ public class CorrelationDetector {
     }
 
     public void setBayesianModule(BayesianModule bayesianModule) {
-        this.bayesian = bayesianModule;
     }
 
     public boolean tryExplore(ServerPlayerEntity bot) {
@@ -190,6 +188,7 @@ public class CorrelationDetector {
         data.put(KEY_LONG_TERM_BASELINE, 0.5);
         data.put(KEY_PROFICIENCY, 0.3);
         data.put("occurrences", 1);
+        data.put(KEY_LAST_ACCESSED, System.currentTimeMillis());
 
         List<Map<String, Object>> atoms = new ArrayList<>();
         Map<String, Object> atom = new LinkedHashMap<>();

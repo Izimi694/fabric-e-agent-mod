@@ -26,6 +26,7 @@ public class MemoryManager {
     private static final long CACHE_REFRESH_MS = 60000;
     private int currentGameDay = 1;
     private MemoryGraph memoryGraph;
+    private final Set<String> dirtyMemoryIds = new HashSet<>();
 
     public MemoryManager(ModConfig config) {
         this(config, null);
@@ -107,26 +108,72 @@ public class MemoryManager {
         long cutoff = System.currentTimeMillis() - (long) config.memoryWindowDays * 86400000L;
         return memoryCache.stream()
                 .filter(Objects::nonNull)
-                .filter(m -> m.timestamp >= cutoff)
+                .filter(m -> Math.max(m.timestamp, m.lastAccessedAt) >= cutoff)
                 .collect(Collectors.toList());
     }
 
     public List<MemoryEntry> searchMemories(String query) {
         if (query == null || query.isEmpty()) return getRecentMemories();
         String lower = query.toLowerCase();
-        return memoryCache.stream()
+        List<MemoryEntry> results = memoryCache.stream()
                 .filter(Objects::nonNull)
                 .filter(m -> matchesQuery(m, lower))
                 .collect(Collectors.toList());
+        results.forEach(this::touchMemory);
+        return results;
     }
 
     public MemoryEntry getEntry(String id) {
         if (id == null) return null;
         refreshCacheIfNeeded();
-        return memoryCache.stream()
+        MemoryEntry found = memoryCache.stream()
                 .filter(Objects::nonNull)
                 .filter(m -> id.equals(m.id))
                 .findFirst().orElse(null);
+        if (found != null) touchMemory(found);
+        return found;
+    }
+
+    public void touchMemory(String id) {
+        memoryCache.stream()
+                .filter(m -> id.equals(m.id))
+                .findFirst()
+                .ifPresent(this::touchMemory);
+    }
+
+    private void touchMemory(MemoryEntry entry) {
+        entry.lastAccessedAt = System.currentTimeMillis();
+        dirtyMemoryIds.add(entry.id);
+    }
+
+    private void flushDirtyTimestamps() {
+        if (dirtyMemoryIds.isEmpty()) return;
+        // 按 day file 分组批量写入
+        Map<Path, List<MemoryEntry>> dayFileMap = new HashMap<>();
+        for (String id : dirtyMemoryIds) {
+            memoryCache.stream()
+                    .filter(m -> id.equals(m.id))
+                    .findFirst()
+                    .ifPresent(m -> {
+                        Path dayFile = getDayFile(m.gameDay);
+                        dayFileMap.computeIfAbsent(dayFile, k -> new ArrayList<>()).add(m);
+                    });
+        }
+        for (Map.Entry<Path, List<MemoryEntry>> e : dayFileMap.entrySet()) {
+            try {
+                List<MemoryEntry> entries = loadDayMemories(e.getKey());
+                Set<String> dirtyIds = e.getValue().stream().map(m -> m.id).collect(Collectors.toSet());
+                for (MemoryEntry entry : entries) {
+                    if (dirtyIds.contains(entry.id)) {
+                        entry.lastAccessedAt = System.currentTimeMillis();
+                    }
+                }
+                JsonUtil.writeToFile(e.getKey(), entries);
+            } catch (IOException ex) {
+                LOGGER.warn("[MemoryManager] 刷新访问时间失败: {}", e.getKey().getFileName());
+            }
+        }
+        dirtyMemoryIds.clear();
     }
 
     public MemoryGraph getMemoryGraph() {
@@ -136,7 +183,7 @@ public class MemoryManager {
     public List<MemoryEntry> searchByKeywords(List<String> keywords) {
         if (keywords == null || keywords.isEmpty()) return Collections.emptyList();
 
-        return memoryCache.stream()
+        List<MemoryEntry> results = memoryCache.stream()
                 .filter(Objects::nonNull)
                 .filter(m -> {
                     StringBuilder textBuilder = new StringBuilder();
@@ -149,6 +196,8 @@ public class MemoryManager {
                     return false;
                 })
                 .collect(Collectors.toList());
+        results.forEach(this::touchMemory);
+        return results;
     }
 
     public List<MemoryEntry> retrieve(String query, HormonalSystem hormones, BayesianModule bayes, int topK) {
@@ -162,7 +211,7 @@ public class MemoryManager {
         long cutoff = System.currentTimeMillis() - maxAgeMs;
         List<MemoryEntry> coarse = all.stream()
                 .filter(Objects::nonNull)
-                .filter(m -> m.timestamp >= cutoff)
+                .filter(m -> Math.max(m.timestamp, m.lastAccessedAt) >= cutoff)
                 .collect(Collectors.toList());
         if (coarse.isEmpty()) coarse = all;
 
@@ -177,8 +226,10 @@ public class MemoryManager {
             });
         }
 
-        // 阶段3: 取 topK
-        return coarse.stream().limit(topK > 0 ? topK : 5).collect(Collectors.toList());
+        // 阶段3: 取 topK + 刷新访问时间
+        List<MemoryEntry> results = coarse.stream().limit(topK > 0 ? topK : 5).collect(Collectors.toList());
+        results.forEach(this::touchMemory);
+        return results;
     }
 
     public boolean hasNotSeenRecently(String entityType, long maxAgeMs) {
@@ -187,7 +238,7 @@ public class MemoryManager {
         String lower = entityType.toLowerCase();
         for (MemoryEntry m : memoryCache) {
             if (m == null) continue;
-            if (m.timestamp >= cutoff) {
+            if (Math.max(m.timestamp, m.lastAccessedAt) >= cutoff) {
                 String text = (m.summary != null ? m.summary : "") +
                         (m.keyLearnings != null ? " " + String.join(" ", m.keyLearnings) : "");
                 if (text.toLowerCase().contains(lower)) return false;
@@ -222,6 +273,7 @@ public class MemoryManager {
     }
 
     private void refreshCache() {
+        flushDirtyTimestamps();
         List<MemoryEntry> newCache = new ArrayList<>();
         Path dir = memoriesDir();
         if (!Files.exists(dir)) {

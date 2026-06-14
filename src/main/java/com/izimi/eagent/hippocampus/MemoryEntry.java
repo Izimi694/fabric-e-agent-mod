@@ -10,6 +10,7 @@ public class MemoryEntry {
     public List<String> relatedSkills;
     public Map<String, Double> preferencesUpdated;
     public long timestamp;
+    public long lastAccessedAt;
     public int gameDay;
 
     public MemoryEntry() {}
@@ -18,10 +19,13 @@ public class MemoryEntry {
         this.id = id;
         this.summary = summary;
         this.timestamp = System.currentTimeMillis();
+        this.lastAccessedAt = this.timestamp;
     }
 
     public String getId() { return id; }
     public String getSummary() { return summary; }
     public long getTimestamp() { return timestamp; }
+    public long getLastAccessedAt() { return lastAccessedAt; }
+    public void setLastAccessedAt(long time) { this.lastAccessedAt = time; }
     public int getGameDay() { return gameDay; }
 }

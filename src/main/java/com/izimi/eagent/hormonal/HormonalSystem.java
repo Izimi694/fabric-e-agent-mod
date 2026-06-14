@@ -5,6 +5,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.ArrayList;
 import java.util.UUID;
+import com.izimi.eagent.cortex.api.HormonalPreset;
 
 public class HormonalSystem {
 
@@ -57,6 +58,17 @@ public class HormonalSystem {
         this.da = clamp(initialAggression);
         this.serotonin = clamp(initialCuriosity * 0.6 + 0.1);
         this.ach = 0.3;
+    }
+
+    /** Bulk-set all hormone levels from a preset (playstyle switch) */
+    public void applyPreset(HormonalPreset preset) {
+        this.stress = clamp(preset.stress());
+        this.aggression = clamp(preset.aggression());
+        this.curiosity = clamp(preset.curiosity());
+        this.ne = clamp(preset.ne());
+        this.da = clamp(preset.da());
+        this.serotonin = clamp(preset.serotonin());
+        this.ach = clamp(preset.ach());
     }
 
     // ── Event triggers (update both old + new) ──

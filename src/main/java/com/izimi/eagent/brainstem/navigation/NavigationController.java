@@ -1,10 +1,14 @@
 package com.izimi.eagent.brainstem.navigation;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import com.izimi.eagent.brainstem.bot.BotPlayer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
 
 public class NavigationController {
+    private static final Logger LOGGER = LoggerFactory.getLogger("e-agent");
     private static final double ARRIVAL_THRESHOLD = 1.5;
 
     public boolean navigateTo(ServerPlayerEntity bot, BlockPos target) {
@@ -12,6 +16,7 @@ public class NavigationController {
 
         double distance = bot.getPos().distanceTo(Vec3d.ofCenter(target));
         if (distance < ARRIVAL_THRESHOLD) {
+            bot.updateInput(0, 0, false, false);
             return true;
         }
 
@@ -34,20 +39,21 @@ public class NavigationController {
             bot.setYaw(yaw);
             bot.setHeadYaw(yaw);
 
-            double speed = 0.3;
+            boolean shouldJump = bot.isOnGround()
+                    && (waypoint.getY() > bot.getBlockY() || direction.y > 0.5);
+            bot.updateInput(1.0f, 0, shouldJump, false);
 
-            Vec3d velocity = new Vec3d(
-                    direction.x / horiDist * speed,
-                    direction.y * 0.2,
-                    direction.z / horiDist * speed
-            );
-            bot.setVelocity(velocity);
-            bot.velocityModified = true;
+            // Also store input in BotPlayer so it survives internal PlayerInput.reset()
+            BotPlayer bp = BotPlayer.getByUUID(bot.getUuid());
+            if (bp != null) {
+                bp.setMoveInput(1.0f, 0, shouldJump);
+            }
 
-            if (bot.isOnGround()) {
-                if (waypoint.getY() > bot.getBlockY() || direction.y > 0.5) {
-                    bot.jump();
-                }
+            LOGGER.info("[Navigation] moveToward -> updateInput(1.0, 0, jump={}), pos={}, isOnGround={}, y={}",
+                    shouldJump, bot.getBlockPos(), bot.isOnGround(), bot.getY());
+
+            if (shouldJump) {
+                bot.jump();
             }
         }
     }

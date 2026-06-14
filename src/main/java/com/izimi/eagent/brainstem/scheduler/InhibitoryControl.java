@@ -62,8 +62,7 @@ public class InhibitoryControl {
         }
 
         double distance = bot.squaredDistanceTo(nearest);
-        int effectiveDist = BASE_SAFETY_DISTANCE;
-        if (distance > effectiveDist * effectiveDist) {
+        if (distance > BASE_SAFETY_DISTANCE * BASE_SAFETY_DISTANCE) {
             logVeto("安全反射-flee", "敌对生物距离过远: " + String.format("%.1f", Math.sqrt(distance)));
             vetoSafetyCount++;
             return true;

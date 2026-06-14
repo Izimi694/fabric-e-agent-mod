@@ -1,9 +1,14 @@
 package com.izimi.eagent.command;
 
+import com.izimi.eagent.EAgent;
 import com.izimi.eagent.api.WorldContext;
 import com.izimi.eagent.brainstem.bot.BotInstance;
 import com.izimi.eagent.brainstem.bot.BotManager;
 import com.izimi.eagent.brainstem.bot.ReflexPackManager;
+import com.izimi.eagent.cortex.api.PersonaManager;
+import com.izimi.eagent.cortex.api.PlaystylePack;
+import com.izimi.eagent.util.FileUtil;
+import com.izimi.eagent.util.JsonUtil;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import net.minecraft.server.command.ServerCommandSource;
@@ -11,6 +16,9 @@ import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.text.Text;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
+
+import java.nio.file.Path;
+import java.util.Map;
 
 import static net.minecraft.server.command.CommandManager.argument;
 import static net.minecraft.server.command.CommandManager.literal;
@@ -56,12 +64,58 @@ public class AICommand {
                         }))
                         .executes(ctx -> showPersonality(ctx.getSource(), null))
                 )
+                .then(literal("persona")
+                        .then(literal("list").executes(ctx -> listPersonas(ctx.getSource())))
+                        .then(argument("name", StringArgumentType.string()).executes(ctx -> {
+                            String name = StringArgumentType.getString(ctx, "name");
+                            return loadPersona(ctx.getSource(), name);
+                        }))
+                        .executes(ctx -> showCurrentPersona(ctx.getSource()))
+                )
                 .then(literal("suggestions")
                         .then(argument("name", StringArgumentType.word()).executes(ctx -> {
                             String name = StringArgumentType.getString(ctx, "name");
                             return triggerSuggestions(ctx.getSource(), name);
                         }))
                         .executes(ctx -> triggerSuggestions(ctx.getSource(), null))
+                )
+                .then(literal("playstyle")
+                        .then(literal("list").executes(ctx -> listPlaystylePacks(ctx.getSource())))
+                        .then(literal("load")
+                                .then(argument("packName", StringArgumentType.word())
+                                        .executes(ctx -> {
+                                            String packName = StringArgumentType.getString(ctx, "packName");
+                                            return loadPlaystylePack(ctx.getSource(), packName, null);
+                                        })
+                                        .then(argument("botName", StringArgumentType.word())
+                                                .executes(ctx -> {
+                                                    String packName = StringArgumentType.getString(ctx, "packName");
+                                                    String botName = StringArgumentType.getString(ctx, "botName");
+                                                    return loadPlaystylePack(ctx.getSource(), packName, botName);
+                                                })
+                                        )
+                                )
+                        )
+                        .then(literal("export")
+                                .then(argument("botName", StringArgumentType.word())
+                                        .then(argument("packName", StringArgumentType.word())
+                                                .executes(ctx -> {
+                                                    String botName = StringArgumentType.getString(ctx, "botName");
+                                                    String packName = StringArgumentType.getString(ctx, "packName");
+                                                    return exportPlaystylePack(ctx.getSource(), botName, packName);
+                                                })
+                                        )
+                                )
+                        )
+                        .then(literal("current")
+                                .then(argument("botName", StringArgumentType.word())
+                                        .executes(ctx -> {
+                                            String botName = StringArgumentType.getString(ctx, "botName");
+                                            return showCurrentPlaystyle(ctx.getSource(), botName);
+                                        })
+                                )
+                                .executes(ctx -> showCurrentPlaystyle(ctx.getSource(), null))
+                        )
                 )
                 .then(literal("forget")
                         .then(argument("id", StringArgumentType.string()).executes(ctx -> {
@@ -192,6 +246,9 @@ public class AICommand {
         source.sendFeedback(() -> Text.literal("§e/ai forget <id> §7- 删除指定记忆"), false);
         source.sendFeedback(() -> Text.literal("§e/ai setkey <key> §7- 设置AI API密钥"), false);
         source.sendFeedback(() -> Text.literal("§e/ai apikey §7- 查看API密钥状态"), false);
+        source.sendFeedback(() -> Text.literal("§e/ai persona list §7- 列出可用角色档案"), false);
+        source.sendFeedback(() -> Text.literal("§e/ai persona <名称> §7- 加载角色 (艾露猫/傲娇大小姐/好兄弟)"), false);
+        source.sendFeedback(() -> Text.literal("§e/ai persona §7- 查看当前角色"), false);
         source.sendFeedback(() -> Text.literal("§e/ai model [name] §7- 查看/设置AI模型 (如 deepseek-chat)"), false);
         source.sendFeedback(() -> Text.literal("§e/ai bot <名字> <指令> §7- 指定AI执行指令"), false);
         source.sendFeedback(() -> Text.literal("§e/ai reflexpack export <机器人> <包名> §7- 导出反射 (默认含先验)"), false);
@@ -199,6 +256,10 @@ public class AICommand {
         source.sendFeedback(() -> Text.literal("§e/ai reflexpack import <机器人> <包名> [reset] §7- 导入反射 (合并/冷启动)"), false);
         source.sendFeedback(() -> Text.literal("§e/ai reflexpack list §7- 列出已导入反射包"), false);
         source.sendFeedback(() -> Text.literal("§e/ai reflexpack delete <包名> §7- 删除反射包"), false);
+        source.sendFeedback(() -> Text.literal("§e/ai playstyle list §7- 列出可用玩法包"), false);
+        source.sendFeedback(() -> Text.literal("§e/ai playstyle load <包名> [机器人] §7- 加载玩法包"), false);
+        source.sendFeedback(() -> Text.literal("§e/ai playstyle export <机器人> <包名> §7- 导出当前状态为玩法包"), false);
+        source.sendFeedback(() -> Text.literal("§e/ai playstyle current [机器人] §7- 查看当前玩法信息"), false);
         return 1;
     }
 
@@ -418,6 +479,60 @@ public class AICommand {
         return 1;
     }
 
+    private static int loadPersona(ServerCommandSource source, String name) {
+        try {
+            PersonaManager pm = EAgent.getPersonaManager();
+            if (pm == null) {
+                source.sendFeedback(() -> Text.literal("§c[E-Agent] PersonaManager 未初始化"), false);
+                return 0;
+            }
+            pm.loadProfile(name);
+            pm.setPersonaLocked(true);
+            source.sendFeedback(() -> Text.literal("§a[E-Agent] 已加载角色: " + name + " (已锁定，玩法包不会覆盖)"), false);
+        } catch (Exception e) {
+            source.sendFeedback(() -> Text.literal("§c[E-Agent] 加载角色失败: " + e.getMessage()), false);
+        }
+        return 1;
+    }
+
+    private static int listPersonas(ServerCommandSource source) {
+        try {
+            var dir = com.izimi.eagent.util.FileUtil.getCharacterDir().resolve("personas");
+            if (!java.nio.file.Files.exists(dir)) {
+                source.sendFeedback(() -> Text.literal("§7[E-Agent] 没有可用角色档案。请将 .json 放到 eagent/skills/character/personas/ 目录下"), false);
+                return 1;
+            }
+            var names = new java.util.ArrayList<String>();
+            try (var stream = java.nio.file.Files.list(dir)) {
+                stream.filter(p -> p.toString().endsWith(".json")).forEach(p -> {
+                    names.add(p.getFileName().toString().replace(".json", ""));
+                });
+            }
+            if (names.isEmpty()) {
+                source.sendFeedback(() -> Text.literal("§7[E-Agent] 没有可用角色档案"), false);
+                return 1;
+            }
+            source.sendFeedback(() -> Text.literal("§6可用角色: §f" + String.join(", ", names)), false);
+            source.sendFeedback(() -> Text.literal("§7使用 /ai persona <名称> 加载"), false);
+        } catch (Exception e) {
+            source.sendFeedback(() -> Text.literal("§c[E-Agent] 列出角色失败: " + e.getMessage()), false);
+        }
+        return 1;
+    }
+
+    private static int showCurrentPersona(ServerCommandSource source) {
+        PersonaManager pm = EAgent.getPersonaManager();
+        if (pm == null || !pm.hasPersona()) {
+            source.sendFeedback(() -> Text.literal("§7[E-Agent] 当前没有活跃角色设定"), false);
+            return 1;
+        }
+        String persona = pm.getPersona();
+        int overrides = pm.getActiveOverrides().size();
+        source.sendFeedback(() -> Text.literal("§6当前角色: §f" + persona.substring(0, Math.min(persona.length(), 60)) + (persona.length() > 60 ? "..." : "")), false);
+        source.sendFeedback(() -> Text.literal("§7本地覆盖: " + overrides + " 条"), false);
+        return 1;
+    }
+
     private static int forgetMemory(ServerCommandSource source, String id, String botName) {
         try {
             BotInstance bot = resolveBot(source, botName);
@@ -548,6 +663,189 @@ public class AICommand {
             source.sendFeedback(() -> Text.literal("§c[ReflexPack] 删除异常: " + e.getMessage()), false);
             return 0;
         }
+    }
+
+    // ── Playstyle command handlers ──
+
+    @SuppressWarnings("unchecked")
+    private static int loadPlaystylePack(ServerCommandSource source, String packName, String botName) {
+        if (!source.hasPermissionLevel(2)) {
+            source.sendFeedback(() -> Text.literal("§c[Playstyle] 仅 OP 可加载玩法包"), false);
+            return 0;
+        }
+        try {
+            BotInstance bot = resolveBot(source, botName);
+            if (bot == null) {
+                source.sendFeedback(() -> Text.literal("§7[Playstyle] 没有活动的AI"), false);
+                return 0;
+            }
+
+            Path packFile = FileUtil.getReflexPacksDir().resolve(packName + ".json");
+            if (!java.nio.file.Files.exists(packFile)) {
+                source.sendFeedback(() -> Text.literal("§7[Playstyle] 包不存在: " + packName), false);
+                return 0;
+            }
+
+            Map<String, Object> data = JsonUtil.readMapFromFileSafe(packFile);
+            if (data == null) {
+                source.sendFeedback(() -> Text.literal("§c[Playstyle] 无法读取包: " + packName), false);
+                return 0;
+            }
+
+            int ver = data.containsKey("version") ? ((Number) data.get("version")).intValue() : 1;
+            if (ver < 2) {
+                source.sendFeedback(() -> Text.literal("§e[Playstyle] 包是V1格式，使用旧导入路径。"), false);
+                return bot.getReflexPackManager().importPack(packName, false) ? 1 : 0;
+            }
+
+            // Parse V2 pack
+            Map<String, Object> profileMap = (Map<String, Object>) data.get("profile");
+            PlaystylePack.PackProfile profile = profileMap != null ? ReflexPackManager.parseProfile(profileMap) : null;
+            Map<String, Object> reflexes = (Map<String, Object>) data.get("reflexes");
+            Map<String, Object> knowledge = (Map<String, Object>) data.get("knowledge");
+            Map<String, Object> config = (Map<String, Object>) data.get("config");
+
+            PlaystylePack pack = new PlaystylePack(packName,
+                (String) data.getOrDefault("description", ""), 2,
+                profile, reflexes, knowledge, config,
+                (String) data.getOrDefault("persona", ""));
+
+            boolean ok = bot.applyPlaystylePack(pack);
+            if (ok) {
+                source.sendFeedback(() -> Text.literal("§a[Playstyle] 玩法包已加载: " + packName), false);
+                // 自动切换人设 (仅当未被手动锁定)
+                String personaName = pack.persona();
+                if (!personaName.isEmpty()) {
+                    PersonaManager pm = EAgent.getPersonaManager();
+                    if (pm != null && !pm.isPersonaLocked()) {
+                        pm.loadProfile(personaName);
+                        source.sendFeedback(() -> Text.literal("§7  └ 自动切换人设: " + personaName), false);
+                    }
+                }
+            } else {
+                source.sendFeedback(() -> Text.literal("§c[Playstyle] 加载失败: " + packName), false);
+            }
+            return ok ? 1 : 0;
+        } catch (Exception e) {
+            source.sendFeedback(() -> Text.literal("§c[Playstyle] 加载异常: " + e.getMessage()), false);
+            return 0;
+        }
+    }
+
+    private static int listPlaystylePacks(ServerCommandSource source) {
+        try {
+            var packs = ReflexPackManager.listPacks();
+            if (packs.isEmpty()) {
+                source.sendFeedback(() -> Text.literal("§7[Playstyle] 没有可用玩法包"), false);
+                return 0;
+            }
+            source.sendFeedback(() -> Text.literal("§6===== 玩法包列表 (" + packs.size() + "个) ====="), false);
+            for (String desc : packs) {
+                source.sendFeedback(() -> Text.literal("§e  " + desc), false);
+            }
+            source.sendFeedback(() -> Text.literal("§7使用 /ai playstyle load <包名> [机器人] 加载"), false);
+        } catch (Exception e) {
+            source.sendFeedback(() -> Text.literal("§c[Playstyle] 查询失败: " + e.getMessage()), false);
+        }
+        return 1;
+    }
+
+    private static int exportPlaystylePack(ServerCommandSource source, String botName, String packName) {
+        if (!source.hasPermissionLevel(2)) {
+            source.sendFeedback(() -> Text.literal("§c[Playstyle] 仅 OP 可导出玩法包"), false);
+            return 0;
+        }
+        try {
+            BotInstance bot = resolveBot(source, botName);
+            if (bot == null) {
+                source.sendFeedback(() -> Text.literal("§7[Playstyle] 没有活动的AI"), false);
+                return 0;
+            }
+
+            Path packFile = FileUtil.getReflexPacksDir().resolve(packName + ".json");
+            Map<String, Object> pack = new java.util.LinkedHashMap<>();
+            pack.put("version", 2);
+            pack.put("source", "E-Agent");
+            pack.put("source_bot", bot.getBotId().toString());
+            pack.put("packName", packName);
+            pack.put("description", "");
+            pack.put("exported_at", java.time.Instant.now().toString());
+
+            // Profile
+            var bp = bot.getBotParams();
+            var h = bot.getHormonalSystem();
+            Map<String, Object> profile = new java.util.LinkedHashMap<>();
+            profile.put("alpha", bp.getAlpha());
+            profile.put("beta", bp.getBeta());
+            profile.put("temperature", bp.getTemperature());
+            Map<String, Object> hp = new java.util.LinkedHashMap<>();
+            hp.put("stress", h.getStress());
+            hp.put("aggression", h.getAggression());
+            hp.put("curiosity", h.getCuriosity());
+            hp.put("ne", h.getNE());
+            hp.put("da", h.getDA());
+            hp.put("serotonin", h.getSerotonin());
+            hp.put("ach", h.getACh());
+            profile.put("hormonal_preset", hp);
+            var weights = bot.getMotivationEngine().getPerspectiveWeights();
+            if (weights != null) profile.put("perspective_weights", weights);
+            pack.put("profile", profile);
+
+            // Reflexes
+            Path conditionedDir = FileUtil.getBotConditionedDir(bot.getBotId());
+            Map<String, Object> reflexes = new java.util.LinkedHashMap<>();
+            if (java.nio.file.Files.exists(conditionedDir)) {
+                try (var stream = java.nio.file.Files.list(conditionedDir)) {
+                    for (Path rf : stream.toList()) {
+                        if (!rf.toString().endsWith(".json")) continue;
+                        Map<String, Object> rd = JsonUtil.readMapFromFileSafe(rf);
+                        if (rd != null) {
+                            String sid = (String) rd.getOrDefault("skillId",
+                                rf.getFileName().toString().replace(".json", ""));
+                            reflexes.put(sid, rd);
+                        }
+                    }
+                }
+            }
+            pack.put("reflexes", reflexes);
+            pack.put("knowledge", new java.util.LinkedHashMap<>());
+            pack.put("config", new java.util.LinkedHashMap<>());
+
+            JsonUtil.writeToFileSafeAtomic(packFile, pack);
+            source.sendFeedback(() -> Text.literal("§a[Playstyle] 已导出: " + packName + " (" + reflexes.size() + " 反射)"), false);
+            return 1;
+        } catch (Exception e) {
+            source.sendFeedback(() -> Text.literal("§c[Playstyle] 导出异常: " + e.getMessage()), false);
+            return 0;
+        }
+    }
+
+    private static int showCurrentPlaystyle(ServerCommandSource source, String botName) {
+        try {
+            BotInstance bot = resolveBot(source, botName);
+            if (bot == null) {
+                source.sendFeedback(() -> Text.literal("§7[Playstyle] 没有活动的AI"), false);
+                return 0;
+            }
+            var bp = bot.getBotParams();
+            source.sendFeedback(() -> Text.literal("§6===== " + bot.getBotName() + " 当前参数 ====="), false);
+            source.sendFeedback(() -> Text.literal("§eα=§f" + String.format("%.3f", bp.getAlpha())
+                    + " §eβ=§f" + String.format("%.4f", bp.getBeta())
+                    + " §e温度=§f" + String.format("%.3f", bp.getTemperature())), false);
+            var h = bot.getHormonalSystem();
+            source.sendFeedback(() -> Text.literal("§e激素: §fNE=" + String.format("%.2f", h.getNE())
+                    + " DA=" + String.format("%.2f", h.getDA())
+                    + " 5-HT=" + String.format("%.2f", h.getSerotonin())
+                    + " ACh=" + String.format("%.2f", h.getACh())), false);
+            var skillMgr = worldContext.skillManager();
+            long count = skillMgr != null ? skillMgr.getSkills().values().stream()
+                .filter(s -> "conditioned".equals(s.getType())).count() : 0L;
+            long reflexCount = count;
+            source.sendFeedback(() -> Text.literal("§e已学习反射: §f" + reflexCount + " 个"), false);
+        } catch (Exception e) {
+            source.sendFeedback(() -> Text.literal("§c[Playstyle] 查询失败: " + e.getMessage()), false);
+        }
+        return 1;
     }
 
     // Shared utility methods

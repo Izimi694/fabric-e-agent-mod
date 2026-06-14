@@ -9,7 +9,6 @@ import com.izimi.eagent.brainstem.IdleBrain;
 import com.izimi.eagent.amygdala.NaiveBayesClassifier;
 import com.izimi.eagent.amygdala.ConditionedReflex;
 import com.izimi.eagent.brainstem.skill.Skill;
-import com.izimi.eagent.amygdala.character.BehaviorStats;
 import com.izimi.eagent.brainstem.adapter.BasicActionAdapter;
 import com.izimi.eagent.amygdala.FamiliarityTracker;
 import com.izimi.eagent.amygdala.SocialObserver;
@@ -81,6 +80,10 @@ public class BotController {
         if (botPlayer == null) return;
 
         ServerPlayerEntity bot = botPlayer.asEntity();
+        bot.updateInput(0, 0, false, false);
+
+        LOGGER.info("[BotController] onTick={}, botPos=({:.1f},{:.1f},{:.1f})",
+                tickCounter, bot.getX(), bot.getY(), bot.getZ());
 
         if (tickCounter % stateSaveInterval == 0) {
             stateManager.saveState(bot);

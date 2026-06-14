@@ -7,7 +7,7 @@
 ## 1. 当前状态
 
 ```
-项目阶段: ✅ Phase 3 — CognitiveControl 集成 (四门决策流水线) 全部完成
+项目阶段: ✅ Phase 3 — CognitiveControl + Phase Playstyle Pack — Layer 1 玩法包全部完成
 ```
 
 ### 完成情况
@@ -41,6 +41,7 @@
 | **Phase W2** | **底层修正: 贝叶斯角色分离 + MemoryGraph 结构性缺陷** | ✅ |
 | **Phase 2** | **神经递质向量系统: NeuroState + 4维 HormonalSystem + NeuroDynamics** | ✅ |
 | **Phase 3** | **CognitiveControl 集成: 余弦匹配/阈值参数化/四门决策流水线** | ✅ |
+| **Phase Playstyle Pack** | **Layer 1 玩法包: PlaystylePack V2 数据模型 + 5 预设包 + CLI** | ✅ |
 
 
 ---
@@ -95,6 +96,16 @@ Phase 3 (CognitiveControl 集成 — 决策升级):
   ├── P3.3 — InhibitoryControl 阈值参数化 (仅向安全方向: effectiveThreshold = base + |modulation|) ✅
   ├── P3.4 — MetaScheduler 四门决策流水线集成 (硬门→候选→调制→玻尔兹曼) ✅
   └── P3.5 — MotivationEngine 弃用旧 curiosity, 改用 NE/DA 驱动 shouldExplore() ✅
+
+Phase Playstyle Pack (Layer 1 玩法包 — 行为预设初始化):
+  ├── PP.1 — PlaystylePack/HormonalPreset/IPlaystylePlugin 数据模型
+  ├── PP.2 — BotParams.override() + HormonalSystem.applyPreset() + KnowledgeBase 分区
+  ├── PP.3 — MotivationEngine.setPerspectiveWeights() 视角权重覆盖
+  ├── PP.4 — ReflexPackManager V2 export/parseProfile/describePack
+  ├── PP.5 — BotInstance.applyPlaystylePack() 统一入口链式调用
+  ├── PP.6 — AICommand /ai playstyle load/list/export/current
+  ├── PP.7 — 5 预设包 JSON: aggressive/explorer/social/cautious/builder
+  └── PP.8 — 331 测试全部通过
 ```
 
 ---
@@ -175,6 +186,10 @@ cd EAgentMod-1.21.1-Fabric
 | `/ai reflexpack import <bot> <name> [reset]` | 导入反射包 (合并/冷启动) |
 | `/ai reflexpack list` | 列出已导入反射包 |
 | `/ai reflexpack delete <name>` | 删除反射包 |
+| `/ai playstyle list` | 列出可用玩法包 (V2 含 profile 标注) |
+| `/ai playstyle load <包名> [机器人]` | 加载 V2 玩法包 (兼容 V1) |
+| `/ai playstyle export <机器人> <包名>` | 导出 Bot 状态为 V2 玩法包 |
+| `/ai playstyle current [机器人]` | 查看 Bot 当前参数/激素/反射数 |
 | `/ai help` | 全部指令 |
 
 `@bot_name <消息>` — 精确路由。无 `@` 时路由最近假人。
@@ -275,7 +290,7 @@ minecraft/eagent/
 | `MemoryGraphTest.java` | 38 | 节点/边 CRUD、显著性门控、边推断、图遍历 BFS、因果链、持久化、贝叶斯重排、Hebbian 强化、扩散激活、骨骼导出/导入 |
 | `ChatSessionManagerTest.java` | 7 | 窗口限制/方向回退/null安全/防御拷贝 |
 | `TemplateMatcherTest.java` | 14 | 路由: CLARIFICATION/TASK_PLAN/REFLEX_CREATE/CHAT_RESPONSE/拦截 |
-| **合计 (含新增)** | **325** | **全部通过** |
+| **合计 (含新增)** | **331** | **全部通过** |
 
 **新增测试计划：**
 

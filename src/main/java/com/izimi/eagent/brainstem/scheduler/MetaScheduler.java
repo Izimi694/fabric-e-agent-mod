@@ -15,7 +15,9 @@ import com.izimi.eagent.brainstem.innate.InnateReflex;
 import com.izimi.eagent.brainstem.innate.InnateReflexRegistry;
 import com.izimi.eagent.cortex.api.TemplateManager;
 import com.izimi.eagent.cortex.api.TemplateMatcher;
+import com.izimi.eagent.cortex.api.PersonaManager;
 import com.izimi.eagent.cortex.prefrontal.CognitiveControl;
+import com.izimi.eagent.EAgent;
 import com.izimi.eagent.hormonal.HormonalSystem;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
@@ -23,13 +25,7 @@ import net.minecraft.text.Text;
 
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
-import java.util.LinkedHashSet;
 import java.util.concurrent.CompletableFuture;
-import com.izimi.eagent.hippocampus.MemoryEntry;
-import com.izimi.eagent.hippocampus.MemoryEdge;
-import com.izimi.eagent.hippocampus.MemoryGraph;
-import com.izimi.eagent.hippocampus.MemoryManager;
 
 public class MetaScheduler {
 
@@ -46,19 +42,14 @@ public class MetaScheduler {
     // ── Dead-end detection ──
     private static final int MAX_CONSECUTIVE_FAILURES = 5;
     private static final double MIN_POSTERIOR_THRESHOLD = 0.1;
-    private static final int EXPLORATION_EXHAUST_THRESHOLD = 37;
 
     // ── Rollback ──
     private static final int MAX_RETRY_COUNT = 3;
     private static final double MIN_ALT_THRESHOLD = 0.3;
 
-    // ── Loop ──
-    private static final int MAX_REFLECTION_LOOPS = 4;
-
     public record DeadEndResult(boolean isDeadEnd, String reason) {}
     public record RollbackStage(int stage, String action) {}
 
-    private int reflectionLoopCount = 0;
     private String lastExecutedNodeId = null;
 
     /** 计算可用时间片: 63.2% 执行, 36.8% 缓冲 */
@@ -217,120 +208,78 @@ public class MetaScheduler {
         botCtx.hormonalSystem().tick();
     }
 
-    // ── Loop Event-Driven Execution ──
+    // ── HABIT layer execution with full gating ──
 
-    public void executeLoop(BotContext botCtx, WorldContext worldCtx, ServerPlayerEntity bot,
-                            MetaState state, MinecraftServer server, String reflexId) {
-        if (bot == null) return;
+    private boolean executeHabitLayerWithGating(BotContext botCtx, MetaState state, ServerPlayerEntity bot) {
+        var conditioned = botCtx.conditionedReflex();
+        var taskManager = botCtx.taskManager();
+        if (conditioned == null || taskManager == null) return false;
 
-        reflectionLoopCount = 0;
-        while (reflectionLoopCount < MAX_REFLECTION_LOOPS) {
-            reflectionLoopCount++;
-
-            var conditioned = botCtx.conditionedReflex();
-            var bayesian = botCtx != null ? botCtx.bayesianModule() : null;
-
-            if (conditioned == null) break;
-
-            // 激素粗筛 + 图扩散 (candidate generation)
-            String candidateReflex = reflexId != null ? reflexId : conditioned.getLastExecutedReflexId();
-            if (candidateReflex == null) {
-                var autoReflex = conditioned.scanAndTrigger(bot);
-                if (autoReflex == null) {
-                    // 路3: 图扩散激活
-                    candidateReflex = getGraphActivatedCandidate(botCtx);
-                    if (candidateReflex == null) break;
-                } else {
-                    candidateReflex = autoReflex.getSkillId();
-                }
+        var activeTask = taskManager.getActiveTask();
+        if (activeTask != null && "running".equals(activeTask.getStatus())) {
+            var reflexSkill = conditioned.match(activeTask);
+            if (reflexSkill != null) {
+                if (tryExecuteReflex(botCtx, bot, reflexSkill.getSkillId(), reflexSkill)) return true;
             }
-
-            // DAG 依赖检查 + 参数绑定 + 前置条件门控
-            if (bayesian != null) {
-                double posterior = bayesian.predictSuccess(candidateReflex, conditioned.extractContextFeatures(bot));
-                if (posterior < 0.05) {
-                    LOGGER.debug("[MetaScheduler] Loop: 贝叶斯预判提前返回 {} (posterior={})", candidateReflex, posterior);
-                    break;
-                }
+            var taskExecutor = botCtx.taskExecutor();
+            if (taskExecutor != null) {
+                taskExecutor.executeTask(bot, activeTask);
+                return true;
             }
-
-            var precond = conditioned.checkPreconditions(candidateReflex, bot, botCtx.hormonalSystem());
-            if (!precond.passed()) {
-                LOGGER.debug("[MetaScheduler] Loop: 前置条件不通过 {} → {}", candidateReflex, precond.reason());
-                break;
-            }
-
-            // CognitiveControl 调制门控 (Gate 3)
-            if (cognitiveControl != null) {
-                var h = botCtx.hormonalSystem();
-                if (h != null) {
-                    String vetoReason = cognitiveControl.checkReflex(candidateReflex, h.getNeuroState());
-                    if (vetoReason != null) {
-                        LOGGER.debug("[MetaScheduler] Loop: CognitiveControl 否决 {} → {}", candidateReflex, vetoReason);
-                        break;
-                    }
-                }
-            }
-
-            // 反射执行
-            var skill = conditioned.getSkill(candidateReflex);
-            if (skill == null) break;
-
-            lastExecutedNodeId = candidateReflex;
-            conditioned.executeReflex(skill, bot);
-
-            // 死路检测
-            DeadEndResult deadEnd = isDeadEnd(botCtx, worldCtx, bot, candidateReflex);
-            if (deadEnd.isDeadEnd()) {
-                LOGGER.warn("[MetaScheduler] Loop: 死路检测触发 {} → {}, 回退中...", candidateReflex, deadEnd.reason());
-                RollbackStage rb = rollback(botCtx, worldCtx, bot, candidateReflex, 0, 0);
-                LOGGER.info("[MetaScheduler] Loop: 回退阶段 {} → {}", rb.stage(), rb.action());
-                if (rb.stage() >= 5) {
-                    // LLM 兜底
-                    executeCortexLLM(botCtx, worldCtx, state, bot);
-                }
-                break;
-            }
-
-            // 麦穗判断: 探索窗口是否耗尽
-            double confidence = conditioned.getConfidence(candidateReflex);
-            double exploreProb = MotivationEngine.wheatEarExplore(confidence, botCtx.hormonalSystem());
-            if (exploreProb <= 0.01 && reflectionLoopCount > 1) {
-                LOGGER.debug("[MetaScheduler] Loop: 麦穗探索窗口耗尽 (conf={}), 停止探索", confidence);
-                break;
-            }
-
-            // 进度推进 → 下一轮
-            reflexId = null;
         }
+
+        if (state.getP3Cooldown() <= 0) {
+            var autoReflex = conditioned.scanAndTrigger(bot);
+            if (autoReflex != null) {
+                if (tryExecuteReflex(botCtx, bot, autoReflex.getSkillId(), autoReflex)) return true;
+            }
+        }
+
+        if (correlationDetector != null) {
+            return correlationDetector.tryExplore(bot);
+        }
+        return false;
     }
 
-    private String getGraphActivatedCandidate(BotContext botCtx) {
-        MemoryManager mem = botCtx.memoryManager();
-        if (mem == null) return null;
-        MemoryGraph mg = mem.getMemoryGraph();
-        if (mg == null) return null;
+    private boolean tryExecuteReflex(BotContext botCtx, ServerPlayerEntity bot,
+                                      String reflexId, com.izimi.eagent.brainstem.skill.Skill skill) {
+        var conditioned = botCtx.conditionedReflex();
+        var bayesian = botCtx.bayesianModule();
+        var h = botCtx.hormonalSystem();
 
-        List<MemoryEntry> recent = mem.getRecentMemories();
-        if (recent.isEmpty()) return null;
-        List<String> seedIds = recent.stream().limit(3).map(e -> e.id).toList();
-
-        Set<String> activated = new LinkedHashSet<>();
-        for (String seed : seedIds) {
-            activated.addAll(mg.traverse(seed, MemoryEdge.RelationType.SIMILARITY, 2, 0.5));
-        }
-        if (activated.isEmpty()) return null;
-
-        for (String nodeId : activated) {
-            MemoryEntry entry = mem.getEntry(nodeId);
-            if (entry != null && entry.relatedSkills != null) {
-                for (String skill : entry.relatedSkills) {
-                    double conf = botCtx.conditionedReflex().getConfidence(skill);
-                    if (conf > 0.1) return skill;
-                }
+        if (bayesian != null) {
+            double posterior = bayesian.predictSuccess(reflexId, conditioned.extractContextFeatures(bot));
+            if (posterior < 0.05) {
+                LOGGER.debug("[MetaScheduler] Gate-Bayesian: veto {} (posterior={})", reflexId, posterior);
+                return false;
             }
         }
-        return null;
+
+        var precond = conditioned.checkPreconditions(reflexId, bot, h);
+        if (!precond.passed()) {
+            LOGGER.debug("[MetaScheduler] Gate-Precondition: veto {} → {}", reflexId, precond.reason());
+            return false;
+        }
+
+        if (cognitiveControl != null && h != null) {
+            String veto = cognitiveControl.checkReflex(reflexId, h.getNeuroState());
+            if (veto != null) {
+                LOGGER.debug("[MetaScheduler] Gate-CognitiveControl: veto {} → {}", reflexId, veto);
+                return false;
+            }
+        }
+
+        conditioned.executeReflex(skill, bot);
+        lastExecutedNodeId = reflexId;
+
+        DeadEndResult deadEnd = isDeadEnd(botCtx, null, bot, reflexId);
+        if (deadEnd.isDeadEnd()) {
+            LOGGER.warn("[MetaScheduler] Dead-end: {} → {}", reflexId, deadEnd.reason());
+            RollbackStage rb = rollback(botCtx, null, bot, reflexId, 0, 0);
+            LOGGER.info("[MetaScheduler] Rollback: stage={} action={}", rb.stage(), rb.action());
+        }
+
+        return true;
     }
 
     private boolean isLLMAction(DispatchReflex.DispatchAction action) {
@@ -370,7 +319,7 @@ public class MetaScheduler {
 
         return switch (action.layer()) {
             case "INSTINCT" -> LowLevelDispatcher.executeInstinctLayer(botCtx, worldCtx, bot, temporalScaler);
-            case "HABIT" -> LowLevelDispatcher.executeHabitLayer(botCtx, state, bot, correlationDetector);
+            case "HABIT" -> executeHabitLayerWithGating(botCtx, state, bot);
             case "CORTEX_LOCAL" -> LowLevelDispatcher.executeCortexLocal(botCtx, worldCtx, state, bot);
             case "CORTEX_LLM" -> executeCortexLLM(botCtx, worldCtx, state, bot);
             case "IDLE" -> LowLevelDispatcher.executeIdle(botCtx, bot, temporalScaler);
@@ -441,8 +390,7 @@ public class MetaScheduler {
     private Map<String, Object> buildTemplateContext(TemplateManager.TemplateType type, String msg,
                                                      BotContext botCtx, WorldContext worldCtx) {
         Map<String, Object> ctx = new java.util.HashMap<>();
-        double stress = botCtx.hormonalSystem() != null ? botCtx.hormonalSystem().getStress() : 0;
-        double curiosity = botCtx.hormonalSystem() != null ? botCtx.hormonalSystem().getCuriosity() : 0;
+        var hormonal = botCtx.hormonalSystem();
         switch (type) {
             case CLARIFICATION -> {
                 ctx.put("userInput", msg);
@@ -459,10 +407,30 @@ public class MetaScheduler {
             }
             case CHAT_RESPONSE -> {
                 ctx.put("playerMessage", msg);
-                ctx.put("contextInfo", String.format("stress=%.2f, curiosity=%.2f", stress, curiosity));
+                String mood = hormonal != null ? deriveMoodSummary(hormonal) : "平静";
+                ctx.put("contextInfo", mood);
+                PersonaManager pm = EAgent.getPersonaManager();
+                String hint = pm != null ? pm.getFormatHint() : "";
+                if (!hint.isEmpty()) ctx.put("formatHint", hint);
             }
         }
         return ctx;
+    }
+
+    /** 4D 状态向量 → 简短情绪摘要，比原始数值更省 token */
+    private static String deriveMoodSummary(com.izimi.eagent.hormonal.HormonalSystem h) {
+        double ne = h.getNE();
+        double da = h.getDA();
+        double st = h.getSerotonin();
+        double cu = h.getCuriosity();
+        StringBuilder b = new StringBuilder();
+        if (ne > 0.5) b.append("警觉中");
+        if (da > 0.6) b.append("、状态好");
+        else if (da < 0.3) b.append("、低迷");
+        if (st > 0.6) b.append("、谨慎");
+        if (cu > 0.6) b.append("、好奇");
+        if (b.isEmpty()) b.append("平静");
+        return b.toString();
     }
 
     private void processTemplateResult(CompletableFuture<JsonObject> future, BotContext botCtx,

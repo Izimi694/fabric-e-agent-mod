@@ -22,7 +22,7 @@
 | 系统调用 | 12 原子动作 (BasicActionAdapter) |
 | 调度器 | MetaScheduler |
 | 文件系统 | 反射库 (`conditioned/*.json`) |
-| 软件包管理 | 反射包 (`reflex_packs/*.json`) |
+| 软件包管理 | 反射包 V1 (`reflex_packs/*.json`) + 玩法包 V2 (`reflex_packs/*.json` v2) |
 | 热/冷缓存 | stw/ltb 双权重 |
 | 动态优先级 | 激素系统 (HormonalSystem) |
 | 进程 fork | 繁衍 / 三规则继承 |
@@ -31,8 +31,8 @@
 | 参数传递 | 参数绑定 (ParameterBinder) |
 | 进程门控 | 边界条件检查 (precondition guard) |
 | 认知网图/记忆关系 | 记忆关系图 (MemoryGraph) |
-| 抑制控制 | 前额叶抑制控制 (InhibitoryControl + CognitiveControl) |
-| 神经调质系统 | 4 维神经递质向量 (NE/DA/5-HT/ACh + GABA/Glu 推导) |
+| 抑制控制 | 抑制控制 (InhibitoryControl + CognitiveControl) |
+| 调质调谐 | 4 维状态向量 (NE/DA/5-HT/ACh + 导出 GABA/Glu) |
 
 ---
 
@@ -127,14 +127,14 @@
 
 ## 9. 四类共享池
 
-| 池 | 生物对应 | 约束 | 工程实现 |
-|----|---------|:----:|---------|
-| 囊泡超级池 | 相邻突触共享囊泡 | 反射链长度 ≤ 5 | chain_max_length |
-| 工作记忆绑定池 | 有限特征绑定 | 贝叶斯候选集 ≤ 5 | bayesian_candidate_limit |
-| 跨脑共享子空间 | dmPFC 社交对齐 | 共享先验比例 10-30% | shared_prior_ratio |
-| 归一化网络池 | 总活动恒定 | 总驱力 = 1.0 | 硬编码归一化 |
+| 池 | 约束 | 工程实现 |
+|----|:----:|---------|
+| 囊泡超级池 | 反射链长度 ≤ 5 | chain_max_length |
+| 工作记忆绑定池 | 贝叶斯候选集 ≤ 5 | bayesian_candidate_limit |
+| 跨脑共享子空间 | 共享先验比例 10-30% | shared_prior_ratio |
+| 归一化网络池 | 总驱力 = 1.0 | 硬编码归一化 |
 
-四池对应不同生物结构，约束独立，不交叉合并。
+四池约束独立，不交叉合并。生物对应关系见 [THEORY.md](./THEORY.md)。
 
 ---
 
@@ -142,7 +142,7 @@
 
 - **信号存储和计算**用连续值 (0-1)
 - **决策边界**用离散阈值，阈值由激素动态调节
-- 神经元速率编码是连续的，门控阈值是离散的
+- （生物类比：神经元速率编码连续，门控阈值离散）
 
 | 连续信号 | 离散决策点 | 阈值调节 |
 |---------|-----------|---------|
@@ -162,7 +162,7 @@
 | C — 选择对策 | "选哪一个？" | 贝叶斯精筛 + 玻尔兹曼抉择 |
 | 填空 | "这一步的具体参数？" | ParameterBinding 填入参数槽位 |
 
-**前额叶三层次 (Grabenhorst & Rolls 2011)**：Tier1 识别特征 → Tier2 计算价值(贝叶斯) → Tier3 做出选择(ACC 冲突仲裁)。价值计算和价值选择分离。
+**价值-选择分离**：价值计算 (贝叶斯后验) 和价值选择 (ACC 冲突仲裁) 在两个独立阶段完成，参见 Grabenhorst & Rolls 2011。
 
 ---
 

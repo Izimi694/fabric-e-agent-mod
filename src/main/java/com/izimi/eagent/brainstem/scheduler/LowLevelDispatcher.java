@@ -1,5 +1,6 @@
 package com.izimi.eagent.brainstem.scheduler;
 
+import com.izimi.eagent.EAgent;
 import com.izimi.eagent.api.BotContext;
 import com.izimi.eagent.api.MetaState;
 import com.izimi.eagent.api.WorldContext;
@@ -14,6 +15,8 @@ import net.minecraft.util.math.Vec3d;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 public final class LowLevelDispatcher {
@@ -89,6 +92,12 @@ public final class LowLevelDispatcher {
                 conditioned.executeReflex(reflexSkill, bot);
                 return true;
             }
+            // No reflex matched → delegate to TaskExecutor for per-tick dispatch
+            var taskExecutor = botCtx.taskExecutor();
+            if (taskExecutor != null) {
+                taskExecutor.executeTask(bot, activeTask);
+                return true;
+            }
         }
 
         if (state.getP3Cooldown() <= 0) {
@@ -135,7 +144,8 @@ public final class LowLevelDispatcher {
         var chatHandler = worldCtx.cortex().chatHandler();
         if (chatHandler != null && chatHandler.canHandle(msg)) {
             UUID playerId = botCtx.botId();
-            String response = chatHandler.getResponse(msg, botCtx.hormonalSystem(), playerId);
+            Map<String, List<String>> overrides = EAgent.getPersonaOverrides();
+            String response = chatHandler.getResponse(msg, botCtx.hormonalSystem(), playerId, overrides);
             if (response != null) {
                 bot.sendMessage(Text.literal("§b[E-Agent] §f" + response));
                 LOGGER.info("[LowLevelDispatcher] CortexLocal 本地聊天: \"{}\" → \"{}\"",

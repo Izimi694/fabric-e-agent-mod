@@ -105,6 +105,14 @@ public class BotParams {
     public BotParams withGeneration(int gen) { this.generation = gen; return this; }
     public BotParams withParentId(UUID id) { this.parentId = id; return this; }
 
+    /** Hot-replace alpha/beta/temperature on a live bot (playstyle switch) */
+    public BotParams override(double alpha, double beta, double temperature) {
+        this.alpha = alpha;
+        this.beta = beta;
+        this.temperature = temperature;
+        return this;
+    }
+
     // ── Getters ──
 
     public double getAlpha() { return alpha; }

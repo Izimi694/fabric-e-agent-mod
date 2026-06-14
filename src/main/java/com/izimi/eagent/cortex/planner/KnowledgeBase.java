@@ -20,6 +20,9 @@ public class KnowledgeBase {
     private final Map<String, Template> templates;
     private final Map<String, String> toolMap;
 
+    private final Map<String, Map<String, Object>> playstyleKnowledge;
+    private String activePlaystyleId;
+
     public record Template(String name, Pattern pattern, List<TemplateStep> steps) {}
 
     public record TemplateStep(String skillId, String action, String target, int amount) {}
@@ -34,21 +37,74 @@ public class KnowledgeBase {
         this.itemUses = itemUses;
         this.templates = templates;
         this.toolMap = toolMap;
+        this.playstyleKnowledge = new HashMap<>();
+        this.activePlaystyleId = null;
+    }
+
+    /** Store per-playstyle knowledge data (loaded from pack) */
+    public void setPlaystyleKnowledge(String playstyleId, Map<String, Object> data) {
+        playstyleKnowledge.put(playstyleId, data != null ? data : Collections.emptyMap());
+    }
+
+    /** Switch active playstyle context; subsequent queries check playstyle knowledge first */
+    public void switchPlaystyle(String playstyleId) {
+        this.activePlaystyleId = playstyleId;
+    }
+
+    /** Clear active playstyle context, fall back to default knowledge */
+    public void clearPlaystyle() {
+        this.activePlaystyleId = null;
+    }
+
+    private Map<String, Object> activePlaystyleKnowledge() {
+        if (activePlaystyleId != null) {
+            Map<String, Object> pk = playstyleKnowledge.get(activePlaystyleId);
+            if (pk != null && !pk.isEmpty()) return pk;
+        }
+        return Collections.emptyMap();
     }
 
     public Optional<Map<String, Object>> getRecipe(String itemId) {
+        Map<String, Object> pk = activePlaystyleKnowledge();
+        if (!pk.isEmpty() && pk.containsKey("recipes")) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> pr = (Map<String, Object>) pk.get("recipes");
+            if (pr != null && pr.containsKey(itemId))
+                return Optional.ofNullable((Map<String, Object>) pr.get(itemId));
+        }
         return Optional.ofNullable(recipes.get(itemId));
     }
 
     public Optional<Map<String, Object>> getEntity(String name) {
+        Map<String, Object> pk = activePlaystyleKnowledge();
+        if (!pk.isEmpty() && pk.containsKey("entities")) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> pe = (Map<String, Object>) pk.get("entities");
+            if (pe != null && pe.containsKey(name))
+                return Optional.ofNullable((Map<String, Object>) pe.get(name));
+        }
         return Optional.ofNullable(entities.get(name));
     }
 
     public Optional<List<String>> getItemUses(String itemId) {
+        Map<String, Object> pk = activePlaystyleKnowledge();
+        if (!pk.isEmpty() && pk.containsKey("item_uses")) {
+            @SuppressWarnings("unchecked")
+            Map<String, List<String>> pu = (Map<String, List<String>>) pk.get("item_uses");
+            if (pu != null && pu.containsKey(itemId))
+                return Optional.ofNullable(pu.get(itemId));
+        }
         return Optional.ofNullable(itemUses.get(itemId));
     }
 
     public Optional<String> getTool(String blockId) {
+        Map<String, Object> pk = activePlaystyleKnowledge();
+        if (!pk.isEmpty() && pk.containsKey("tool_map")) {
+            @SuppressWarnings("unchecked")
+            Map<String, String> pt = (Map<String, String>) pk.get("tool_map");
+            if (pt != null && pt.containsKey(blockId))
+                return Optional.ofNullable(pt.get(blockId));
+        }
         return Optional.ofNullable(toolMap.get(blockId));
     }
 

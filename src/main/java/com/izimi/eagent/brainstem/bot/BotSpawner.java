@@ -3,6 +3,7 @@ package com.izimi.eagent.brainstem.bot;
 import com.mojang.authlib.GameProfile;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import net.minecraft.network.packet.s2c.play.PlayerListS2CPacket;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.PlayerManager;
 import net.minecraft.server.network.ServerPlayerEntity;
@@ -45,13 +46,22 @@ public class BotSpawner {
             entity.setPitch(0);
             entity.setYaw(0);
 
-            world.onPlayerConnected(entity);
+            entity.changeGameMode(net.minecraft.world.GameMode.SURVIVAL);
 
             PlayerManager playerManager = server.getPlayerManager();
             playerManager.getPlayerList().add(entity);
+            server.getPlayerManager().sendToAll(new PlayerListS2CPacket(PlayerListS2CPacket.Action.ADD_PLAYER, entity));
+            world.onPlayerConnected(entity);
+            LOGGER.info("[BotSpawner] Bot游戏模式: {}, allowFlying={}, flying={}, noClip={}",
+                    entity.interactionManager.getGameMode(),
+                    entity.getAbilities().allowFlying,
+                    entity.getAbilities().flying,
+                    entity.isSpectator() || entity.isCreative());
 
             entity.setHealth(20.0f);
             entity.getHungerManager().setFoodLevel(20);
+
+            BotPlayer.registerBot(entity.getUuid(), bot);
 
             isSpawned = true;
             LOGGER.info("[BotSpawner] Bot已生成在 ({}, {}, {})", position.x, position.y, position.z);
@@ -68,6 +78,8 @@ public class BotSpawner {
         if (!isSpawned || bot == null) return false;
 
         try {
+            bot.unregisterBot();
+
             MinecraftServer server = bot.getServer();
             if (server != null) {
                 server.getPlayerManager().remove(bot.asEntity());

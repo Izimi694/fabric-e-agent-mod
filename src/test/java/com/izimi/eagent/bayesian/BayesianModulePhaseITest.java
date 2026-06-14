@@ -28,8 +28,7 @@ class BayesianModulePhaseITest {
     @Test
     @DisplayName("GatingArbiter computes controllability for unknown reflex")
     void controllabilityUnknown() {
-        var gating = new GatingArbiter(module);
-        double c = gating.computeControllability("unknown_reflex", null);
+        double c = GatingArbiter.computeControllability(module, "unknown_reflex", null);
         assertEquals(0.5, c, 0.001);
     }
 
@@ -39,8 +38,7 @@ class BayesianModulePhaseITest {
         for (int i = 0; i < 10; i++) {
             module.update("reflex_dig_stone", List.of(new BayesianFeature("block=stone", true)), true);
         }
-        var gating = new GatingArbiter(module);
-        double c = gating.computeControllability("reflex_dig_stone", null);
+        double c = GatingArbiter.computeControllability(module, "reflex_dig_stone", null);
         assertTrue(c >= 0.5, "Low-variance should give controllability >= 0.5, got " + c);
     }
 
@@ -50,9 +48,8 @@ class BayesianModulePhaseITest {
         for (int i = 0; i < 5; i++) {
             module.update("reflex_test", List.of(new BayesianFeature("test", true)), true);
         }
-        var gating = new GatingArbiter(module);
-        double without = gating.computeControllability("reflex_test", null);
-        double with = gating.computeControllability("reflex_test",
+        double without = GatingArbiter.computeControllability(module, "reflex_test", null);
+        double with = GatingArbiter.computeControllability(module, "reflex_test",
                 List.of(new BayesianFeature("environment_change", true)));
         assertTrue(with < without, "Environment change should reduce controllability");
     }

@@ -1,0 +1,29 @@
+{
+  "version": 2,
+  "packName": "cautious",
+  "description": "谨慎型玩法包 — 高规避风险，偏好安全策略和保守行动",
+  "profile": {
+    "alpha": 0.18,
+    "beta": 0.028,
+    "temperature": 0.25,
+    "hormonal_preset": {
+      "stress": 0.35,
+      "aggression": 0.08,
+      "curiosity": 0.15,
+      "ne": 0.55,
+      "da": 0.12,
+      "serotonin": 0.65,
+      "ach": 0.15
+    },
+    "perspective_weights": {
+      "SURVIVAL": 1.0,
+      "TASK": 0.4,
+      "SOCIAL": 0.3,
+      "CURIOUS": 0.1,
+      "CAUTIOUS": 1.2
+    }
+  },
+  "reflexes": {},
+  "knowledge": {},
+  "config": {}
+}

@@ -45,7 +45,6 @@ public class BayesianModule {
 
     // ── Optional FileSystem injection for testability ──
     private final FileSystem fileSystem;
-    private final UUID botId;
 
     // ── Constants ──
     private static final double PRIOR_LEARNING_RATE = 0.1;
@@ -59,13 +58,14 @@ public class BayesianModule {
 
     public BayesianModule(UUID botId, FileSystem fileSystem) {
         this.fileSystem = fileSystem;
-        this.botId = botId;
         if (fileSystem != null) {
-            this.posteriorPath = Path.of("memory", botId.toString(), "posterior.json");
+            this.posteriorPath = Path.of("memory", botId != null ? botId.toString() : "shared", "posterior.json");
         } else {
             loadSharedPrior();
-            this.posteriorPath = FileUtil.getBotBayesianDir(botId).resolve("posterior.json");
-            loadPosterior();
+            if (botId != null) {
+                this.posteriorPath = FileUtil.getBotBayesianDir(botId).resolve("posterior.json");
+                loadPosterior();
+            }
         }
     }
 
@@ -97,18 +97,19 @@ public class BayesianModule {
     // ── Per-bot posterior persistence ──
 
     private void loadPosterior() {
-        if (FileUtil.fileExists(posteriorPath)) {
-            Map<String, Object> raw = JsonUtil.readMapFromFileSafe(posteriorPath);
-            if (raw != null) {
-                for (var entry : raw.entrySet()) {
-                    @SuppressWarnings("unchecked")
-                    Map<String, Object> counts = (Map<String, Object>) entry.getValue();
-                    Map<String, Integer> parsed = new HashMap<>();
-                    for (var ce : counts.entrySet()) {
-                        parsed.put(ce.getKey(), ((Number) ce.getValue()).intValue());
-                    }
-                    featureGivenOutcome.put(entry.getKey(), parsed);
+        if (posteriorPath == null || !FileUtil.fileExists(posteriorPath)) {
+            return;
+        }
+        Map<String, Object> raw = JsonUtil.readMapFromFileSafe(posteriorPath);
+        if (raw != null) {
+            for (var entry : raw.entrySet()) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> counts = (Map<String, Object>) entry.getValue();
+                Map<String, Integer> parsed = new HashMap<>();
+                for (var ce : counts.entrySet()) {
+                    parsed.put(ce.getKey(), ((Number) ce.getValue()).intValue());
                 }
+                featureGivenOutcome.put(entry.getKey(), parsed);
             }
         }
     }

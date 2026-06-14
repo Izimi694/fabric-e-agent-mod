@@ -8,6 +8,8 @@ import com.izimi.eagent.cortex.task.Task;
 import com.izimi.eagent.hormonal.HormonalSystem;
 import net.minecraft.server.network.ServerPlayerEntity;
 
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Random;
 
 public class MotivationEngine {
@@ -25,8 +27,6 @@ public class MotivationEngine {
 
     private static final double CROSS_INHIBITION_RATIO = 0.7;
     private static final int INHIBITION_WINDOW = 5;
-    private static final double EXPLORE_THRESHOLD = 1.0 / Math.E;
-
     /**
      * 探索判断: DA > 0.4 (奖赏驱动) 且 NE < 0.5 (低威胁).
      * 替代旧版 curiosity 单一维度判断.
@@ -56,6 +56,38 @@ public class MotivationEngine {
     private Perspective lastWinner = null;
     private int inhibitionTicks = 0;
 
+    private Map<Perspective, Double> perspectiveWeightOverrides;
+
+    /** Replace default hardcoded perspective weights with playstyle-specific values */
+    public void setPerspectiveWeights(Map<Perspective, Double> weights) {
+        this.perspectiveWeightOverrides = weights != null && !weights.isEmpty()
+            ? new HashMap<>(weights) : null;
+    }
+
+    /** Export current perspective weight overrides (null if not set) */
+    public Map<String, Double> getPerspectiveWeights() {
+        if (perspectiveWeightOverrides == null) return null;
+        Map<String, Double> out = new HashMap<>();
+        for (var e : perspectiveWeightOverrides.entrySet()) {
+            out.put(e.getKey().name(), e.getValue());
+        }
+        return out;
+    }
+
+    private double weight(Perspective p) {
+        if (perspectiveWeightOverrides != null) {
+            Double w = perspectiveWeightOverrides.get(p);
+            if (w != null) return w;
+        }
+        return switch (p) {
+            case SURVIVAL -> W_SURVIVAL;
+            case TASK -> W_TASK_BASE;
+            case SOCIAL -> W_SOCIAL;
+            case CURIOUS -> 0.0; // computed dynamically in computeCuriosityDrive
+            case CAUTIOUS -> W_CAUTIOUS;
+        };
+    }
+
     public DriveState computeDrives(BotContext ctx, WorldContext world, ServerPlayerEntity bot) {
         HormonalSystem h = ctx.hormonalSystem();
         BotParams params = ctx.botParams();
@@ -65,6 +97,14 @@ public class MotivationEngine {
         double socialUrgency = computeSocialDrive(ctx, world, h);
         double curiosityUrgency = computeCuriosityDrive(ctx, h);
         double cautiousUrgency = computeCautiousDrive(ctx, h, params);
+
+        if (perspectiveWeightOverrides != null) {
+            survivalUrgency *= weight(Perspective.SURVIVAL);
+            taskUrgency *= weight(Perspective.TASK);
+            socialUrgency *= weight(Perspective.SOCIAL);
+            curiosityUrgency *= weight(Perspective.CURIOUS);
+            cautiousUrgency *= weight(Perspective.CAUTIOUS);
+        }
 
         return new DriveState(survivalUrgency, taskUrgency, socialUrgency, curiosityUrgency, cautiousUrgency);
     }

@@ -1,0 +1,29 @@
+{
+  "version": 2,
+  "packName": "aggressive",
+  "description": "好战型玩法包 — 优先战斗与掠夺，低恐惧高攻击性",
+  "profile": {
+    "alpha": 0.25,
+    "beta": 0.008,
+    "temperature": 0.55,
+    "hormonal_preset": {
+      "stress": 0.15,
+      "aggression": 0.65,
+      "curiosity": 0.25,
+      "ne": 0.12,
+      "da": 0.55,
+      "serotonin": 0.15,
+      "ach": 0.20
+    },
+    "perspective_weights": {
+      "SURVIVAL": 1.0,
+      "TASK": 0.5,
+      "SOCIAL": 0.3,
+      "CURIOUS": 0.4,
+      "CAUTIOUS": 0.2
+    }
+  },
+  "reflexes": {},
+  "knowledge": {},
+  "config": {}
+}

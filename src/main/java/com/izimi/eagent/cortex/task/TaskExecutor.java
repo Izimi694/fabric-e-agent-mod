@@ -81,13 +81,17 @@ public class TaskExecutor {
                     executionTick = 0;
                 }
             } else {
-                current.attemptCount++;
-
                 if (!result.executed()) {
                     LOGGER.warn("[TaskExecutor] 确定无法执行，跳过: {} (goal={})",
                             current.skillId, current.goal);
                     current.status = "skipped";
                     return;
+                }
+
+                if (result.effectiveness() > 0.01) {
+                    current.attemptCount = 0;
+                } else {
+                    current.attemptCount++;
                 }
 
                 int maxRetries = getMaxRetries();

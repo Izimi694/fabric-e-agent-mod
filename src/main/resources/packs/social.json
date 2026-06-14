@@ -1,0 +1,29 @@
+{
+  "version": 2,
+  "packName": "social",
+  "description": "社交型玩法包 — 高亲密度倾向，喜欢陪伴玩家，乐于助人",
+  "profile": {
+    "alpha": 0.35,
+    "beta": 0.012,
+    "temperature": 0.45,
+    "hormonal_preset": {
+      "stress": 0.08,
+      "aggression": 0.10,
+      "curiosity": 0.35,
+      "ne": 0.05,
+      "da": 0.35,
+      "serotonin": 0.60,
+      "ach": 0.30
+    },
+    "perspective_weights": {
+      "SURVIVAL": 0.5,
+      "TASK": 0.5,
+      "SOCIAL": 1.0,
+      "CURIOUS": 0.3,
+      "CAUTIOUS": 0.4
+    }
+  },
+  "reflexes": {},
+  "knowledge": {},
+  "config": {}
+}

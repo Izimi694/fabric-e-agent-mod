@@ -9,6 +9,7 @@ import com.izimi.eagent.brainstem.adapter.TemporalScaler;
 import com.izimi.eagent.util.FileUtil;
 import com.izimi.eagent.util.JsonUtil;
 import com.mojang.authlib.GameProfile;
+import net.minecraft.network.packet.s2c.play.PlayerListS2CPacket;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.PlayerManager;
 import net.minecraft.server.network.ServerPlayerEntity;
@@ -45,13 +46,32 @@ public class BotManager {
         entity.setPitch(0);
         entity.setYaw(0);
 
-        world.onPlayerConnected(entity);
+        // Force-load chunk at spawn so entity enters world tick list
+        net.minecraft.util.math.BlockPos bp = net.minecraft.util.math.BlockPos.ofFloored(position);
+        world.getChunk(bp.getX() >> 4, bp.getZ() >> 4);
+        LOGGER.info("[BotManager] 强制加载区块: ({}, {}) 于 ({:.1f}, {:.1f}, {:.1f})",
+                bp.getX() >> 4, bp.getZ() >> 4, position.x, position.y, position.z);
+
+        entity.changeGameMode(net.minecraft.world.GameMode.SURVIVAL);
 
         PlayerManager playerManager = server.getPlayerManager();
         playerManager.getPlayerList().add(entity);
+        server.getPlayerManager().sendToAll(new PlayerListS2CPacket(PlayerListS2CPacket.Action.ADD_PLAYER, entity));
+        world.onPlayerConnected(entity);
+        LOGGER.info("[BotManager] Bot游戏模式: {}, abilities.allowFlying={}, abilities.flying={}, noClip={}",
+                entity.interactionManager.getGameMode(),
+                entity.getAbilities().allowFlying,
+                entity.getAbilities().flying,
+                entity.isSpectator() || entity.isCreative());
 
         entity.setHealth(20.0f);
         entity.getHungerManager().setFoodLevel(20);
+
+        // Initialize abilities for entity physics
+        entity.getAbilities().flying = false;
+        entity.getAbilities().allowFlying = false;
+        entity.getAbilities().invulnerable = false;
+        entity.sendAbilitiesUpdate();
 
         // Phase 7: Inherit params from genome archive if available
         BotParams childParams = null;
@@ -66,6 +86,9 @@ public class BotManager {
         }
 
         BotInstance instance = new BotInstance(botId, name, botPlayer, childParams, worldContext);
+
+        // Register in BotPlayer's active bots map for navigation communication
+        BotPlayer.registerBot(botId, botPlayer);
 
         FileUtil.getBotDir(botId).toFile().mkdirs();
 
@@ -96,6 +119,8 @@ public class BotManager {
             worldContext.brainstem().basicActions().stopNavigation(botId);
             // Save genome before removing (Phase 7)
             instance.saveDeathGenome("despawned");
+
+            instance.getBotPlayer().unregisterBot();
 
             MinecraftServer server = instance.getBotPlayer().getServer();
             if (server != null) {

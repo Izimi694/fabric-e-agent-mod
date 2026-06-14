@@ -211,10 +211,6 @@ public class ConditionedReflex {
         return ReflexIO.conditionedDir(botId);
     }
 
-    private Path archivedDir() {
-        return ReflexIO.archivedDir(botId);
-    }
-
     private Path reflexPath(String reflexId) {
         return ReflexIO.reflexPath(reflexId, botId);
     }
@@ -258,6 +254,8 @@ public class ConditionedReflex {
 
             double reflexWeight = effectiveWeight(data);
 
+            double decayFactor = computeDecayFactor(data);
+
             double bayesianMultiplier = bayesianModule != null
                     ? Math.max(0.1, bayesianModule.predictSuccess(skill.getSkillId(), contextFeatures))
                     : 1.0;
@@ -276,7 +274,7 @@ public class ConditionedReflex {
 
                     double atomProficiency = ((Number) atom.getOrDefault(KEY_PROFICIENCY, 0.0)).doubleValue();
                     if (isAtomTargetNearby(bot, (String) atom.get("action"), atomTarget)) {
-                        double score = reflexWeight * atomProficiency * bayesianMultiplier;
+                        double score = reflexWeight * atomProficiency * bayesianMultiplier * decayFactor;
                         candidates.add(new Candidate(skill, score, i));
                     }
                 }
@@ -284,7 +282,7 @@ public class ConditionedReflex {
                 String category = (String) data.get("category");
                 if (category != null && isTargetNearby(bot, category, data)) {
                     double compoundProficiency = ((Number) data.getOrDefault(KEY_PROFICIENCY, 0.0)).doubleValue();
-                    candidates.add(new Candidate(skill, reflexWeight * compoundProficiency * bayesianMultiplier, -1));
+                    candidates.add(new Candidate(skill, reflexWeight * compoundProficiency * bayesianMultiplier * decayFactor, -1));
                 }
             }
         }
@@ -306,7 +304,6 @@ public class ConditionedReflex {
         return best.skill();
     }
 
-    @SuppressWarnings("unchecked")
     private boolean isTargetNearby(ServerPlayerEntity bot, String category, Map<String, Object> reflexData) {
         if (category.startsWith("dig_")) {
             return isDigTargetNearby(bot, reflexData);
@@ -585,6 +582,8 @@ public class ConditionedReflex {
         } else {
             handleReflexFailure(skillId, bot, atoms, atomIdx);
         }
+
+        updateLastAccessed(skillId);
     }
 
     public enum ReflexHealth { HEALTHY, WATCHING, DORMANT }
@@ -783,6 +782,7 @@ public class ConditionedReflex {
         reflexData.put("target", sequence.target());
         reflexData.put("contributedTargets", extractTargets(sequence));
         reflexData.put("solidifiedAt", System.currentTimeMillis());
+        reflexData.put(KEY_LAST_ACCESSED, System.currentTimeMillis());
 
         List<Map<String, String>> steps = new ArrayList<>();
         for (ObservedSequence.Step step : sequence.steps()) {
@@ -809,7 +809,6 @@ public class ConditionedReflex {
                 skillId, category, sequence.occurrences(), String.format("%.2f", sequence.proficiency()));
     }
 
-    @SuppressWarnings("deprecation")
     public void incrementProficiency(String skillId) {
         Path path = reflexPath(skillId);
         Map<String, Object> data = JsonUtil.readMapFromFileSafe(path);
@@ -863,6 +862,21 @@ public class ConditionedReflex {
         double stw = ((Number) data.getOrDefault(KEY_SHORT_TERM_WEIGHT, DEFAULT_WEIGHT)).doubleValue();
         double ltb = ((Number) data.getOrDefault(KEY_LONG_TERM_BASELINE, DEFAULT_WEIGHT)).doubleValue();
         return Math.max(0, stw * EW_STW_RATIO + ltb * EW_LTB_RATIO);
+    }
+
+    static double computeDecayFactor(Map<String, Object> data) {
+        long lastAccessed = ((Number) data.getOrDefault(KEY_LAST_ACCESSED, 0L)).longValue();
+        if (lastAccessed == 0L) return 1.0;
+        double hours = (System.currentTimeMillis() - lastAccessed) / 3600000.0;
+        return Math.max(DECAY_MIN, 1.0 - hours * DECAY_RATE_PER_HOUR);
+    }
+
+    public void updateLastAccessed(String skillId) {
+        Path path = reflexPath(skillId);
+        Map<String, Object> data = JsonUtil.readMapFromFileSafe(path);
+        if (data == null) return;
+        data.put(KEY_LAST_ACCESSED, System.currentTimeMillis());
+        JsonUtil.writeToFileSafeAtomic(path, data);
     }
 
     public String getLastExecutedReflexId() {

@@ -19,7 +19,6 @@ import com.izimi.eagent.cortex.api.DeepSeekClient;
 import com.izimi.eagent.cortex.api.AIConfig;
 import com.izimi.eagent.cortex.api.TemplateManager;
 import com.izimi.eagent.cortex.api.PersonaManager;
-import com.izimi.eagent.cortex.api.TemplateMatcher;
 import com.izimi.eagent.brainstem.scheduler.InhibitoryControl;
 import com.izimi.eagent.amygdala.FamiliarityTracker;
 import com.izimi.eagent.brainstem.IdleBrain;
@@ -36,7 +35,6 @@ import com.izimi.eagent.amygdala.ThresholdConfig;
 import com.izimi.eagent.command.AICommand;
 import com.izimi.eagent.config.ModConfig;
 import com.izimi.eagent.hippocampus.MemoryManager;
-import com.izimi.eagent.hippocampus.MemoryQuery;
 import com.izimi.eagent.state.StateManager;
 import com.izimi.eagent.cortex.task.TaskManager;
 import com.izimi.eagent.cortex.task.TaskExecutor;
@@ -60,8 +58,14 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
-import java.util.UUID;
+import java.util.Map;
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 
 public class EAgent implements ModInitializer {
     public static final String MOD_ID = "e-agent";
@@ -71,7 +75,6 @@ public class EAgent implements ModInitializer {
     private static TaskManager taskManager;
     private static TaskExecutor taskExecutor;
     private static MemoryManager memoryManager;
-    private static MemoryQuery memoryQuery;
     private static SkillManager skillManager;
     private static ConditionedReflex conditionedReflex;
     private static StateManager stateManager;
@@ -115,6 +118,7 @@ public class EAgent implements ModInitializer {
         try {
             FileUtil.ensureDirectories();
             FileUtil.cleanupTempFiles();
+            copyBuiltinPacks();
             LOGGER.info("[E-Agent] 目录结构已创建, 已清理残留tmp文件");
         } catch (Exception e) {
             LOGGER.error("[E-Agent] 目录创建/清理失败", e);
@@ -142,7 +146,6 @@ public class EAgent implements ModInitializer {
         botManager = new BotManager();
         stateManager = new StateManager();
         memoryManager = new MemoryManager(config);
-        memoryQuery = new MemoryQuery(memoryManager);
         taskManager = new TaskManager();
         skillManager = new SkillManager();
         executionLogger = new ExecutionLogger();
@@ -225,7 +228,7 @@ public class EAgent implements ModInitializer {
             if (botManager != null) {
                 botManager.tickAll(server);
             }
-            if (botController != null && (botManager == null || botManager.isEmpty())) {
+            if (botController != null) {
                 botController.onTick(server);
             }
             if (evaluationCycle != null) {
@@ -330,6 +333,15 @@ public class EAgent implements ModInitializer {
         }
     }
 
+    /** 供 LowLevelDispatcher 获取当前 persona 的聊天覆盖表 */
+    public static Map<String, List<String>> getPersonaOverrides() {
+        return personaManager != null ? personaManager.getActiveOverrides() : Collections.emptyMap();
+    }
+
+    public static PersonaManager getPersonaManager() {
+        return personaManager;
+    }
+
     private static void routeChatToBot(BotInstance bot, ServerPlayerEntity sender, String message) {
         if (message == null || message.isEmpty()) return;
         bot.getTaskManager().createTask(message);
@@ -412,6 +424,26 @@ public class EAgent implements ModInitializer {
                 }
             }
             socialObserver.markNearbyPlayers(nearby);
+        }
+    }
+
+    private static void copyBuiltinPacks() {
+        String[] builtinPacks = {"aggressive", "builder", "cautious", "explorer", "social"};
+        Path packsDir = FileUtil.getReflexPacksDir();
+        for (String name : builtinPacks) {
+            Path target = packsDir.resolve(name + ".json");
+            if (Files.exists(target)) continue;
+            try (InputStream is = EAgent.class.getResourceAsStream("/packs/" + name + ".json")) {
+                if (is == null) {
+                    LOGGER.warn("[E-Agent] 内置包资源不存在: {}", name);
+                    continue;
+                }
+                Files.createDirectories(packsDir);
+                Files.copy(is, target, StandardCopyOption.REPLACE_EXISTING);
+                LOGGER.info("[E-Agent] 已复制内置玩法包: {}", name);
+            } catch (IOException e) {
+                LOGGER.warn("[E-Agent] 复制内置玩法包失败: {} — {}", name, e.getMessage());
+            }
         }
     }
 }

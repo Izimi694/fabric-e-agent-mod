@@ -109,17 +109,18 @@ if (newTask.priority > currentTask.priority * (1 + (1.0 / Math.E))) {
                                        死亡 → 三规则继承给后代
 ```
 
-### 3.1 激素系统 (HormonalSystem)
+### 3.1 状态向量系统 (HormonalSystem + NeuroState)
 
-当前状态：4 维神经递质向量模型 (NE/DA/5-HT/ACh) + 向下兼容的 stress/aggression/curiosity/intimacy 旧别名。
+当前状态：4 维状态向量 (NE/DA/5-HT/ACh) + 向下兼容的 stress/aggression/curiosity/intimacy 旧别名。
+4 维名称源于神经科学命名约定，工程上视为独立状态通道，不做生物模拟。
 
-| 变量 | 生物对应 | 触发方式 | 时间尺度 | 调制角色 |
-|------|---------|---------|:-------:|---------|
-| NE (去甲肾上腺素) | 警觉/唤醒 | 受伤/威胁/突发事件 | 快 (秒) | 情境门控：NE < 0.5 低威胁 / ≥ 0.5 高威胁 |
-| DA (多巴胺) | 奖赏/活力 | 战斗胜利/新奇发现/任务完成 | 中 (秒~分) | 攻击前提：DA < 0.4 时否决攻击候选 |
-| 5-HT (血清素) | 情境开关 | 连续失败/威胁持续 | 慢 (分) | 低NE→全局抑制；高NE→促逃抑攻 |
-| ACh (乙酰胆碱) | 注意力聚焦 | 专注任务/目标切换 | 中 (秒~分) | 高→攻击/挖矿（专注），低→探索（扫视） |
-| intimacy | 社交信任 (独立) | 玩家评价/互动 | 极慢 (时~天) | 社交候选门控乘数，不参与余弦匹配 |
+| 变量 | 触发方式 | 时间尺度 | 调制角色 |
+|------|---------|:-------:|---------|
+| NE | 受伤/威胁/突发事件 | 快 (秒) | 情境门控：NE < 0.5 低威胁 / ≥ 0.5 高威胁 |
+| DA | 战斗胜利/新奇发现/任务完成 | 中 (秒~分) | 攻击前提：DA < 0.4 时否决攻击候选 |
+| 5-HT | 连续失败/威胁持续 | 慢 (分) | 低NE→全局抑制；高NE→促逃抑攻 |
+| ACh | 专注任务/目标切换 | 中 (秒~分) | 高→攻击/挖矿（专注），低→探索（扫视） |
+| intimacy | 玩家评价/互动 | 极慢 (时~天) | 社交候选门控乘数，不参与余弦匹配 |
 
 GABA (攻击刹车) 与 Glu (逃跑油门) 作为独立导出量，由 `NeuroDynamics` 工具类实时计算，不持久化存储。详见 §4.3。
 
@@ -151,33 +152,35 @@ public boolean shouldExplore() {
 
 ---
 
-## 4. 四模块脑区架构
+## 4. 四模块代码分包
 
-| 脑区 | 模块 | 职责 |
-|------|------|------|
-| **前额叶** | `cortex/` | 规划、复杂决策、语义理解 |
-| **海马体** | `hippocampus/` | 记忆存储、高光回忆、记忆关系图 (MemoryGraph) |
-| **杏仁核** | `amygdala/` | 评价、条件反射、学习、情绪 |
-| **脑干** | `brainstem/` | 先天反射、基础动作、生存本能 |
+命名来自神经科学中对应脑区的功能启发，但代码包结构 = 模块边界，不是生物模拟。
 
-**基础设施 = 骨架** (`command/`, `config/`, `util/`, `log/`, `state/`, `mixin/`, `bayesian/`, `hormonal/`)：跨领域支撑层，不属于任何脑区。
+| 包 | 职责 |
+|---|------|
+| `cortex/` | 规划、复杂决策、语义理解 |
+| `hippocampus/` | 记忆存储、高光回忆、记忆关系图 (MemoryGraph) |
+| `amygdala/` | 评价、条件反射、学习 |
+| `brainstem/` | 先天反射、基础动作、生存本能 |
 
-### 4.1 脑干 vs 杏仁核分工
+**基础设施 = 骨架** (`command/`, `config/`, `util/`, `log/`, `state/`, `bayesian/`, `hormonal/`)：跨领域支撑层，不属于四个模块分包。
 
-| | 脑干 (brainstem/) | 杏仁核 (amygdala/) |
+### 4.1 brainstem（执行层） vs amygdala（判断层）
+
+| | brainstem/ | amygdala/ |
 |---|---|---|
-| 职责 | "怎么做" — 执行层 + 唯一决策调度 | "什么时候做" — 判断层 |
+| 职责 | "怎么做" — 动作执行 | "什么时候做" — 评价判断 |
 | 内容 | 调度器、12 原子动作、寻路、Idle 动画 | 条件反射、社会镜像、评价 |
-| 不含 | 任何"如何执行"的实现（除 MetaScheduler 外） | 任何"如何执行"的实现 |
-| 类比 | 伺服电机和机械臂（含一个 PLC） | 膝跳反射和痛觉神经 |
+| 不含 | 任何"是否该做"的判断（除 MetaScheduler 外） | 任何"如何执行"的实现 |
+| 类比 | 伺服电机和机械臂（含一个 PLC） | 条件反射回路 |
 
 > **实现注记**：MetaScheduler 为满足每 tick 的性能要求，直接引用了底层模块而非通过 API 门面（BrainstemAPI/AmygdalaAPI/CortexAPI）。这是一个有意的性能权衡，不视为架构偏离。此外，InhibitoryControl 历史位于 `cortex/inhibitor/` 路径下，逻辑归属 L2 调度层，该路径视为历史遗留，不改变功能。
 
 **骨架** 在 §4 表格的基础上扩展为：
-- 脑干内 `brainstem/scheduler/` 包含 MetaScheduler（系统唯一决策调度器）——它不执行动作，只做"是否做、做什么"的选择。这是整套系统中**唯一**进行"是否应该做"决策的模块，其余脑干模块不参与决策。
+- `brainstem/scheduler/` 包含 MetaScheduler（系统唯一决策调度器）——它不执行动作，只做"是否做、做什么"的选择。这是整套系统中**唯一**进行决策的模块，其余执行模块不参与决策。
 - `brainstem/scheduler/` 还包含反射链、参数绑定、紧急分类、驱力计算（MotivationEngine），全部为决策调度服务。
 
-### 4.2 前额叶抑制控制 (InhibitoryControl + CognitiveControl)
+### 4.2 抑制控制 (InhibitoryControl + CognitiveControl)
 
 当前实现（InhibitoryControl）：硬否决 → 二进制 veto，静态阈值。
 已实现（Phase 3）：扩展为两层抑制模型（InhibitoryControl 硬门 + CognitiveControl 连续调制）。
@@ -328,16 +331,16 @@ private boolean meetsRequirements(NeuroState state, ReflexRecipe recipe) {
 
 ---
 
-### 4.3 NeuroDynamics (GABA/Glu 推导工具类)
+### 4.3 NeuroDynamics — 攻击抑制/逃跑激励推导
 
-依据外侧下丘脑 (LH) 双向开关的生物学发现，GABA 与 Glu 对攻击/逃跑有独立的控制通道：
+GABA（攻击抑制）与 Glu（逃跑激励）是 CognitiveControl 调制流程中两个独立的推导值，分别注入候选权重，不合并为单比值。
 
-| 信号 | 生物对应 | 功能 | 工程角色 |
-|------|---------|------|---------|
-| GABA | LH GABA 能神经元 | 抑制攻击（攻击刹车） | `computeAttackInhibition()` |
-| Glu  | LH 谷氨酸能神经元 | 驱动逃跑（逃跑油门） | `computeFlightExcitation()` |
+> 注：GABA/Glu 命名借用自神经科学中 LH 双向开关的发现，工程上是两个独立的数值通道，不做生物模拟。
 
-两个值独立计算，分别注入 CognitiveControl 的候选调制阶段，不合并为单比值。
+| 信号 | 功能 | 工程角色 |
+|------|------|---------|
+| GABA | 抑制攻击（随 5-HT/失败次数/低置信度递增） | `computeAttackInhibition()` |
+| Glu  | 激励逃跑（随 DA/NE/新奇度递增） | `computeFlightExcitation()` |
 
 #### 攻击刹车 (computeAttackInhibition)
 
@@ -392,10 +395,10 @@ CognitiveControl 中应用：`candidate.type == FLEE ? candidate.weight += fligh
 
 ### 5.1 双权重学习 (stw/ltb)
 
-| 权重 | 性质 | 更新频率 | 类比 |
+| 权重 | 性质 | 更新频率 | 说明 |
 |------|------|---------|------|
-| stw (short-term) | 快变 | 每次执行 +5% 成功/-3% 失败 | 突触可塑性快成分 |
-| ltb (long-term) | 慢变 | 反复成功才更新 | 突触可塑性慢成分 |
+| stw (short-term) | 快变 | 每次执行 +5% 成功/-3% 失败 | 快速适应短期经验变化 |
+| ltb (long-term) | 慢变 | 反复成功才更新 | 慢速固化长期经验 |
 
 ### 5.2 生命周期
 
@@ -442,9 +445,9 @@ Fabric 事件触发
 
 ### 6.3 社会学习（两阶段）
 
-**阶段 1 — 学习期（前额叶驱动）**：观察 + KNN 筛选 + 朴素贝叶斯价值评估 + 前额叶抑制控制
+**阶段 1 — 学习期（cortex/ 驱动）**：观察 + KNN 筛选 + 朴素贝叶斯价值评估 + 抑制控制
 
-**阶段 2 — 反射期（杏仁核驱动）**：同一模式成功 ≥3 次 → 固化 → 零成本自动执行
+**阶段 2 — 反射期（amygdala/ 驱动）**：同一模式成功 ≥3 次 → 固化 → 零成本自动执行
 
 ---
 
@@ -542,7 +545,7 @@ PersonaManager 管理角色设定注入:
 
 ## 9. 贝叶斯模块 (BayesianModule)
 
-> **注意**：本系统中的贝叶斯模块是被动数据仓库，不参与实时决策门控。它提供成功率统计、记忆相关性排序、社交镜像筛选等服务。决策由 Subsumption Architecture (L0-L5) + 玻尔兹曼驱力竞争完成。这符合生物学事实——大脑不输出后验概率 (Nature 2025)。
+> **注意**：本系统中的贝叶斯模块是被动数据仓库，不参与实时决策门控。它提供成功率统计、记忆相关性排序、社交镜像筛选等服务。决策由 Subsumption Architecture (L0-L5) + 玻尔兹曼驱力竞争完成。理论依据见 [THEORY.md](./THEORY.md)。
 
 ### 9.1 三层存储
 
@@ -590,9 +593,9 @@ public boolean isConverged(Posterior posterior) {
 
 **挂机 1 小时: 0 次 API。活跃 1 小时: ~4-8 次。**
 
-### 10.1 反射包 (ReflexPack) — 零成本的批量移植
+### 10.1 反射包 V1 (ReflexPack) — 零成本的批量移植
 
-反射包 = JSON 文件，打包所有 `conditioned/*.json` + 可选贝叶斯先验。纯本地文件操作，不触发 LLM。
+V1 包 = JSON 文件，打包所有 `conditioned/*.json` + 可选贝叶斯先验。纯本地文件操作，不触发 LLM。
 
 | 操作 | 成本 | 场景 |
 |------|:----:|------|
@@ -602,6 +605,49 @@ public boolean isConverged(Posterior posterior) {
 | `import bot packname reset` | 0 | 冷启动（完全覆盖） |
 
 **核心原则**：导入后不自闭，Bot 继续用自己的贝叶斯模块去适应新环境。包只是初始信念。
+
+### 10.2 玩法包 V2 (PlaystylePack) — 一次性初始化整个行为配置
+
+V2 玩法包在 V1 反射包基础上扩展了 profile/knowledge/config 三个额外段，用于一次性初始化 Bot 的完整行为配置。
+
+| 段 | 内容 | 说明 |
+|:----:|------|------|
+| `profile` | BotParams (α/β/temperature) + HormonalPreset (7 维) + PerspectiveWeights (5 维) | 覆盖 Bot 的行为参数和初始激素状态 |
+| `reflexes` | 同 V1 反射列表 | 同 V1 |
+| `knowledge` | 玩法专属知识 (recipes/entities/item_uses/tool_map) | 隔离到 `KnowledgeBase` 的 playstyle 分区，查询优先于全局知识 |
+| `config` | 共享池约束覆盖 (chain_max_length 等) | 预留，当前仅记录日志 |
+
+**应用链路**：
+
+```
+BotInstance.applyPlaystylePack(pack)
+  1. BotParams.override(alpha, beta, temp)     ← 热替换
+  2. HormonalSystem.applyPreset(preset)         ← 批设 7 维
+  3. MotivationEngine.setPerspectiveWeights()    ← 覆盖 5 视角权重
+  4. KnowledgeBase.switchPlaystyle(id)           ← 切换知识分区
+  5. Reflexes → 逐文件写入 conditioned/          ← 同 V1
+```
+
+**5 预设包**（`resources/packs/`）：
+
+| 包名 | α | β | 温度 | 主导视角 | 适用场景 |
+|:----:|::|::|:---:|:--------:|---------|
+| aggressive | 0.25 | 0.008 | 0.55 | SURVIVAL + DA↑ | 好战型，低恐惧高攻击性 |
+| explorer | 0.45 | 0.005 | 0.50 | CURIOUS + ACh↑ | 好奇心驱动，地图遍历 |
+| social | 0.35 | 0.012 | 0.45 | SOCIAL + 5-HT↑ | 高亲密度，爱陪伴玩家 |
+| cautious | 0.18 | 0.028 | 0.25 | CAUTIOUS + NE↑ | 高规避风险，保守行动 |
+| builder | 0.30 | 0.015 | 0.35 | TASK + 5-HT/DA中 | 偏好建设与收集 |
+
+这些包可通过 `/ai playstyle load <name> [botName]` 运行时加载，不影响其他 Bot，支持 `/ai playstyle list` 预览。
+
+**命令**：
+
+| 命令 | 说明 |
+|------|------|
+| `/ai playstyle list` | 列出可用玩法包 (v2 含 profile 标注) |
+| `/ai playstyle load <包名> [机器人]` | 加载 V2 玩法包 (兼容 V1 自动回退) |
+| `/ai playstyle export <机器人> <包名>` | 导出 Bot 当前状态为 V2 玩法包 |
+| `/ai playstyle current [机器人]` | 查看 Bot 当前参数/激素/反射数 |
 
 ---
 
@@ -727,7 +773,10 @@ copyReflexesFromMentor()
 | SocialObserver | 骨架 | 内存 |
 | BehaviorStats | 骨架 | 内存 |
 | ChatSessionManager | 骨架 (cortex/chat) | 内存窗口 |
-| ReflexPackManager | 骨架 (brainstem/bot) | 实例注入（botId + BayesianModule） `reflex_packs/*.json` |
+| ReflexPackManager | 骨架 (brainstem/bot) | 实例注入（botId + BayesianModule + BotInstance） `reflex_packs/*.json` |
+| PlaystylePack | L3 (cortex/api) | `reflex_packs/*.json` — V2 pack 数据模型 |
+| HormonalPreset | L1 (cortex/api) | 7 维激素预设记录 |
+| IPlaystylePlugin | 预留 (cortex/api) | 未来 L2 专精模块接口 |
 | WorldContext | 骨架 (api) | `WorldContext` 接口 / `WorldContextImpl` |
 | BotContext | 骨架 (api) | `BotContext` 接口 / `BotContextImpl` |
 | MetaState | 骨架 (api) — 具体类，非接口 | `MetaState` 类（每 tick 新建，状态容器，不定义行为） |
@@ -972,14 +1021,14 @@ public void rollback(Node node, Failure failure) {
 
 ## 22. 四类共享池形式化参数
 
-| 池 | 生物对应 | 约束 | 配置键 |
-|----|---------|:----:|--------|
-| 囊泡超级池 | 相邻突触共享囊泡 | 反射链长度 ≤ 5 | `chain_max_length` |
-| 工作记忆绑定池 | 有限特征绑定 | 贝叶斯候选集 ≤ 5 | `bayesian_candidate_limit` |
-| 跨脑共享子空间 | dmPFC 社交对齐 | 共享先验比例 10-30% | `shared_prior_ratio` |
-| 归一化网络池 | 总活动恒定 | 总驱力 = 1.0 | 硬编码归一化 |
+| 池 | 约束 | 配置键 |
+|----|:----:|--------|
+| 囊泡超级池 | 反射链长度 ≤ 5 | `chain_max_length` |
+| 工作记忆绑定池 | 贝叶斯候选集 ≤ 5 | `bayesian_candidate_limit` |
+| 跨脑共享子空间 | 共享先验比例 10-30% | `shared_prior_ratio` |
+| 归一化网络池 | 总驱力 = 1.0 | 硬编码归一化 |
 
-四池对应不同生物结构，约束独立，不交叉合并。
+四池约束独立，不交叉合并。生物对应关系见 [THEORY.md](./THEORY.md)。
 
 ---
 
