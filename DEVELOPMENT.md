@@ -7,7 +7,7 @@
 ## 1. 当前状态
 
 ```
-项目阶段: ✅ Phase 3 — CognitiveControl + Phase Playstyle Pack — Layer 1 玩法包全部完成
+项目阶段: ✅ Phase Playstyle Pack — Layer 1 玩法包全部完成 + Gating stateless + Memory RLU + 死代码清理
 ```
 
 ### 完成情况
@@ -42,6 +42,11 @@
 | **Phase 2** | **神经递质向量系统: NeuroState + 4维 HormonalSystem + NeuroDynamics** | ✅ |
 | **Phase 3** | **CognitiveControl 集成: 余弦匹配/阈值参数化/四门决策流水线** | ✅ |
 | **Phase Playstyle Pack** | **Layer 1 玩法包: PlaystylePack V2 数据模型 + 5 预设包 + CLI** | ✅ |
+| **Gating stateless** | **GatingArbiter 纯静态重构 + SocialObserver 清理 + OneShotAlarmSystem 直连 BayesianModule** | ✅ |
+| **Memory RLU + Reflex decay** | **MemoryEntry.lastAccessedAt + MemoryManager.touchMemory()/flushDirtyTimestamps() + ConditionedReflex.computeDecayFactor()/updateLastAccessed()** | ✅ |
+| **Persona formatHint/lock** | **PersonaProfile.formatHint 字段 + PersonaManager.personaLocked 锁 + /ai persona 设置锁 + playstyle 自动切换人格** | ✅ |
+| **Playstyle Pack 扩展** | **jar→filesystem 内置包首次复制 + ReflexPackManager 子目录递归扫描** | ✅ |
+| **死代码清理** | **移除 ~30 个未使用 import/field/method/annotation/参数，消除所有编译器警告** | ✅ |
 
 
 ---
@@ -105,7 +110,34 @@ Phase Playstyle Pack (Layer 1 玩法包 — 行为预设初始化):
   ├── PP.5 — BotInstance.applyPlaystylePack() 统一入口链式调用
   ├── PP.6 — AICommand /ai playstyle load/list/export/current
   ├── PP.7 — 5 预设包 JSON: aggressive/explorer/social/cautious/builder
-  └── PP.8 — 331 测试全部通过
+  └── PP.8 — 326 测试全部通过
+```
+
+### 本轮新增 (2026-06-14)
+
+```
+Phase Gating stateless (GatingArbiter 纯静态):
+  ├── GS.1 — GatingArbiter 移出 BayesianModule，改为纯 static 工具类
+  ├── GS.2 — SocialObserver 删除 gatingArbiter 字段/setGatingArbiter/shouldDirectConsolidate/CONTROLLABILITY_GATE
+  └── GS.3 — OneShotAlarmSystem 直连 BayesianModule，替换 gatingArbiter 字段
+
+Phase RLU+Decay (记忆刷新 + 反射衰减):
+  ├── RD.1 — MemoryEntry.lastAccessedAt + MemoryManager.touchMemory/flushDirtyTimestamps
+  ├── RD.2 — getRecentMemories 改用 Math.max(timestamp, lastAccessedAt) 过滤
+  ├── RD.3 — ConditionedReflex.computeDecayFactor(方案A): max(0.3, 1 - unusedHours×0.0003)
+  ├── RD.4 — getTopCandidates 乘 decayFactor + executeReflex 调 updateLastAccessed
+  └── RD.5 — 创建时设 lastAccessedAt (4处) + ReflexIO 反激活
+
+Phase Persona Extension (角色系统扩展):
+  ├── PE.1 — PersonaProfile.formatHint 字段 + PersonaManager 存储
+  ├── PE.2 — MetaScheduler/buildTemplateContext 注入 CHAT_RESPONSE
+  ├── PE.3 — PersonaManager.personaLocked 锁 + AICommand 设置
+  └── PE.4 — PlaystylePack.persona 字段 + load 时自动切换（未锁时）
+
+Phase Cleanup (死代码清理):
+  ├── CL.1 — 移除 ~30 个未使用 import/field/method/local
+  ├── CL.2 — 移除 3 个不必要的 @SuppressWarnings("unchecked")
+  └── CL.3 — 移除 MemoryQuery 字段/引用/EAgent/LinkedHashSet/EXPLORE_THRESHOLD 等
 ```
 
 ---
@@ -290,7 +322,7 @@ minecraft/eagent/
 | `MemoryGraphTest.java` | 38 | 节点/边 CRUD、显著性门控、边推断、图遍历 BFS、因果链、持久化、贝叶斯重排、Hebbian 强化、扩散激活、骨骼导出/导入 |
 | `ChatSessionManagerTest.java` | 7 | 窗口限制/方向回退/null安全/防御拷贝 |
 | `TemplateMatcherTest.java` | 14 | 路由: CLARIFICATION/TASK_PLAN/REFLEX_CREATE/CHAT_RESPONSE/拦截 |
-| **合计 (含新增)** | **331** | **全部通过** |
+| **合计 (含新增)** | **326** | **全部通过** |
 
 **新增测试计划：**
 
@@ -309,4 +341,4 @@ minecraft/eagent/
 | 2 | `NeuroDynamicsTest.java` | 7 | GABA/Glu 推导/抑制兴奋比/NeuroState重载 |
 | 3 | `CognitiveControlTest.java` | 10 | 余弦匹配/候选调制/5-HT情境分支/require合取/阈值参数化 |
 | 3 | `MetaSchedulerCognitiveControlTest.java` | 7 | setCognitiveControl 安全性/checkReflex 全路径 (无配方/通过/否决/余弦过低/精确匹配) |
-| | **合计** | **325** | **全部通过** |
+| | **合计** | **326** | **全部通过** |
