@@ -32,7 +32,9 @@ public class AIMemoryGenerator {
                     && !response.getMemoryNote().isEmpty()) {
                 MemoryEntry memory = new MemoryEntry();
                 memory.id = "mem_" + completedTask.getTaskId().replace("task_", "");
-                memory.summary = response.getMemoryNote();
+                String note = response.getMemoryNote();
+                int maxChars = 120;
+                memory.summary = note != null && note.length() > maxChars ? note.substring(0, maxChars) + "…" : note;
                 memory.keyLearnings = new ArrayList<>();
                 memory.relatedSkills = new ArrayList<>();
                 memory.timestamp = System.currentTimeMillis();

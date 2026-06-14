@@ -45,5 +45,9 @@ public interface BasicActionAdapter {
 
     ActionResult sneak(ServerPlayerEntity bot, boolean sneaking);
 
+    ActionResult sprint(ServerPlayerEntity bot, boolean sprinting);
+
+    ActionResult dropItem(ServerPlayerEntity bot, int slot);
+
     default void stopNavigation(java.util.UUID botId) {}
 }

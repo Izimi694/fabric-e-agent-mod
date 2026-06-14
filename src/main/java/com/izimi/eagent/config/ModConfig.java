@@ -15,6 +15,8 @@ public class ModConfig {
     public double commandWeight = 0.3;
     public double chatWeight = 0.1;
     public int preferenceEvolutionThreshold = 10;
+    public int maxMemorySummaryChars = 120;
+    public int maxChatSlotChars = 80;
 
     public static ModConfig load() {
         ModConfig config = JsonUtil.readFromFileSafe(FileUtil.getConfigPath(), ModConfig.class);

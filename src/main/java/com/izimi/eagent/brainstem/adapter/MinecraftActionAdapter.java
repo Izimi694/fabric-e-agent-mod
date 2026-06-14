@@ -68,7 +68,7 @@ public class MinecraftActionAdapter implements BasicActionAdapter {
         double dist = botPos.squaredDistanceTo(target.toCenterPos());
 
         if (dist < 4.0) {
-            nav.stopNavigation();
+            nav.stopNavigation(bot);
             return ActionResult.success("已到达");
         }
 
@@ -296,6 +296,28 @@ public class MinecraftActionAdapter implements BasicActionAdapter {
         if (bot == null) return ActionResult.unable("sneak: bot为null");
         bot.setSneaking(sneaking);
         return ActionResult.success("sneak: " + sneaking);
+    }
+
+    @Override
+    public ActionResult sprint(ServerPlayerEntity bot, boolean sprinting) {
+        if (bot == null) return ActionResult.unable("sprint: bot为null");
+        bot.setSprinting(sprinting);
+        return ActionResult.success("sprint: " + sprinting);
+    }
+
+    @Override
+    public ActionResult dropItem(ServerPlayerEntity bot, int slot) {
+        if (bot == null) return ActionResult.unable("dropItem: bot为null");
+        if (slot < 0) {
+            if (bot.getMainHandStack().isEmpty()) return ActionResult.unable("手持没有物品");
+            bot.dropSelectedItem(true);
+            return ActionResult.success("丢弃手持物品");
+        }
+        if (slot >= 36) return ActionResult.unable("无效槽位");
+        var stack = bot.getInventory().getStack(slot);
+        if (stack.isEmpty()) return ActionResult.unable("槽位为空");
+        bot.getInventory().removeStack(slot);
+        return ActionResult.success("丢弃: slot " + slot);
     }
 
     @Override

@@ -15,7 +15,9 @@ import com.izimi.eagent.brainstem.innate.InnateReflex;
 import com.izimi.eagent.brainstem.innate.InnateReflexRegistry;
 import com.izimi.eagent.cortex.api.TemplateManager;
 import com.izimi.eagent.cortex.api.TemplateMatcher;
+import com.izimi.eagent.brainstem.navigation.LandmarkCalibrator;
 import com.izimi.eagent.cortex.api.PersonaManager;
+import com.izimi.eagent.cortex.chat.InputDigester;
 import com.izimi.eagent.cortex.prefrontal.CognitiveControl;
 import com.izimi.eagent.EAgent;
 import com.izimi.eagent.hormonal.HormonalSystem;
@@ -71,6 +73,9 @@ public class MetaScheduler {
     private final TemplateMatcher templateMatcher;
     private CorrelationDetector correlationDetector;
     private CognitiveControl cognitiveControl;
+    private ReflectionCycle reflectionCycle;
+    private LandmarkCalibrator landmarkCalibrator;
+    private final InputDigester inputDigester = new InputDigester();
 
     public MetaScheduler(MotivationEngine motivationEngine) {
         this.motivationEngine = motivationEngine;
@@ -85,6 +90,14 @@ public class MetaScheduler {
 
     public void setCognitiveControl(CognitiveControl cc) {
         this.cognitiveControl = cc;
+    }
+
+    public void setReflectionCycle(ReflectionCycle rc) {
+        this.reflectionCycle = rc;
+    }
+
+    public void setLandmarkCalibrator(LandmarkCalibrator lc) {
+        this.landmarkCalibrator = lc;
     }
 
     private ProblemLabel labelProblem(BotContext botCtx, WorldContext worldCtx, ServerPlayerEntity bot, Perspective perspective) {
@@ -277,6 +290,15 @@ public class MetaScheduler {
         DeadEndResult deadEnd = isDeadEnd(botCtx, null, bot, reflexId);
         if (deadEnd.isDeadEnd()) {
             LOGGER.warn("[MetaScheduler] Dead-end: {} → {}", reflexId, deadEnd.reason());
+            if (reflectionCycle != null && conditioned != null) {
+                ReflectionCycle.Result rcResult = reflectionCycle.evaluate(
+                        conditioned, bayesian, landmarkCalibrator, bot);
+                if (rcResult == ReflectionCycle.Result.RESOLVED
+                        || rcResult == ReflectionCycle.Result.CALIBRATED) {
+                    LOGGER.info("[MetaScheduler] 反思周期解决死路: {} ({})", reflexId, rcResult);
+                    return true;
+                }
+            }
             RollbackStage rb = rollback(botCtx, null, bot, reflexId, 0, 0);
             LOGGER.info("[MetaScheduler] Rollback: stage={} action={}", rb.stage(), rb.action());
         }
@@ -396,7 +418,11 @@ public class MetaScheduler {
         var hormonal = botCtx.hormonalSystem();
         switch (type) {
             case CLARIFICATION -> {
-                ctx.put("userInput", msg);
+                var d = inputDigester.digest(msg);
+                ctx.put("userInput", d.rawPreview());
+                ctx.put("intent", d.intent());
+                ctx.put("entities", d.entities());
+                ctx.put("count", d.count());
                 ctx.put("availableTemplates", "TASK_PLAN, REFLEX_CREATE, CHAT_RESPONSE");
             }
             case TASK_PLAN -> {
@@ -409,7 +435,11 @@ public class MetaScheduler {
                 ctx.put("target", parts.length > 1 ? parts[1] : msg);
             }
             case CHAT_RESPONSE -> {
-                ctx.put("playerMessage", msg);
+                var d = inputDigester.digest(msg);
+                ctx.put("playerMessage", d.rawPreview());
+                ctx.put("intent", d.intent());
+                ctx.put("entities", d.entities());
+                ctx.put("count", d.count());
                 String mood = hormonal != null ? deriveMoodSummary(hormonal) : "平静";
                 ctx.put("contextInfo", mood);
                 PersonaManager pm = EAgent.getPersonaManager();

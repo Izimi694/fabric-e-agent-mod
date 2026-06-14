@@ -4,6 +4,7 @@ import com.izimi.eagent.bayesian.BayesianFeature;
 import com.izimi.eagent.bayesian.BayesianModule;
 import com.izimi.eagent.brainstem.adapter.ActionResult;
 import com.izimi.eagent.brainstem.adapter.BasicActionAdapter;
+import com.izimi.eagent.brainstem.scheduler.DeviationCounter;
 import com.izimi.eagent.brainstem.skill.Skill;
 import com.izimi.eagent.brainstem.skill.SkillManager;
 import com.izimi.eagent.brainstem.bot.BotInstance;
@@ -57,6 +58,7 @@ public class ConditionedReflex {
     private String lastExecutedReflexId;
     private final AtomicInteger consecutiveFailures = new AtomicInteger(0);
     private int recentSuccessCount = 0;
+    private final DeviationCounter deviationCounter = new DeviationCounter();
 
     private final Map<String, Set<String>> prevPointers = new ConcurrentHashMap<>();
     private final Map<String, Set<String>> nextPointers = new ConcurrentHashMap<>();
@@ -930,6 +932,14 @@ public class ConditionedReflex {
 
     public int getConsecutiveFailures() {
         return consecutiveFailures.get();
+    }
+
+    public void resetConsecutiveFailures() {
+        consecutiveFailures.set(0);
+    }
+
+    public DeviationCounter getDeviationCounter() {
+        return deviationCounter;
     }
 
     public Skill getSkill(String skillId) {

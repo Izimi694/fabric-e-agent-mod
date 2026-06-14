@@ -331,7 +331,9 @@ public class MemoryManager {
         String goal = task.getGoal();
         int completed = task.progress != null ? task.progress.completedCount : 0;
         int target = task.progress != null ? task.progress.targetCount : 0;
-        return "完成任务: " + goal + " (进度: " + completed + "/" + target + ")";
+        String summary = "完成任务: " + goal + " (进度: " + completed + "/" + target + ")";
+        int maxChars = config != null ? config.maxMemorySummaryChars : 120;
+        return summary.length() > maxChars ? summary.substring(0, maxChars) + "…" : summary;
     }
 
     private List<String> generateLearnings(Task task) {

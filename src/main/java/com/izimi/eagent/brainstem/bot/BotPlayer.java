@@ -144,6 +144,7 @@ public class BotPlayer {
         if (hasInput) {
             float yawRad = playerEntity.getYaw() * 0.017453292f;
             float speed = playerEntity.getMovementSpeed();
+            if (playerEntity.isSprinting()) speed *= 1.3f;
 
             double vx = (-MathHelper.sin(yawRad) * storedForward + MathHelper.cos(yawRad) * storedStrafe) * speed;
             double vz = (MathHelper.cos(yawRad) * storedForward + MathHelper.sin(yawRad) * storedStrafe) * speed;
@@ -192,7 +193,10 @@ public class BotPlayer {
                     String.format("%.4f", moved));
         }
 
-        // 8. Reset stored input for next tick
+        // 8. Store input for next tick persistence (explicitly cleared by stopNavigation)
+    }
+
+    public void clearMoveInput() {
         storedForward = 0;
         storedStrafe = 0;
         storedJump = false;

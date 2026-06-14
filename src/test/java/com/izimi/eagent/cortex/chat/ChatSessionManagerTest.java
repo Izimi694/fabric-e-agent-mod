@@ -1,7 +1,7 @@
 package com.izimi.eagent.cortex.chat;
 
 import com.izimi.eagent.bayesian.BayesianModule;
-import com.izimi.eagent.cortex.chat.ChatSessionManager.Message;
+import com.izimi.eagent.cortex.chat.ChatSessionManager.ChatSlot;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -9,6 +9,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.Deque;
+import java.util.List;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -37,11 +38,11 @@ class ChatSessionManagerTest {
     }
 
     @Test
-    @DisplayName("addMessage appends and buildPrompt includes messages")
+    @DisplayName("addMessage appends and buildPrompt includes slots")
     void addMessageAndBuildPrompt() {
         ChatSessionManager manager = newManager();
-        manager.addMessage(new Message("player", "你好"));
-        manager.addMessage(new Message("bot", "你好"));
+        manager.addMessage(new ChatSlot("player", "chat", List.of(), "你好"));
+        manager.addMessage(new ChatSlot("bot", "chat", List.of(), "你好"));
         String prompt = manager.buildPrompt();
         assertTrue(prompt.contains("player: 你好"));
         assertTrue(prompt.contains("bot: 你好"));
@@ -53,19 +54,19 @@ class ChatSessionManagerTest {
     void windowMaxSize() {
         ChatSessionManager manager = newManager();
         for (int i = 0; i < 9; i++) {
-            manager.addMessage(new Message("user", "msg" + i));
+            manager.addMessage(new ChatSlot("user", "chat", List.of(), "msg" + i));
         }
         assertEquals(6, manager.getWindowSize());
-        Deque<Message> window = manager.getWindow();
-        assertEquals("msg3", window.getFirst().content());
-        assertEquals("msg8", window.getLast().content());
+        Deque<ChatSlot> window = manager.getWindow();
+        assertEquals("msg3", window.getFirst().rawPreview());
+        assertEquals("msg8", window.getLast().rawPreview());
     }
 
     @Test
     @DisplayName("refresh clears window")
     void refreshClearsWindow() {
         ChatSessionManager manager = newManager();
-        manager.addMessage(new Message("user", "hello"));
+        manager.addMessage(new ChatSlot("user", "chat", List.of(), "hello"));
         manager.refresh();
         assertEquals(0, manager.getWindowSize());
         assertTrue(manager.getWindow().isEmpty());
@@ -84,9 +85,9 @@ class ChatSessionManagerTest {
     @DisplayName("getWindow returns copy not reference")
     void getWindowReturnsCopy() {
         ChatSessionManager manager = newManager();
-        manager.addMessage(new Message("user", "hello"));
-        Deque<Message> window = manager.getWindow();
-        window.addFirst(new Message("hacker", "injected"));
+        manager.addMessage(new ChatSlot("user", "chat", List.of(), "hello"));
+        Deque<ChatSlot> window = manager.getWindow();
+        window.addFirst(new ChatSlot("hacker", "chat", List.of(), "injected"));
         assertEquals(1, manager.getWindowSize());
     }
 

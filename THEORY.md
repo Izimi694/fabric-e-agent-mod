@@ -150,41 +150,35 @@ else:           // 高威胁
 
 **工程边界**：HormonalSystem（4 维向量存储+事件更新） vs CognitiveControl（余弦匹配+情境分支+合取检查） — 信号产生与决策应用分离。
 
-### 洞察 9：有限步骤 = 微分 + 竞争 + 关系 + 刷新 + 锚定 + 适应
+### 洞察 9：有限步骤定义
 
-在承认外部环境动态无限、内部有限步骤的条件下，想要以最低成本对外部拟合，需要六步：
+在承认外部环境动态无限、内部有限步骤的条件下，以最低成本对外部拟合：
+
+> **前提**：在迫不得已的情况下才使用 LLM。
 
 | # | 定义 | 工程落点 | 数据结构 |
 |:--:|------|---------|---------|
-| ① | 对外部微分，使其变为有限步骤 | TaskDAG + ReflexChain + Template TASK_PLAN | `TaskDAG.SubtaskNode`, `ReflexChain.ReflexNode` |
-| ② | 接收环境，贝叶斯/激素在竞争池抉择动作 | MetaScheduler 玻尔兹曼 + IDC 三阶段 | `DriveState`, `Posterior`, `BotParams` |
-| ③ | 记忆只记关系与连续，非切片 | MemoryGraph 关系图 (`memory_graph.json`) | `MemoryNode`, `MemoryEdge`, `RelationType` enum |
-| ④ | 每次读上次记忆，接收-竞争-执行后更新记忆刷新 | Loop 事件驱动刷新 (§17) + MemoryGraph.inferEdges() | `MetaState`, `inferEdges()` |
-| ⑤ | 找稳定标识防动态积分偏离 | 贝叶斯收敛(e) + 瓶颈节点 + 固化阈值 | `PosteriorSnapshot.isConverged()`, `isBottleneck`, `reflex.status=healthy` |
+| ① | 对外部微分，使其变为有限步骤 | TaskDAG + ReflexChain + Template TASK_PLAN + **InputDigester (入口压缩)** | `TaskDAG.SubtaskNode`, `ReflexChain.ReflexNode`, `InputDigester.Digested` |
+| ② | 接收当前环境，贝叶斯/激素在竞争池抉择动作 | MetaScheduler 玻尔兹曼 + IDC 三阶段 | `DriveState`, `Posterior`, `BotParams` |
+| ③ | 记忆只记关系、连续与标识，非切片 | MemoryGraph 关系图 + **ChatSlot (对话槽位压缩)** + **summary 硬上限(120字)** | `MemoryNode`, `MemoryEdge`, `RelationType` enum, `ChatSlot`, `ModConfig.maxMemorySummaryChars` |
+| ④ | 每次读取上次记忆，接收-竞争-执行后更新并刷新 | Loop 事件驱动刷新 (§17) + MemoryGraph.inferEdges() | `MetaState`, `inferEdges()` |
+| ⑤ | 找稳定标识让动态积分不偏离轨道 | 贝叶斯收敛(e) + 瓶颈节点 + 固化阈值 + LandmarkCalibrator | `isConverged()`, `isBottleneck`, `LandmarkCalibrator` |
 | ⑥ | 以是否适应外部环境决定成败 | 环境裁决原则 + 错误蒸馏 + stw/ltb 更新 | `successRate`, `consecutiveFailures`, `stw/ltb` |
+| ⑦ | LLM 也无法完美时接受当前要求，不过拟合 | ACCEPT 终止态 + DeviationCounter 累积偏差 + **BotPlayer 移动持久化（输入逐 tick 不清零）** | `accumulatedDrift`, `ACCEPTED`, `BotPlayer.clearMoveInput()` |
+| ⑧ | 累积偏差或连续失败超阈值时进入反思周期，LLM 改权重/边后重置偏差 | 死路检测 + ReflectionCycle + EVALUATION_BATCH + FAILURE_CLASSIFY | `ReflectionCycle`, `DeviationCounter` |
 
 **统一公式**：
-> 微分是压缩，竞争是选择，关系是结构，刷新是去噪，锚定是稳定，适应是标准。
+> 微分是压缩，竞争是选择，关系是结构，刷新是去噪，锚定是稳定，适应是标准，接受是务实，反思是修复。
+> 能跑就行，偏了校准，卡死才修。
 
-#### 附：高光记忆的生物启发
+> 注：步骤③的标识锚定与步骤⑦⑧的偏差累积—反思周期，共同形成"心里有账"闭环——每次 ACCEPT 记录漂移，累积超过阈值时主动找标志物校准或向玩家求助。高光记忆（salience ≥ 0.6 触发边推理）是步骤③中"关系与连续"的工程落地，详见 MemoryGraph.inferEdges() §25。
 
-在神经科学中，"高光记忆"的设计有坚实的生物学基础：
+### Phase A & B — 工程实施总结
 
-| 项目概念 | 生物学对应 | 核心相似点 | 支持文献 |
-|---------|-----------|-----------|---------|
-| 高光记忆 | 显著性 (Salience) | 大脑自动标记重要信息，使其更容易被记住 | Saliency / Salience |
-| 记忆固化 | 记忆印记 (Engram) | 一次学习经历在特定神经元网络中留下物理痕迹 | Josselyn & Tonegawa, *Science* (2015) |
-| 记忆动态 | 记忆印记稳定性与灵活性 | 记忆痕迹会根据新经验更新和调整 | Memory Engram Stability and Flexibility |
-| 注意力状态 | 泛光灯 vs 聚光灯 | 高光记忆 ≈ 聚光灯高度聚焦的注意力状态 | Sustained Attention as a Floodlight |
-
-判定"高光"的多维依据在工程中的对应：
-
-| 显著性维度 | 生物学定义 | 工程判定条件 |
-|-----------|-----------|-------------|
-| 感知显著性 | 视觉突出、声音独特 | 稀有实体/方块检测、异常事件 |
-| 语义/情境显著性 | 违反预期、与核心目标强相关 | Task 目标相关、贝叶斯 posterior 突变 |
-| 结果显著性 | 巨大收益或损失 | 死亡/击杀 BOSS / 获得稀有物品 |
-| 社交显著性 | 其他智能体普遍关注 | SocialObserver 群体注意力检测 |
+| Phase | 改动 | 目的 |
+|:-----:|------|------|
+| **A** | `BasicActionAdapter`: +`sprint()`, +`dropItem()`; 新建 `JumpSkill`, `SneakSkill`; `BotPlayer` 删除每 tick 输入重置 + 冲刺速度倍率；`NavigationController` 到达时清除输入；`BotController` 输入重置条件化 | 补全原子动作 + 修复"假人不动"（移动意图持久化） |
+| **B** | 新建 `InputDigester`（入口压缩，正则抽取 intent/entities/count，丢弃原文）；`ChatSessionManager` `Message`→`ChatSlot`（rawPreview≤80字）；`MemoryManager`/`AIMemoryGenerator` summary 硬上限 120字；`ModConfig` +`maxMemorySummaryChars`, `maxChatSlotChars` | 彻底消除长文本：LLM 只看到结构化槽位 + 截断预览，原始文本无处渗透 |
 
 ---
 

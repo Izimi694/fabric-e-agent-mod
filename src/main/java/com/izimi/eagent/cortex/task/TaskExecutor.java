@@ -9,6 +9,7 @@ import net.minecraft.server.network.ServerPlayerEntity;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.function.Consumer;
 
 public class TaskExecutor {
     private static final Logger LOGGER = LoggerFactory.getLogger("e-agent");
@@ -19,6 +20,9 @@ public class TaskExecutor {
 
     private int executionTick = 0;
     private static final int SKILL_TIMEOUT_TICKS = 6000;
+    private static final double ACCEPTANCE_THRESHOLD = 0.3;
+
+    private Consumer<Double> onAcceptDrift;
 
     public TaskExecutor(TaskManager taskManager, SkillManager skillManager,
                          ExecutionLogger executionLogger) {
@@ -80,6 +84,23 @@ public class TaskExecutor {
                     taskManager.completeTask();
                     executionTick = 0;
                 }
+            } else if (result.executed() && result.effectiveness() >= ACCEPTANCE_THRESHOLD) {
+                current.status = "accepted";
+                task.progress.completedCount++;
+                taskManager.saveActiveTask();
+
+                double drift = 1.0 - result.effectiveness();
+                if (onAcceptDrift != null) {
+                    onAcceptDrift.accept(drift);
+                }
+
+                LOGGER.info("[TaskExecutor] 子任务接受(漂移{:.2f}): {} ({}/{})",
+                        drift, current.goal, task.progress.completedCount, task.progress.targetCount);
+
+                if (task.progress.completedCount >= task.progress.targetCount) {
+                    taskManager.completeTask();
+                    executionTick = 0;
+                }
             } else {
                 if (!result.executed()) {
                     LOGGER.warn("[TaskExecutor] 确定无法执行，跳过: {} (goal={})",
@@ -116,6 +137,10 @@ public class TaskExecutor {
             }
         }
         return null;
+    }
+
+    public void setOnAcceptDrift(Consumer<Double> onAcceptDrift) {
+        this.onAcceptDrift = onAcceptDrift;
     }
 
     public void resetExecutionTick() {

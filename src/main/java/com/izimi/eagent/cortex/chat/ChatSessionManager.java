@@ -2,20 +2,21 @@ package com.izimi.eagent.cortex.chat;
 
 import java.util.ArrayDeque;
 import java.util.Deque;
+import java.util.List;
 import java.util.UUID;
 
 import com.izimi.eagent.bayesian.BayesianModule;
 
 public class ChatSessionManager {
 
-    public record Message(String role, String content, long timestamp) {
-        public Message(String role, String content) {
-            this(role, content, System.currentTimeMillis());
+    public record ChatSlot(String role, String intent, List<String> entities, String rawPreview, long timestamp) {
+        public ChatSlot(String role, String intent, List<String> entities, String rawPreview) {
+            this(role, intent, entities, rawPreview, System.currentTimeMillis());
         }
     }
 
     private static final int MAX_WINDOW_SIZE = 6;
-    private final Deque<Message> window = new ArrayDeque<>(MAX_WINDOW_SIZE);
+    private final Deque<ChatSlot> window = new ArrayDeque<>(MAX_WINDOW_SIZE);
     private final BayesianModule bayesianModule;
     private String currentGoal = "";
 
@@ -23,8 +24,8 @@ public class ChatSessionManager {
         this.bayesianModule = bayesianModule;
     }
 
-    public void addMessage(Message msg) {
-        window.addLast(msg);
+    public void addMessage(ChatSlot slot) {
+        window.addLast(slot);
         if (window.size() > MAX_WINDOW_SIZE) {
             window.removeFirst();
         }
@@ -45,8 +46,8 @@ public class ChatSessionManager {
 
         if (!window.isEmpty()) {
             sb.append("[最近对话]\n");
-            for (Message msg : window) {
-                sb.append(msg.role()).append(": ").append(msg.content()).append("\n");
+            for (ChatSlot slot : window) {
+                sb.append(slot.role()).append(": ").append(slot.rawPreview()).append("\n");
             }
         }
 
@@ -62,7 +63,7 @@ public class ChatSessionManager {
         return window.size();
     }
 
-    public Deque<Message> getWindow() {
+    public Deque<ChatSlot> getWindow() {
         return new ArrayDeque<>(window);
     }
 }

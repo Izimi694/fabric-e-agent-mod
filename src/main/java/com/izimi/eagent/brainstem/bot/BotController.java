@@ -80,7 +80,11 @@ public class BotController {
         if (botPlayer == null) return;
 
         ServerPlayerEntity bot = botPlayer.asEntity();
-        bot.updateInput(0, 0, false, false);
+
+        var activeTask = taskManager.getActiveTask();
+        if (activeTask == null || !"running".equals(activeTask.getStatus())) {
+            bot.updateInput(0, 0, false, false);
+        }
 
         LOGGER.info("[BotController] onTick={}, botPos=({:.1f},{:.1f},{:.1f})",
                 tickCounter, bot.getX(), bot.getY(), bot.getZ());
@@ -98,7 +102,6 @@ public class BotController {
         if (reflexRegistry != null && executeSafetyReflex(bot, server)) return;
 
         // P1: 玩家任务 → 固化反射匹配 → 本地执行, 0 API
-        var activeTask = taskManager.getActiveTask();
         if (activeTask != null && "running".equals(activeTask.getStatus())) {
             var reflexSkill = conditionedReflex.match(activeTask);
             if (reflexSkill != null) {

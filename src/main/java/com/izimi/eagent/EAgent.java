@@ -28,6 +28,7 @@ import com.izimi.eagent.brainstem.bot.BotSpawner;
 import com.izimi.eagent.brainstem.bot.BotManager;
 import com.izimi.eagent.brainstem.bot.BotInstance;
 import com.izimi.eagent.brainstem.bot.BotController;
+import com.izimi.eagent.brainstem.navigation.LandmarkCalibrator;
 import com.izimi.eagent.amygdala.character.BehaviorEventHandler;
 import com.izimi.eagent.amygdala.character.BehaviorStats;
 import com.izimi.eagent.amygdala.character.EvaluationCycle;
@@ -205,7 +206,13 @@ public class EAgent implements ModInitializer {
                 worldContext);
         metaScheduler.setCorrelationDetector(correlationDetector);
 
-        LOGGER.info("[E-Agent] MetaScheduler 已初始化 (MotivationEngine + LLM Gate)");
+        ReflectionCycle reflectionCycle = new ReflectionCycle();
+        LandmarkCalibrator landmarkCalibrator = new LandmarkCalibrator();
+        metaScheduler.setReflectionCycle(reflectionCycle);
+        metaScheduler.setLandmarkCalibrator(landmarkCalibrator);
+        taskExecutor.setOnAcceptDrift(drift -> conditionedReflex.getDeviationCounter().recordAcceptance());
+
+        LOGGER.info("[E-Agent] MetaScheduler 已初始化 (MotivationEngine + LLM Gate + ReflectionCycle)");
 
         learningSystem = new LearningSystem(conditionedReflex, skillManager);
         behaviorEventHandler.addLearningListener(learningSystem::onEvent);

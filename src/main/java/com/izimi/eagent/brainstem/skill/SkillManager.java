@@ -5,7 +5,9 @@ import static com.izimi.eagent.amygdala.ReflexConstants.*;
 import com.izimi.eagent.brainstem.innate.AttackSkill;
 import com.izimi.eagent.brainstem.innate.CraftSkill;
 import com.izimi.eagent.brainstem.innate.DigSkill;
+import com.izimi.eagent.brainstem.innate.JumpSkill;
 import com.izimi.eagent.brainstem.innate.MoveSkill;
+import com.izimi.eagent.brainstem.innate.SneakSkill;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -32,6 +34,8 @@ public class SkillManager {
         registerSkill(new DigSkill());
         registerSkill(new AttackSkill());
         registerSkill(new CraftSkill());
+        registerSkill(new JumpSkill());
+        registerSkill(new SneakSkill());
 
         saveInnateSkillFiles();
     }

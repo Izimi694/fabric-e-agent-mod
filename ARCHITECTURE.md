@@ -489,7 +489,13 @@ public class TemplateManager {
 }
 ```
 
-### 7.3 TemplateMatcher 路由
+### 7.3 入口压缩 (InputDigester)
+
+在路由之前，所有用户输入经过 `InputDigester.digest()` 压缩：正则抽取 `intent/entities/count`，原文截断至 80 字符为 `rawPreview` 后丢弃。LLM 只看到结构化槽位，原始长文本不会进入上下文。
+
+成本 = 0（纯本地正则）。
+
+### 7.4 TemplateMatcher 路由
 
 `TemplateMatcher.match(message, botCtx, worldCtx)` 按以下顺序路由用户输入：
 
@@ -501,17 +507,17 @@ public class TemplateManager {
    - 模糊输入 (怎么/如何/能不能/?) → `CLARIFICATION`
    - 含具体名词 → `TASK_PLAN`, 否则 `CHAT_RESPONSE`
 
-### 7.4 CLARIFICATION 调用限制
+### 7.5 CLARIFICATION 调用限制
 
 - 同一对话轮次最多调用一次 CLARIFICATION
 - 用户二次模糊 → 返回预设 "请更具体地描述你的需求"
 
-### 7.5 CHAT_RESPONSE 预算隔离
+### 7.6 CHAT_RESPONSE 预算隔离
 
 - 独立预算配额 (最多 50 次), 与核心循环完全隔离
 - 预算耗尽 → 回退到 LocalChatHandler 预设回复
 
-### 7.6 PersonaManager
+### 7.7 PersonaManager
 
 PersonaManager 管理角色设定注入:
 
@@ -522,7 +528,7 @@ PersonaManager 管理角色设定注入:
 
 ---
 
-## 8. 基本动作池 (12 原子动作)
+## 8. 基本动作池 (14 原子动作)
 
 | 动作 | 说明 | 返回 |
 |------|------|------|
@@ -538,8 +544,10 @@ PersonaManager 管理角色设定注入:
 | `clickSlot(slot, button)` | 点击容器格子 | boolean |
 | `chat(msg)` | 发送聊天 | void |
 | `jump()` | 跳跃 | boolean |
+| `sprint(enable)` | 冲刺开关 | void |
+| `dropItem(slot)` | 丢弃物品 | boolean |
 
-> **注**：上表为 12 个核心原子动作。`BasicActionAdapter` 实际有 20 个方法（12 原子 + 8 复合）：原子动作同左表，复合动作包括 `craft`、`flee`、`eat`、`retreat`、`avoidLava`、`seekShelter`、`collectItem`、`sneak`。
+> **注**：上表为 14 个核心原子动作。`BasicActionAdapter` 实际有 22 个方法（14 原子 + 8 复合）：原子动作同左表，复合动作包括 `craft`、`flee`、`eat`、`retreat`、`avoidLava`、`seekShelter`、`collectItem`、`sneak`。
 
 ---
 
@@ -808,7 +816,8 @@ copyReflexesFromMentor()
 | TemplateMatcher | L6 (cortex/api) | 内存 |
 | AIMemoryGenerator | L6 (cortex/api) | 内存 |
 | LocalChatHandler | L5 (cortex/chat) | 内存 |
-| ChatSessionManager | 骨架 (cortex/chat) | 内存窗口 |
+| ChatSessionManager | 骨架 (cortex/chat) | 内存窗口, ChatSlot {intent, entities, rawPreview} |
+| InputDigester | L5 (cortex/chat) | 内存 — 入口压缩: 抽取 intent/entities/count 后丢弃原文 |
 | KnowledgeBase | L3 (cortex/planner) | `config/knowledge_base.json` |
 | UrgencyClassifier | L2 (brainstem/scheduler) | 内存 |
 | ReflexChain | L4 (brainstem/scheduler) | `dag/` 索引 + 反射节点间关系 |

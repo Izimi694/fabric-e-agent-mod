@@ -17,6 +17,8 @@ public class NavigationController {
         double distance = bot.getPos().distanceTo(Vec3d.ofCenter(target));
         if (distance < ARRIVAL_THRESHOLD) {
             bot.updateInput(0, 0, false, false);
+            BotPlayer bp = BotPlayer.getByUUID(bot.getUuid());
+            if (bp != null) bp.clearMoveInput();
             return true;
         }
 
@@ -55,6 +57,14 @@ public class NavigationController {
             if (shouldJump) {
                 bot.jump();
             }
+        }
+    }
+
+    public void stopNavigation(ServerPlayerEntity bot) {
+        if (bot != null) {
+            bot.updateInput(0, 0, false, false);
+            BotPlayer bp = BotPlayer.getByUUID(bot.getUuid());
+            if (bp != null) bp.clearMoveInput();
         }
     }
 
