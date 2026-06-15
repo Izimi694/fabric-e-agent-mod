@@ -79,8 +79,7 @@ public class MinecraftActionAdapter implements BasicActionAdapter {
     }
 
     public void stopNavigation(UUID botId) {
-        NavigationController nav = navigationControllers.remove(botId);
-        if (nav != null) nav.stopNavigation();
+        navigationControllers.remove(botId);
     }
 
     @Override

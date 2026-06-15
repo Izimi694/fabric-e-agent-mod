@@ -31,6 +31,24 @@ public class TemporalScaler {
         }
     }
 
+    /**
+     * 直接从激素 4 维向量计算时间缩放 (连续值, 替代 UrgencyClassifier 的离散 5 档).
+     *
+     * NE↑ (警觉/恐惧) → scale 增大 → 主观时间变慢 → 紧迫动作更有价值
+     * DA↑ (奖赏/活力) → scale 减小 → 主观时间变快 → 容忍更长任务
+     * 5-HT↑ (情境钝化) → scale 小幅增大 → 行为抑制趋强
+     *
+     * @return 时间缩放因子, 范围 [0.5, 2.0]
+     */
+    public static double computeTimeScale(HormonalSystem h) {
+        if (h == null) return 1.0;
+        double ne = h.getNE();
+        double da = h.getDA();
+        double ser = h.getSerotonin();
+        double scale = 0.5 + ne * 0.8 + (1.0 - da) * 0.3 + ser * 0.15;
+        return Math.max(0.5, Math.min(2.0, scale));
+    }
+
     public int scaleDuration(int baseTicks) {
         return Math.max(1, Math.round(baseTicks / globalSpeed));
     }

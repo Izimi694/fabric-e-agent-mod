@@ -587,6 +587,33 @@ Fiddler / Charles / Wireshark 过滤 deepseek.com API 调用
 
 ---
 
+## 17. 挑战系统
+
+### 17.1 启动与停止
+
+- [ ] `/ai challenge start 5` → 生成 LegacyBot（旧）和 NewBot（新）相距 200 格
+- [ ] 启动后控制台打印 `[SurvivalChallengeMonitor] Challenge started for 5 days`
+- [ ] NewBot 使用 ReflexSatisfaction 新评分 (timeScore + riskScore + resourceScore)
+- [ ] LegacyBot 使用 product 乘积公式 (useLegacyScoring=true)
+- [ ] `/ai challenge status` → 两 Bot 并列 HP/饥饿/工具/矿石/死亡数/LLM 调用
+- [ ] `/ai challenge stop` → 杀死两 Bot，打印最终计分报告
+- [ ] 无进行中挑战时 `/ai challenge stop` → "没有进行中的挑战"
+
+### 17.2 每日快照
+
+- [ ] 每日 dawn 时刻打印 compact 行: `LegacyBot[HP:12/20 饿:8 🪓:0 ⛏:0 💎:0 💀:1 🤖:0]`
+- [ ] 同时打印 detailed 日志行含各维度具体值
+- [ ] 最终报告含计分: score = iron×10 + diamond×50 - deaths×100
+
+### 17.3 计分正确性
+
+- [ ] 死亡记录: BotInstance.tick 中死亡时调 SurvivalChallengeMonitor.recordDeath()
+- [ ] LLM 调用记录: MetaScheduler.executeCortexLLM 调 recordLLMCall()
+- [ ] 最终报告含两 Bot 并列格式对比
+- [ ] Legacy 乘积公式: riskScore=1.0 时两评分体系结果一致（Scenarios S9 验证）
+
+---
+
 ## 汇总
 
 | 大类 | 场景数 | 通过 | 失败 | 阻塞 |
@@ -613,4 +640,5 @@ Fiddler / Charles / Wireshark 过滤 deepseek.com API 调用
 | 14. 降级与健壮 | 10 | | | |
 | 15. 模糊边界 | 10 | | | |
 | 16. 性能稳定性 | 4 | | | |
-| **合计** | **~140** | — | — | — |
+| **17. 挑战系统** | **14** | | | |
+| **合计** | **~154** | — | — | — |

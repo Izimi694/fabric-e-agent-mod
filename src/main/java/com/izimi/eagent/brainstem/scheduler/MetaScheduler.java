@@ -21,6 +21,7 @@ import com.izimi.eagent.cortex.chat.InputDigester;
 import com.izimi.eagent.cortex.prefrontal.CognitiveControl;
 import com.izimi.eagent.EAgent;
 import com.izimi.eagent.hormonal.HormonalSystem;
+import com.izimi.eagent.brainstem.scheduler.SurvivalChallengeMonitor;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.text.Text;
@@ -209,7 +210,7 @@ public class MetaScheduler {
             action = new DispatchReflex.DispatchAction("HABIT", "llm_gate");
         }
 
-        boolean success = execute(action, botCtx, worldCtx, bot, state, server);
+        boolean success = execute(action, botCtx, worldCtx, bot, state, server, perspective);
 
         if (botCtx.dispatchReflex() != null) {
             if ("llm_gate".equals(action.reason())) {
@@ -223,7 +224,7 @@ public class MetaScheduler {
 
     // ── HABIT layer execution with full gating ──
 
-    private boolean executeHabitLayerWithGating(BotContext botCtx, MetaState state, ServerPlayerEntity bot) {
+    private boolean executeHabitLayerWithGating(BotContext botCtx, MetaState state, ServerPlayerEntity bot, Perspective perspective) {
         var conditioned = botCtx.conditionedReflex();
         var taskManager = botCtx.taskManager();
         if (conditioned == null || taskManager == null) return false;
@@ -244,7 +245,7 @@ public class MetaScheduler {
         }
 
         if (state.getP3Cooldown() <= 0) {
-            var autoReflex = conditioned.scanAndTrigger(bot);
+            var autoReflex = conditioned.scanAndTrigger(bot, perspective);
             if (autoReflex != null) {
                 if (tryExecuteReflex(botCtx, bot, autoReflex.getSkillId(), autoReflex)) return true;
             }
@@ -336,14 +337,14 @@ public class MetaScheduler {
         };
     }
 
-    private boolean execute(DispatchReflex.DispatchAction action, BotContext botCtx, WorldContext worldCtx, ServerPlayerEntity bot, MetaState state, MinecraftServer server) {
+    private boolean execute(DispatchReflex.DispatchAction action, BotContext botCtx, WorldContext worldCtx, ServerPlayerEntity bot, MetaState state, MinecraftServer server, Perspective perspective) {
         if (bot == null) return false;
 
         LOGGER.info("[MetaScheduler] Dispatch: {} ({})", action.layer(), action.reason());
 
         return switch (action.layer()) {
             case "INSTINCT" -> LowLevelDispatcher.executeInstinctLayer(botCtx, worldCtx, bot, temporalScaler);
-            case "HABIT" -> executeHabitLayerWithGating(botCtx, state, bot);
+            case "HABIT" -> executeHabitLayerWithGating(botCtx, state, bot, perspective);
             case "CORTEX_LOCAL" -> LowLevelDispatcher.executeCortexLocal(botCtx, worldCtx, state, bot);
             case "CORTEX_LLM" -> executeCortexLLM(botCtx, worldCtx, state, bot);
             case "IDLE" -> LowLevelDispatcher.executeIdle(botCtx, bot, temporalScaler);
@@ -396,6 +397,7 @@ public class MetaScheduler {
         state.resetTickSinceLastLLM();
         try {
             LOGGER.info("[LLM] L6 dispatch: template={}, msg={}", templateType, msg.length() > 60 ? msg.substring(0, 60) + "..." : msg);
+            SurvivalChallengeMonitor.recordLLMCall(botCtx.botId());
             CompletableFuture<JsonObject> future = templateManager.fill(templateType, context);
             // 如果被限速返回 null, 直接回退
             if (future == null) {

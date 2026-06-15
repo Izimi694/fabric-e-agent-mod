@@ -62,7 +62,7 @@ public class GreedyNavigator {
     private boolean isSingleBlockJump(BlockPos from, BlockPos to) {
         if (to.getY() - from.getY() != 1) return false;
         BlockPos wall = new BlockPos(to.getX(), from.getY(), to.getZ());
-        if (!isPassableForJump(wall) || !isPassableForJump(wall.up())) return false;
+        if (isPassableForJump(wall) || !isPassableForJump(wall.up())) return false;
         BlockPos wallAbove = wall.up(2);
         return isPassableForJump(wallAbove);
     }

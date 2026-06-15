@@ -28,17 +28,6 @@ public class MotivationEngine {
     private static final double CROSS_INHIBITION_RATIO = 0.7;
     private static final int INHIBITION_WINDOW = 5;
     /**
-     * 探索判断: DA > 0.4 (奖赏驱动) 且 NE < 0.5 (低威胁).
-     * 替代旧版 curiosity 单一维度判断.
-     */
-    public static boolean shouldExplore(HormonalSystem hormones) {
-        if (hormones == null) return false;
-        double da = hormones.getDA();
-        double ne = hormones.getNE();
-        return da > 0.4 && ne < 0.5;
-    }
-
-    /**
      * 麦穗策略: 基于置信度计算探索剩余窗口.
      * exploreProb = max(0, 0.37 - confidence).
      * 探索倾向额外受 DA 驱动.

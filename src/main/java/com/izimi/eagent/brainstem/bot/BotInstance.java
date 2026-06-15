@@ -23,6 +23,7 @@ import com.izimi.eagent.brainstem.adapter.TemporalScaler;
 import com.izimi.eagent.brainstem.scheduler.MetaScheduler;
 import com.izimi.eagent.brainstem.scheduler.MotivationEngine;
 import com.izimi.eagent.brainstem.scheduler.Perspective;
+import com.izimi.eagent.brainstem.scheduler.SurvivalChallengeMonitor;
 import com.izimi.eagent.cortex.api.AITaskPlanner;
 import com.izimi.eagent.cortex.chat.ChatSessionManager;
 import com.izimi.eagent.cortex.planner.KnowledgeBase;
@@ -72,6 +73,7 @@ public class BotInstance {
     private int tickCounter = 0;
     private static final int STATE_SAVE_INTERVAL = 200;
     private boolean deathGenomeSaved = false;
+    private boolean useLegacyScoring = false;
 
     public BotInstance(UUID botId, String botName, BotPlayer botPlayer) {
         this(botId, botName, botPlayer, null, null);
@@ -144,6 +146,7 @@ public class BotInstance {
         }
 
         if (bot.getHealth() <= 0 && !deathGenomeSaved) {
+            SurvivalChallengeMonitor.recordDeath(botId);
             saveDeathGenome("killed");
         }
 
@@ -165,6 +168,15 @@ public class BotInstance {
         botPlayer.tick();
 
         hormonalSystem.tick();
+
+        // 每日快照 (每个游戏日 ~24000 ticks)
+        if (tickCounter > 0 && tickCounter % 24000 == 0) {
+            int day = tickCounter / 24000;
+            var mgr = worldContext != null ? worldContext.botManager() : null;
+            if (mgr != null) {
+                SurvivalChallengeMonitor.printDailySnapshot(day, mgr.getAll());
+            }
+        }
 
         if (tickCounter % STATE_SAVE_INTERVAL == 0) {
             stateManager.saveState(bot);
@@ -285,6 +297,9 @@ public class BotInstance {
         pendingChatMessage = null;
         return msg;
     }
+
+    public boolean isLegacyScoring() { return useLegacyScoring; }
+    public void setLegacyScoring(boolean v) { this.useLegacyScoring = v; }
 
     public boolean isSpawned() {
         return botPlayer != null && !botPlayer.isRemoved();

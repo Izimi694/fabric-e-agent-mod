@@ -4,7 +4,10 @@ import com.izimi.eagent.bayesian.BayesianFeature;
 import com.izimi.eagent.bayesian.BayesianModule;
 import com.izimi.eagent.brainstem.adapter.ActionResult;
 import com.izimi.eagent.brainstem.adapter.BasicActionAdapter;
+import com.izimi.eagent.brainstem.adapter.TemporalScaler;
 import com.izimi.eagent.brainstem.scheduler.DeviationCounter;
+import com.izimi.eagent.brainstem.scheduler.Perspective;
+import com.izimi.eagent.brainstem.scheduler.ReflexSatisfaction;
 import com.izimi.eagent.brainstem.skill.Skill;
 import com.izimi.eagent.brainstem.skill.SkillManager;
 import com.izimi.eagent.brainstem.bot.BotInstance;
@@ -237,11 +240,40 @@ public class ConditionedReflex {
     }
 
     public Skill scanAndTrigger(ServerPlayerEntity bot) {
+        return scanAndTrigger(bot, null);
+    }
+
+    public Skill scanAndTrigger(ServerPlayerEntity bot, Perspective domain) {
         if (bot == null) return null;
 
         record Candidate(Skill skill, double score, int atomIndex) {}
         List<Candidate> candidates = new ArrayList<>();
         List<BayesianFeature> contextFeatures = extractContextFeatures(bot);
+
+        double timeScale = 1.0;
+        if (botInstance != null && botInstance.getBotContext() != null) {
+            var h = botInstance.getBotContext().hormonalSystem();
+            if (h != null) timeScale = TemporalScaler.computeTimeScale(h);
+        }
+
+        // ── 全局风险/资源因子 (per-candidate 部分在循环内计算) ──
+        double healthRatio = Math.max(0, bot.getHealth() / bot.getMaxHealth());
+        double hungerRatio = bot.getHungerManager().getFoodLevel() / 20.0;
+        boolean isNight = !bot.getWorld().isDay();
+        int consecFails = consecutiveFailures.get();
+        double dangerLevel = (1.0 - healthRatio) * 0.5;
+        if (botInstance != null && botInstance.getBotContext() != null) {
+            var h = botInstance.getBotContext().hormonalSystem();
+            if (h != null) {
+                dangerLevel = Math.max(dangerLevel, h.getNE() * 0.3);
+                if (h.getNE() < 0.5) dangerLevel += h.getSerotonin() * 0.15;
+            }
+        }
+        if (isNight) dangerLevel += 0.1;
+        dangerLevel += Math.min(0.15, consecFails * 0.04);
+        dangerLevel = Math.max(0, Math.min(1, dangerLevel));
+
+        boolean legacy = botInstance != null && botInstance.isLegacyScoring();
 
         for (Map.Entry<String, Skill> entry : skillManager.getSkills().entrySet()) {
             Skill skill = entry.getValue();
@@ -276,7 +308,22 @@ public class ConditionedReflex {
 
                     double atomProficiency = ((Number) atom.getOrDefault(KEY_PROFICIENCY, 0.0)).doubleValue();
                     if (isAtomTargetNearby(bot, (String) atom.get("action"), atomTarget)) {
-                        double score = reflexWeight * atomProficiency * bayesianMultiplier * decayFactor;
+                        double score;
+                        if (legacy) {
+                            score = reflexWeight * atomProficiency * bayesianMultiplier * decayFactor;
+                        } else {
+                            double estimatedSec = ReflexSatisfaction.estimateSeconds(atoms.size());
+                            double riskScore = clampScore(1.0 - dangerLevel * (1.0 - bayesianMultiplier));
+                            double resourceScore = clampScore(0.3 + hungerRatio * 0.3 + bayesianMultiplier * 0.4);
+                            score = domain != null
+                                    ? ReflexSatisfaction.computeForDomainWithScale(estimatedSec, timeScale,
+                                            reflexWeight, atomProficiency, bayesianMultiplier, decayFactor,
+                                            riskScore, resourceScore, domain)
+                                    : ReflexSatisfaction.computeWithScale(
+                                            estimatedSec, timeScale, reflexWeight, atomProficiency,
+                                            bayesianMultiplier, decayFactor,
+                                            riskScore, resourceScore);
+                        }
                         candidates.add(new Candidate(skill, score, i));
                     }
                 }
@@ -284,7 +331,23 @@ public class ConditionedReflex {
                 String category = (String) data.get("category");
                 if (category != null && isTargetNearby(bot, category, data)) {
                     double compoundProficiency = ((Number) data.getOrDefault(KEY_PROFICIENCY, 0.0)).doubleValue();
-                    candidates.add(new Candidate(skill, reflexWeight * compoundProficiency * bayesianMultiplier * decayFactor, -1));
+                    double score;
+                    if (legacy) {
+                        score = reflexWeight * compoundProficiency * bayesianMultiplier * decayFactor;
+                    } else {
+                        double estimatedSec = ReflexSatisfaction.estimateSeconds(1);
+                        double riskScore = clampScore(1.0 - dangerLevel * (1.0 - bayesianMultiplier));
+                        double resourceScore = clampScore(0.3 + hungerRatio * 0.3 + bayesianMultiplier * 0.4);
+                        score = domain != null
+                                ? ReflexSatisfaction.computeForDomainWithScale(estimatedSec, timeScale,
+                                        reflexWeight, compoundProficiency, bayesianMultiplier, decayFactor,
+                                        riskScore, resourceScore, domain)
+                                : ReflexSatisfaction.computeWithScale(
+                                        estimatedSec, timeScale, reflexWeight, compoundProficiency,
+                                        bayesianMultiplier, decayFactor,
+                                        riskScore, resourceScore);
+                    }
+                    candidates.add(new Candidate(skill, score, -1));
                 }
             }
         }
@@ -1147,6 +1210,11 @@ public class ConditionedReflex {
             }
         }
         return null;
+    }
+
+    /** 将值钳制在 [0,1] 区间 */
+    private static double clampScore(double v) {
+        return Math.max(0.0, Math.min(1.0, v));
     }
 
     public static class ConditionedSkill extends Skill {

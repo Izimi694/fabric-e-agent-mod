@@ -9,10 +9,13 @@ import com.izimi.eagent.cortex.api.PersonaManager;
 import com.izimi.eagent.cortex.api.PlaystylePack;
 import com.izimi.eagent.util.FileUtil;
 import com.izimi.eagent.util.JsonUtil;
+import com.izimi.eagent.brainstem.scheduler.SurvivalChallengeMonitor;
 import com.mojang.brigadier.CommandDispatcher;
+import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.suggestion.Suggestions;
 import com.mojang.brigadier.suggestion.SuggestionsBuilder;
+import net.minecraft.item.Item;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.text.Text;
@@ -241,12 +244,142 @@ public class AICommand {
                                 }))
                         )
                 )
+                .then(literal("challenge")
+                        .then(literal("start")
+                                .then(argument("days", IntegerArgumentType.integer(1, 365))
+                                        .executes(ctx -> {
+                                            int days = IntegerArgumentType.getInteger(ctx, "days");
+                                            return startChallenge(ctx.getSource(), days);
+                                        })
+                                )
+                                .executes(ctx -> startChallenge(ctx.getSource(), 0))
+                        )
+                        .then(literal("stop")
+                                .executes(ctx -> stopChallenge(ctx.getSource()))
+                        )
+                        .then(literal("status")
+                                .executes(ctx -> challengeStatus(ctx.getSource()))
+                        )
+                )
                 .then(argument("goal", StringArgumentType.greedyString()).executes(ctx -> {
                     String goal = StringArgumentType.getString(ctx, "goal");
                     return createTask(ctx.getSource(), goal);
                 }));
 
         dispatcher.register(root);
+    }
+
+    private static int startChallenge(ServerCommandSource source, int days) {
+        try {
+            BotManager mgr = getManager();
+            if (mgr == null) {
+                source.sendFeedback(() -> Text.literal("§7[E-Agent] Bot系统未初始化"), false);
+                return 0;
+            }
+
+            var player = source.getPlayer();
+            if (player == null) {
+                source.sendFeedback(() -> Text.literal("§7[E-Agent] 需要玩家执行此命令"), false);
+                return 0;
+            }
+
+            var server = source.getServer();
+            var world = source.getWorld();
+            Vec3d look = player.getRotationVector();
+            Vec3d basePos = player.getPos().add(look.x * 3, 0, look.z * 3);
+            BlockPos ground = findGroundBelow(world, basePos);
+            int groundY = ground != null ? ground.getY() + 1 : (int) basePos.y;
+
+            // Spawn legacy bot (模式=旧)
+            Vec3d legacyPos = new Vec3d(basePos.x, groundY, basePos.z);
+            BotInstance legacyBot = mgr.spawn("LegacyBot", server, world, legacyPos);
+            if (legacyBot == null) {
+                source.sendFeedback(() -> Text.literal("§c[E-Agent] 生成 LegacyBot 失败"), false);
+                return 0;
+            }
+            legacyBot.setLegacyScoring(true);
+
+            // Spawn new bot (模式=新) — +200 blocks in look direction
+            Vec3d newPos = new Vec3d(basePos.x + look.x * 200, groundY, basePos.z + look.z * 200);
+            BotInstance newBot = mgr.spawn("NewBot", server, world, newPos);
+            if (newBot == null) {
+                source.sendFeedback(() -> Text.literal("§c[E-Agent] 生成 NewBot 失败"), false);
+                mgr.despawn(legacyBot.getBotId());
+                return 0;
+            }
+            newBot.setLegacyScoring(false);
+
+            // Reset and start challenge monitor
+            SurvivalChallengeMonitor.startChallenge(days);
+
+            String dayMsg = days > 0 ? " (" + days + "天)" : "";
+            source.sendFeedback(() -> Text.literal("§a[挑战] 双Bot已生成" + dayMsg), false);
+            source.sendFeedback(() -> Text.literal("§e  LegacyBot §7(旧系统) 已出生在 §f" + formatPos(legacyPos)), false);
+            source.sendFeedback(() -> Text.literal("§e  NewBot §7(新系统) 已出生在 §f" + formatPos(newPos)), false);
+            source.sendFeedback(() -> Text.literal("§7  每日快照将自动打印到控制台"), false);
+
+            // Give both bots an initial explore task
+            legacyBot.getTaskManager().createExploreTask();
+            newBot.getTaskManager().createExploreTask();
+
+            return 1;
+        } catch (Exception e) {
+            source.sendFeedback(() -> Text.literal("§c[挑战] 启动失败: " + e.getMessage()), false);
+            return 0;
+        }
+    }
+
+    private static String formatPos(Vec3d pos) {
+        return String.format("[%.0f, %.0f, %.0f]", pos.x, pos.y, pos.z);
+    }
+
+    private static int stopChallenge(ServerCommandSource source) {
+        var mgr = getManager();
+        if (mgr == null || mgr.isEmpty()) {
+            source.sendFeedback(() -> Text.literal("§7[挑战] 没有活动的Bot"), false);
+            return 0;
+        }
+        SurvivalChallengeMonitor.stopChallenge(mgr.getAll());
+        // Despawn all bots
+        for (BotInstance b : mgr.getAll()) {
+            mgr.despawn(b.getBotId());
+        }
+        source.sendFeedback(() -> Text.literal("§a[挑战] 已终止并生成最终报告"), false);
+        return 1;
+    }
+
+    private static int challengeStatus(ServerCommandSource source) {
+        var mgr = getManager();
+        if (mgr == null || mgr.isEmpty()) {
+            source.sendFeedback(() -> Text.literal("§7[挑战] 没有活动的Bot"), false);
+            return 0;
+        }
+        var bots = mgr.getAll();
+        for (BotInstance b : bots) {
+            if (b == null) continue;
+            var entity = b.asEntity();
+            if (entity == null) {
+                source.sendFeedback(() -> Text.literal("§7  " + b.getBotName() + ": 离线"), false);
+                continue;
+            }
+            String line = String.format("§e  %s §7(legacy=%s) §fHP=%d/%d 饿=%d 铁=%d 钻=%d 💀=%d",
+                    b.getBotName(), b.isLegacyScoring(),
+                    (int) entity.getHealth(), (int) entity.getMaxHealth(),
+                    entity.getHungerManager().getFoodLevel(),
+                    countItem(entity, net.minecraft.item.Items.IRON_INGOT),
+                    countItem(entity, net.minecraft.item.Items.DIAMOND),
+                    SurvivalChallengeMonitor.getDeathCount(b.getBotId()));
+            source.sendFeedback(() -> Text.literal(line), false);
+        }
+        return 1;
+    }
+
+    private static int countItem(ServerPlayerEntity entity, net.minecraft.item.Item item) {
+        int count = 0;
+        for (var stack : entity.getInventory().main) {
+            if (!stack.isEmpty() && stack.isOf(item)) count += stack.getCount();
+        }
+        return count;
     }
 
     private static int showHelp(ServerCommandSource source) {

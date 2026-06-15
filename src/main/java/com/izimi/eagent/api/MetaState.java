@@ -62,17 +62,11 @@ public class MetaState {
     }
 
     // ── 聊天预算 ──
-    public int getChatBudgetRemaining() { return chatBudgetRemaining; }
-
     public void consumeChatBudget() { if (chatBudgetRemaining > 0) chatBudgetRemaining--; }
-
-    public void rechargeChatBudget() { chatBudgetRemaining = CHAT_BUDGET_MAX; }
 
     public boolean isChatBudgetExhausted() { return chatBudgetRemaining <= 0; }
 
     public int getP3Cooldown() { return p3Cooldown; }
-    public void setP3Cooldown(int v) { this.p3Cooldown = v; }
-    public void tickP3Cooldown() { if (p3Cooldown > 0) p3Cooldown--; }
 
     public int getTickSinceLastLLM() { return tickSinceLastLLM; }
     public void incrementTickSinceLastLLM() { tickSinceLastLLM++; }
@@ -81,14 +75,12 @@ public class MetaState {
     public boolean hasRecentLLMFailure() { return recentLLMFailure; }
     public void setRecentLLMFailure(boolean v) { this.recentLLMFailure = v; }
 
-    public String getPendingChatMessage() { return pendingChatMessage; }
     public void setPendingChat(String msg) { this.pendingChatMessage = msg; }
     public String consumePendingChat() {
         String msg = pendingChatMessage;
         pendingChatMessage = null;
         return msg;
     }
-    public boolean hasPendingChat() { return pendingChatMessage != null; }
 
     public String getLastPlayerMessage() { return lastPlayerMessage; }
     public void setLastPlayerMessage(String msg) {
@@ -98,21 +90,9 @@ public class MetaState {
         }
     }
 
-    public String getCurrentBiomeId() { return currentBiomeId; }
-    public void setCurrentBiomeId(String id) { this.currentBiomeId = id; }
-
     public int getPlayerInactiveMinutes() {
         if (lastPlayerMessageTime == 0) return 60;
         return (int) ((System.currentTimeMillis() - lastPlayerMessageTime) / 60_000);
-    }
-
-    public int getLastTickEntityCount() { return lastTickEntityCount; }
-    public void setLastTickEntityCount(int c) { this.lastTickEntityCount = c; }
-    public int getThisTickEntityCount() { return thisTickEntityCount; }
-    public void setThisTickEntityCount(int c) { thisTickEntityCount = c; }
-    public void cycleEntityCount() {
-        lastTickEntityCount = thisTickEntityCount;
-        thisTickEntityCount = 0;
     }
 
     public int getLastActionSuccessCount() { return lastActionSuccessCount; }
@@ -139,13 +119,6 @@ public class MetaState {
         });
     }
     public boolean hasNovelEntity() { return !novelEntityTicks.isEmpty(); }
-
-    public String getBlockFingerprint() { return lastBlockFingerprint; }
-    public void setBlockFingerprint(String fp) { this.lastBlockFingerprint = fp; }
-    public boolean hasBlockChange(String newFingerprint) {
-        if (lastBlockFingerprint.isEmpty()) return false;
-        return !lastBlockFingerprint.equals(newFingerprint);
-    }
 
     public boolean hasSuddenEnvironmentChange() {
         if (lastTickEntityCount == 0) return false;

@@ -179,6 +179,7 @@ public boolean shouldExplore() {
 **骨架** 在 §4 表格的基础上扩展为：
 - `brainstem/scheduler/` 包含 MetaScheduler（系统唯一决策调度器）——它不执行动作，只做"是否做、做什么"的选择。这是整套系统中**唯一**进行决策的模块，其余执行模块不参与决策。
 - `brainstem/scheduler/` 还包含反射链、参数绑定、紧急分类、驱力计算（MotivationEngine），全部为决策调度服务。
+- `brainstem/scheduler/` 还包含 `ReflexSatisfaction`（五维满意度评分：timeScore + riskScore + resourceScore + 贝叶斯后验 + 熟练度）和 `TemporalScaler`（激素驱动连续时间缩放 `[0.5, 2.0]`）和 `SurvivalChallengeMonitor`（挑战监控），组成三件套：时空缩放(TemporalScaler) + 领域自适应权重(Perspective → DomainWeights) + 满意度评分(ReflexSatisfaction — timeScore + riskScore + resourceScore)。
 
 ### 4.2 抑制控制 (InhibitoryControl + CognitiveControl)
 
@@ -412,6 +413,26 @@ CognitiveControl 中应用：`candidate.type == FLEE ? candidate.weight += fligh
   ├─ 20~40% → watching（继续观察）
   └─ ≤ 20% 且 executionCount > 20 → 休眠 (dormant)，不删除，可复活
 ```
+
+### 5.3 反射满意度评分 (ReflexSatisfaction)
+
+`ConditionedReflex.scanAndTrigger()` 在候选排序中使用 `ReflexSatisfaction` 替代原始乘积公式（或 `legacy` 分支保留乘积），评分由五部分组成：
+
+| 维度 | 计算方式 | 来源 |
+|------|---------|------|
+| **时间满意度** | S 形曲线：`estimatedTime < T1 → 1.0`，`T1~T2 → 线性递减`，`> T2 → 0` | `timeScore()` 三段折线 |
+| **后验置信度** | 贝叶斯均值 + 熟练度加权 | `bayesianPosterior * atomProficiency` |
+| **风险评分 riskScore** | `clamp(1 - dangerLevel × (1 - posterior))` | `scanAndTrigger()` 预计算，dangerLevel 由 health/NE/5-HT/night/consecutiveFails 合成 |
+| **资源评分 resourceScore** | `clamp(0.3 + hungerRatio × 0.3 + posterior × 0.4)` | `scanAndTrigger()` 预计算，hungerRatio 映射饥饿度 |
+| **时间缩放 timeScale** | NE/DA/5-HT → `[0.5, 2.0]` 连续缩放 | `TemporalScaler.computeTimeScale()` |
+
+最终评分 = `wTime × timeScore + wRisk × (1 - riskScore) + wSuccess × (posterior × proficiency) + wResource × (1 - resourceScore)`。
+
+**领域自适应权重**：各 `Perspective`（SURVIVAL/TASK/SOCIAL/CURIOUS/CAUTIOUS）有独立的 `[wTime, wRisk, wSuccess, wResource]` 权重配置，通过 `computeForDomainWithScale()` 完成评分。
+
+**向后兼容**：`compute()` 保留 9 参数重载（默认 risk=1.0, resource=1.0），旧调用无需修改。`legacy` 分支在 `BotInstance.useLegacyScoring` 为 true 时使用原始乘积公式，用于挑战系统对比。
+
+**运行中调优**：`updateWeights(Perspective, DomainWeights)` 支持运行时更新视角权重，无需重启。
 
 
 ## 6. 观察学习系统
@@ -1296,6 +1317,82 @@ importSkeleton(skeleton)
 
 ---
 
-> 设计原理与理念详见 [AGENTS.md](./AGENTS.md)
-> 当前实施状态与路线图详见 [DEVELOPMENT.md](./DEVELOPMENT.md)
-> 理论背景与论文详见 [THEORY.md](./THEORY.md)
+## 26. SurvivalChallengeMonitor — 生存挑战监控
+
+SurvivalChallengeMonitor 是挑战系统的核心监控器，用于盲测对比新旧评分系统（ReflexSatisfaction 五维评分 vs 原始乘积公式）。
+
+### 26.1 数据模型
+
+```java
+class SurvivalChallengeMonitor {
+    static final ConcurrentHashMap<UUID, AtomicInteger> llmCounters;   // LLM 调用计数器
+    static final ConcurrentHashMap<UUID, AtomicInteger> deathCounters; // 死亡计数器
+    static int endDay;                                                  // 挑战结束天数
+}
+```
+
+### 26.2 生命周期
+
+```
+/ai challenge start [days]
+  ├── 重置 llmCounters/deathCounters
+  ├── 设置 endDay = currentDay + days
+  ├── 生成 LegacyBot (useLegacyScoring=true, 800格远)
+  └── 生成 NewBot (useLegacyScoring=false, 600格远)
+
+BotInstance.tick() 内钩子:
+  ├── 检测死亡 → recordDeath(botId)
+  └── day 边界变化 → printDailySnapshot(day, bots)
+
+MetaScheduler.executeCortexLLM() 内钩子:
+  └── recordLLMCall(botId)
+
+/ai challenge stop
+  ├── 杀死两 Bot
+  ├── printFinalReport(bots) — 计分对比
+  └── 重置监控状态
+```
+
+### 26.3 每日快照格式 (printDailySnapshot)
+
+**Compact 行**（控制台，单行）：
+```
+LegacyBot[HP:12/20 饿:8 🪓:0 ⛏:0 💎:0 💀:1 🤖:0]
+NewBot[HP:18/20 饿:6 🪓:1 ⛏:5 💎:1 💀:0 🤖:2]
+```
+
+**Detailed 行**（日志文件，含细分维度）：
+```
+[Challenge] Day 3 — LegacyBot: HP=12/20, hunger=8, wood=0, iron=0, diamond=0, deaths=1, llmCalls=0
+[Challenge] Day 3 — NewBot:     HP=18/20, hunger=6, wood=1, iron=5, diamond=1, deaths=0, llmCalls=2
+```
+
+### 26.4 最终报告与计分规则 (printFinalReport)
+
+```java
+score = ironCount × 10 + diamondCount × 50 - deathCount × 100
+```
+
+最终报告格式：
+```
+=== Survival Challenge Report ===
+              LegacyBot     NewBot
+HP             12/20         18/20
+Hunger         8              6
+Wood           0              1
+Iron           0              5
+Diamond        0              1
+Deaths         1              0
+LLM Calls      0              2
+-----------------------------------
+Score          -100           100
+Winner: NewBot
+```
+
+计分规则设计：
+| 指标 | 单位分值 | 理由 |
+|------|:-------:|------|
+| 铁锭 | +10 | 基础资源产出，反映日常效率 |
+| 钻石 | +50 | 高价值资源，反映高阶能力 |
+| 死亡 | -100 | 严重扣分，反映生存能力 |
+| 其他 | 0 | 不计分，仅展示 |

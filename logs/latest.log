@@ -1,5 +1,5 @@
-[23:04:24] [Test worker/WARN]: [DeepSeekClient] 响应无choices
-[23:04:24] [Test worker/WARN]: [DeepSeekClient] 响应无choices
-[23:04:24] [Test worker/ERROR]: [DeepSeekClient] 解析响应失败: Expected a com.google.gson.JsonObject but was com.google.gson.JsonPrimitive; at path $ -- body: not json
-[23:04:24] [Test worker/WARN]: [TemplateManager] 填空解析失败: EVALUATION_BATCH - Expected a com.google.gson.JsonObject but was com.google.gson.JsonArray; at path $
-[23:04:24] [Test worker/WARN]: [TemplateManager] 填空解析失败: REFLEX_CREATE - com.google.gson.stream.MalformedJsonException: Expected ':' at line 1 column 7 path $.not
+[19:16:46] [Test worker/WARN]: [DeepSeekClient] 响应无choices
+[19:16:46] [Test worker/WARN]: [DeepSeekClient] 响应无choices
+[19:16:46] [Test worker/ERROR]: [DeepSeekClient] 解析响应失败: Expected a com.google.gson.JsonObject but was com.google.gson.JsonPrimitive; at path $ -- body: not json
+[19:16:46] [Test worker/WARN]: [TemplateManager] 填空解析失败: EVALUATION_BATCH - Expected a com.google.gson.JsonObject but was com.google.gson.JsonArray; at path $
+[19:16:46] [Test worker/WARN]: [TemplateManager] 填空解析失败: REFLEX_CREATE - com.google.gson.stream.MalformedJsonException: Expected ':' at line 1 column 7 path $.not

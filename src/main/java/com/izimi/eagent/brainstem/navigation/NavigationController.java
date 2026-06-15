@@ -10,6 +10,7 @@ import net.minecraft.util.math.Vec3d;
 public class NavigationController {
     private static final Logger LOGGER = LoggerFactory.getLogger("e-agent");
     private static final double ARRIVAL_THRESHOLD = 1.5;
+    private static final float FORWARD_SPEED = 0.5f;
 
     public boolean navigateTo(ServerPlayerEntity bot, BlockPos target) {
         if (bot == null || target == null) return false;
@@ -43,16 +44,16 @@ public class NavigationController {
 
             boolean shouldJump = bot.isOnGround()
                     && (waypoint.getY() > bot.getBlockY() || direction.y > 0.5);
-            bot.updateInput(1.0f, 0, shouldJump, false);
+            bot.updateInput(FORWARD_SPEED, 0, shouldJump, false);
 
             // Also store input in BotPlayer so it survives internal PlayerInput.reset()
             BotPlayer bp = BotPlayer.getByUUID(bot.getUuid());
             if (bp != null) {
-                bp.setMoveInput(1.0f, 0, shouldJump);
+                bp.setMoveInput(FORWARD_SPEED, 0, shouldJump);
             }
 
-            LOGGER.info("[Navigation] moveToward -> updateInput(1.0, 0, jump={}), pos={}, onGround={}, y={}, waypoint={}",
-                    shouldJump, bot.getBlockPos(), bot.isOnGround(), String.format("%.1f", bot.getY()), waypoint);
+            LOGGER.info("[Navigation] moveToward -> updateInput({}, 0, jump={}), pos={}, onGround={}, y={}, waypoint={}",
+                    FORWARD_SPEED, shouldJump, bot.getBlockPos(), bot.isOnGround(), String.format("%.1f", bot.getY()), waypoint);
 
             if (shouldJump) {
                 bot.jump();
@@ -68,10 +69,4 @@ public class NavigationController {
         }
     }
 
-    public void stopNavigation() {
-    }
-
-    public boolean isNavigating() {
-        return false;
-    }
 }

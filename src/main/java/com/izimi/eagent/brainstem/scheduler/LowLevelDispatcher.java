@@ -5,7 +5,7 @@ import com.izimi.eagent.api.BotContext;
 import com.izimi.eagent.api.MetaState;
 import com.izimi.eagent.api.WorldContext;
 import com.izimi.eagent.amygdala.OneShotAlarmSystem;
-import com.izimi.eagent.amygdala.learning.CorrelationDetector;
+
 import com.izimi.eagent.brainstem.adapter.TemporalScaler;
 import com.izimi.eagent.brainstem.innate.InnateReflex;
 import com.izimi.eagent.brainstem.innate.InnateReflexRegistry;
@@ -75,43 +75,6 @@ public final class LowLevelDispatcher {
             case "collectItem" -> adapter.collectItem(bot, reflex.action().getDouble("speed", 0.15) * speedMul);
             case "sneak" -> adapter.sneak(bot, true);
         }
-    }
-
-    // ── L1: Habit ──
-
-    public static boolean executeHabitLayer(BotContext botCtx, MetaState state,
-                                            ServerPlayerEntity bot, CorrelationDetector correlationDetector) {
-        var conditioned = botCtx.conditionedReflex();
-        var taskManager = botCtx.taskManager();
-        if (conditioned == null || taskManager == null) return false;
-
-        var activeTask = taskManager.getActiveTask();
-        if (activeTask != null && "running".equals(activeTask.getStatus())) {
-            var reflexSkill = conditioned.match(activeTask);
-            if (reflexSkill != null) {
-                conditioned.executeReflex(reflexSkill, bot);
-                return true;
-            }
-            // No reflex matched → delegate to TaskExecutor for per-tick dispatch
-            var taskExecutor = botCtx.taskExecutor();
-            if (taskExecutor != null) {
-                taskExecutor.executeTask(bot, activeTask);
-                return true;
-            }
-        }
-
-        if (state.getP3Cooldown() <= 0) {
-            var autoReflex = conditioned.scanAndTrigger(bot);
-            if (autoReflex != null) {
-                conditioned.executeReflex(autoReflex, bot);
-                return true;
-            }
-        }
-
-        if (correlationDetector != null) {
-            return correlationDetector.tryExplore(bot);
-        }
-        return false;
     }
 
     // ── L2: Cortex Local ──

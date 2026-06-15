@@ -7,7 +7,7 @@
 ## 1. 当前状态
 
 ```
-项目阶段: ✅ Phase Playstyle Pack — Layer 1 玩法包全部完成 + Gating stateless + Memory RLU + 死代码清理
+项目阶段: ✅ Phase S4-S5 — risk/resource scoring + Phase 3 挑战系统
 ```
 
 ### 完成情况
@@ -47,6 +47,10 @@
 | **Persona formatHint/lock** | **PersonaProfile.formatHint 字段 + PersonaManager.personaLocked 锁 + /ai persona 设置锁 + playstyle 自动切换人格** | ✅ |
 | **Playstyle Pack 扩展** | **jar→filesystem 内置包首次复制 + ReflexPackManager 子目录递归扫描** | ✅ |
 | **死代码清理** | **移除 ~30 个未使用 import/field/method/annotation/参数，消除所有编译器警告** | ✅ |
+| **Phase S0-S3** | **S0: 导航 bug 修复 + S1: ReflexSatisfaction 满意度评分 + S2: TemporalScaler 连续时间缩放 + S3: 领域自适应权重** | ✅ |
+| **死代码清理 II** | **移除 ~20 个未使用 method (ConditionedReflex/MotivationEngine/LowLevelDispatcher/MetaState/ReflexSatisfaction)** | ✅ |
+| **Phase S4-S5** | **riskScore/resourceScore 实现 + scanAndTrigger 集成** | ✅ |
+| **Phase 3 (Challenge)** | **SurvivalChallengeMonitor + /ai challenge 命令** | ✅ |
 
 
 ---
@@ -111,6 +115,49 @@ Phase Playstyle Pack (Layer 1 玩法包 — 行为预设初始化):
   ├── PP.6 — AICommand /ai playstyle load/list/export/current
   ├── PP.7 — 5 预设包 JSON: aggressive/explorer/social/cautious/builder
   └── PP.8 — 326 测试全部通过
+```
+
+### 本轮新增 (2026-06-15)
+
+```
+Phase S0-S3 (三件套决策系统 + 导航修复):
+  ├── S0.1 — GreedyNavigator.isSingleBlockJump() 条件反转修复
+  ├── S0.2 — NavigationController FORWARD_SPEED = 0.5f 常量 + 日志修复
+  ├── S0.3 — 删除 stopNavigation() 无参空方法 和 isNavigating() 存根
+  ├── S1.1 — ReflexSatisfaction 类: timeScore() 三段折线 S 形 / compute() 加权和
+  ├── S1.2 — scanAndTrigger() 改用 ReflexSatisfaction 替代原始乘积
+  ├── S2.1 — TemporalScaler.computeTimeScale(HormonalSystem) 连续 [0.5, 2.0] 缩放
+  ├── S2.2 — timeScale 注入 scanAndTrigger() 满意度计算
+  ├── S3.1 — DomainWeights record + 全视图权重配置 (SURVIVAL/TASK/SOCIAL/CURIOUS/CAUTIOUS)
+  └── S3.2 — Perspective 管道: MetaScheduler → executeHabitLayerWithGating → scanAndTrigger
+
+Phase Cleanup II (死代码清理):
+  ├── CL.1 — ConditionedReflex: delete getRecentSuccessCount/getStoragePath/resetReflexWeights/getLastExecutedReflexId
+  ├── CL.2 — MotivationEngine: delete shouldExplore() (被 wheatEarExplore 替代)
+  ├── CL.3 — LowLevelDispatcher: delete executeHabitLayer() + CorrelationDetector 导入
+  ├── CL.4 — MetaState: delete ~15 个未使用 getter/setter (biome/entity/block/chat/p3 等)
+  ├── CL.5 — ReflexSatisfaction: delete 过载 compute(wTime,wSuccess) 简化 API
+  └── CL.6 — NavigationController: delete stopNavigation() 无参空方法
+```
+
+### 本轮新增 (2026-06-16)
+
+```
+Phase S4-S5 (riskScore/resourceScore + 挑战系统):
+  ├── S4.1 — ReflexSatisfaction.compute() 11 参数: 新增 riskScore, resourceScore
+  ├── S4.2 — 9 参数向后兼容重载 (risk=1.0, resource=1.0)
+  ├── S4.3 — computeWithScale() / computeForDomainWithScale() 8/9 参数重载
+  ├── S4.4 — ConditionedReflex.scanAndTrigger() riskScore = clamp(1 - dangerLevel×(1-posterior))
+  ├── S4.5 — scanAndTrigger() resourceScore = clamp(0.3 + hungerRatio×0.3 + posterior×0.4)
+  ├── S4.6 — BotInstance.useLegacyScoring 字段 + getter/setter
+  ├── S4.7 — clampScore() 工具方法 + legacy 分支 (乘积公式)
+  ├── S5.1 — SurvivalChallengeMonitor 静态计数器 (llmCounters/deathCounters)
+  ├── S5.2 — recordLLMCall/recordDeath/reset/startChallenge/stopChallenge
+  ├── S5.3 — 每日快照 (compact 行 + detailed 行) + 最终报告 (计分规则)
+  ├── S5.4 — BotInstance.tick 钩子: recordDeath + day 边界每日快照
+  ├── S5.5 — MetaScheduler.executeCortexLLM 调 recordLLMCall
+  ├── S5.6 — AICommand: /ai challenge start/stop/status
+  └── S5.7 — 337 测试全部通过 (新增 Scenarios S8/S9 + DecisionQualityTest risk/resource)
 ```
 
 ### 本轮新增 (2026-06-14)
@@ -222,6 +269,9 @@ cd EAgentMod-1.21.1-Fabric
 | `/ai playstyle load <包名> [机器人]` | 加载 V2 玩法包 (兼容 V1) |
 | `/ai playstyle export <机器人> <包名>` | 导出 Bot 状态为 V2 玩法包 |
 | `/ai playstyle current [机器人]` | 查看 Bot 当前参数/激素/反射数 |
+| `/ai challenge start [days]` | 启动生存挑战：生成 LegacyBot + NewBot，开启监控 |
+| `/ai challenge stop` | 停止挑战：杀死两 Bot，打印最终计分报告 |
+| `/ai challenge status` | 实时查看两 Bot 对比统计 |
 | `/ai help` | 全部指令 |
 
 `@bot_name <消息>` — 精确路由。无 `@` 时路由最近假人。
@@ -266,7 +316,7 @@ src/main/java/com/izimi/eagent/
 │   ├── adapter/                      12 原子动作 (MinecraftActionAdapter)
 │   ├── bot/                          BotManager/BotInstance/BotSpawner/BotController
 │   ├── innate/                       InnateReflexRegistry/9 先天技能 (含 sneak)
-│   ├── scheduler/                    MetaScheduler/MotivationEngine/UrgencyClassifier/InhibitoryControl
+│   ├── scheduler/                    MetaScheduler/MotivationEngine/UrgencyClassifier/InhibitoryControl/SurvivalChallengeMonitor
 │   ├── skill/                        Skill + SkillManager
 │   ├── navigation/                   GreedyNavigator + NavigationController
 │   └── IdleBrain.java
@@ -322,7 +372,7 @@ minecraft/eagent/
 | `MemoryGraphTest.java` | 38 | 节点/边 CRUD、显著性门控、边推断、图遍历 BFS、因果链、持久化、贝叶斯重排、Hebbian 强化、扩散激活、骨骼导出/导入 |
 | `ChatSessionManagerTest.java` | 7 | 窗口限制/方向回退/null安全/防御拷贝 |
 | `TemplateMatcherTest.java` | 14 | 路由: CLARIFICATION/TASK_PLAN/REFLEX_CREATE/CHAT_RESPONSE/拦截 |
-| **合计 (含新增)** | **326** | **全部通过** |
+| **合计 (含新增)** | **337** | **全部通过** |
 
 **新增测试计划：**
 
@@ -341,4 +391,4 @@ minecraft/eagent/
 | 2 | `NeuroDynamicsTest.java` | 7 | GABA/Glu 推导/抑制兴奋比/NeuroState重载 |
 | 3 | `CognitiveControlTest.java` | 10 | 余弦匹配/候选调制/5-HT情境分支/require合取/阈值参数化 |
 | 3 | `MetaSchedulerCognitiveControlTest.java` | 7 | setCognitiveControl 安全性/checkReflex 全路径 (无配方/通过/否决/余弦过低/精确匹配) |
-| | **合计** | **326** | **全部通过** |
+| | **合计** | **337** | **全部通过** |
