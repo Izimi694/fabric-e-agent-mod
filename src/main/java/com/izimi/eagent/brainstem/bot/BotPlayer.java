@@ -36,6 +36,8 @@ public class BotPlayer {
     private float storedForward = 0f;
     private float storedStrafe = 0f;
     private boolean storedJump = false;
+    private boolean storedSprint = false;
+    private int stuckLogCooldown = 0;
 
     private BotPlayer(ServerPlayerEntity playerEntity) {
         this.playerEntity = playerEntity;
@@ -59,6 +61,21 @@ public class BotPlayer {
         this.storedForward = forward;
         this.storedStrafe = strafe;
         this.storedJump = jump;
+    }
+
+    public float getForward() {
+        return storedForward;
+    }
+
+    public float getStrafe() {
+        return storedStrafe;
+    }
+
+    public void clearControlStates() {
+        storedForward = 0f;
+        storedStrafe = 0f;
+        storedJump = false;
+        storedSprint = false;
     }
 
     public static BotPlayer create(MinecraftServer server, ServerWorld world, GameProfile profile) {
@@ -123,34 +140,48 @@ public class BotPlayer {
     public void tick() {
         tickCounter++;
 
-        boolean hasInput = storedForward != 0f || storedStrafe != 0f || storedJump;
+        // 更新水/火/传送门状态 (原版 baseTick 处理)
+        playerEntity.baseTick();
+
+        boolean hasInput = storedForward != 0f || storedStrafe != 0f || storedJump || storedSprint;
 
         // 1. Read current velocity
         Vec3d vel = playerEntity.getVelocity();
 
-        // 2. Apply gravity (0.08 blocks/tick²)
-        if (!playerEntity.isOnGround()) {
+        // 2. Apply gravity (water: 0.02; air: 0.08)
+        if (playerEntity.isTouchingWater()) {
+            vel = vel.subtract(0, 0.02, 0);
+        } else if (!playerEntity.isOnGround()) {
             vel = vel.subtract(0, 0.08, 0);
         }
 
-        // 3. Apply friction
-        if (playerEntity.isOnGround()) {
+        // 3. Apply friction (water: 0.8 drag; ground: 0.6; air: 0.91)
+        if (playerEntity.isTouchingWater()) {
+            vel = vel.multiply(0.8, 0.8, 0.8);
+        } else if (playerEntity.isOnGround()) {
             vel = new Vec3d(vel.x * 0.6, vel.y * 0.98, vel.z * 0.6);
         } else {
             vel = new Vec3d(vel.x * 0.91, vel.y * 0.98, vel.z * 0.91);
         }
 
-        // 4. Apply input-based velocity
+        // 4. Apply input-based velocity (单次触发 jump: 读取后立即清 0)
+        boolean shouldJump = this.storedJump;
+        if (shouldJump) {
+            this.storedJump = false;
+        }
+
         if (hasInput) {
             float yawRad = playerEntity.getYaw() * 0.017453292f;
             float speed = playerEntity.getMovementSpeed();
-            if (playerEntity.isSprinting()) speed *= 1.3f;
+            if (storedSprint) speed *= 1.3f;
 
             double vx = (-MathHelper.sin(yawRad) * storedForward + MathHelper.cos(yawRad) * storedStrafe) * speed;
             double vz = (MathHelper.cos(yawRad) * storedForward + MathHelper.sin(yawRad) * storedStrafe) * speed;
             vel = vel.add(vx, 0, vz);
 
-            if (storedJump && playerEntity.isOnGround()) {
+            if (shouldJump && playerEntity.isTouchingWater()) {
+                vel = vel.add(0, 0.12, 0);
+            } else if (shouldJump && playerEntity.isOnGround()) {
                 vel = vel.add(0, 0.42, 0);
             }
         }
@@ -177,21 +208,31 @@ public class BotPlayer {
             playerEntity.velocityModified = true;
         }
 
-        // 7. Log every 60 ticks (or if input but no movement)
-        if (tickCounter % LOG_TICK_INTERVAL == 0 || (hasInput && moved < 0.001)) {
-            LOGGER.info("[BotPlayer] tick={}, pos=({},{},{}), onGround={}, yaw={}, vel=({},{},{}), input=({},{},{}), moved={}",
+        // 6b. 饥饿更新 (行走消耗 + 转换)
+        if (moved > 0) {
+            playerEntity.addExhaustion(0.01f * (float) Math.min(moved, 1.0));
+        }
+        playerEntity.getHungerManager().update(playerEntity);
+
+        // 7. Log every 60 ticks (or occasionally if input but no movement)
+        if (tickCounter % LOG_TICK_INTERVAL == 0 || (hasInput && moved < 0.001 && stuckLogCooldown <= 0)) {
+            LOGGER.info("[BotPlayer] tick={}, pos=({},{},{}), onGround={}, inWater={}, yaw={}, vel=({},{},{}), input=({},{},{}), sprint={}, moved={}",
                     tickCounter,
                     String.format("%.1f", playerEntity.getX()),
                     String.format("%.1f", playerEntity.getY()),
                     String.format("%.1f", playerEntity.getZ()),
                     playerEntity.isOnGround(),
+                    playerEntity.isTouchingWater(),
                     String.format("%.1f", playerEntity.getYaw()),
                     String.format("%.3f", playerEntity.getVelocity().x),
                     String.format("%.3f", playerEntity.getVelocity().y),
                     String.format("%.3f", playerEntity.getVelocity().z),
                     storedForward, storedStrafe, storedJump ? 1 : 0,
+                    storedSprint ? 1 : 0,
                     String.format("%.4f", moved));
+            if (hasInput && moved < 0.001) stuckLogCooldown = 200;
         }
+        if (stuckLogCooldown > 0) stuckLogCooldown--;
 
         // 8. Store input for next tick persistence (explicitly cleared by stopNavigation)
     }
@@ -200,6 +241,7 @@ public class BotPlayer {
         storedForward = 0;
         storedStrafe = 0;
         storedJump = false;
+        storedSprint = false;
     }
 
     public MinecraftServer getServer() {

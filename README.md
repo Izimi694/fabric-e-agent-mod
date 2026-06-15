@@ -254,6 +254,14 @@ minecraft/eagent/
 
 ---
 
+## 🔗 参考项目
+
+| 项目 | 许可证 | 关系 |
+|------|--------|------|
+| [Mineflayer](https://github.com/PrismarineJS/mineflayer) | MIT | **客户端 Bot 框架**（Node.js）。本系统借用了三个设计：controlState 意图分离（setControlState → 物理循环单向消费）、挖掘协议三态（start/cancel/finish + swing 动画）、复活延迟 1500ms 防 Invalid move。本系统为 Fabric 服务端 mod，非客户端注入。 |
+
+---
+
 ## 📄 许可证
 
 MIT License

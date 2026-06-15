@@ -36,7 +36,12 @@ import com.izimi.eagent.util.FileUtil;
 
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
+import net.minecraft.server.world.ServerWorld;
 import net.minecraft.text.Text;
+import net.minecraft.registry.RegistryKey;
+import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Vec3d;
+import net.minecraft.world.World;
 
 public class BotInstance {
     private static final Logger LOGGER = LoggerFactory.getLogger("e-agent");
@@ -154,7 +159,32 @@ public class BotInstance {
         if (bot.getHealth() <= 0) {
             bot.setHealth(20.0f);
             bot.deathTime = 0;
+            bot.fallDistance = 0;
             LOGGER.info("[BotInstance] 自动复活 {}", botName);
+            // 传送到床/世界出生点 (替代原地复活)
+            ServerWorld world = bot.getServerWorld();
+            BlockPos spawnPos = world.getSpawnPos();
+            float spawnAngle = world.getSpawnAngle();
+            BlockPos bedPos = bot.getSpawnPointPosition();
+            RegistryKey<World> bedDim = bot.getSpawnPointDimension();
+            if (bedPos != null && bedDim != null && bedDim.equals(world.getRegistryKey())) {
+                spawnPos = bedPos;
+                spawnAngle = bot.getSpawnAngle();
+            }
+            bot.teleport(world, spawnPos.getX() + 0.5, spawnPos.getY(), spawnPos.getZ() + 0.5, spawnAngle, 0.0f);
+            bot.setVelocity(Vec3d.ZERO);
+            LOGGER.info("[BotInstance] 复活传送到出生点: ({},{},{})", spawnPos.getX(), spawnPos.getY(), spawnPos.getZ());
+        }
+
+        // 每60tick状态摘要
+        if (tickCounter > 0 && tickCounter % 60 == 0) {
+            String reflex = conditionedReflex.getLastExecutedReflexId();
+            double health = bot.getHealth();
+            int food = bot.getHungerManager().getFoodLevel();
+            String pos = String.format("(%.0f,%.0f,%.0f)", bot.getX(), bot.getY(), bot.getZ());
+            LOGGER.info("[BotInstance] {} HP={}/{} 饿={} pos={} reflex={}",
+                    botName, String.format("%.0f", health), String.format("%.0f", bot.getMaxHealth()),
+                    food, pos, reflex != null ? reflex : "none");
         }
 
         tickCounter++;

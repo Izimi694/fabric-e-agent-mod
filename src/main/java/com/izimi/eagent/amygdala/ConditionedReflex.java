@@ -357,6 +357,9 @@ public class ConditionedReflex {
         candidates.sort((a, b) -> Double.compare(b.score(), a.score()));
         Candidate best = candidates.get(0);
 
+        LOGGER.info("[ConditionedReflex] scanAndTrigger: selected={} score={} ({} candidates)",
+                best.skill().getSkillId(), String.format("%.4f", best.score()), candidates.size());
+
         if (best.atomIndex() >= 0) {
             Path reflexPath = conditionedDir().resolve(best.skill().getSkillId() + ".json");
             Map<String, Object> data = JsonUtil.readMapFromFileSafe(reflexPath);

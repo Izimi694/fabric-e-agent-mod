@@ -1,5 +1,6 @@
 package com.izimi.eagent.brainstem.adapter;
 
+import com.izimi.eagent.brainstem.bot.BotPlayer;
 import com.izimi.eagent.brainstem.navigation.NavigationController;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
@@ -54,7 +55,10 @@ public class MinecraftActionAdapter implements BasicActionAdapter {
 
     private BlockPos currentDigTarget = null;
     private int digBreakingTicks = 0;
-    private static final int BREAK_TIME_TICKS = 40;
+    private int digBreakTimeTicks = 40;
+    private int digSwingTicks = 0;
+    private static final int MIN_BREAK_TICKS = 15;
+    private static final int SWING_INTERVAL = 7;
     private static final int SCAN_RANGE = 8;
 
     @Override
@@ -108,47 +112,86 @@ public class MinecraftActionAdapter implements BasicActionAdapter {
 
         ServerWorld world = bot.getServerWorld();
 
+        // 首次调用：设置目标
         if (target != null) {
             currentDigTarget = target;
         }
 
+        // 无目标 → 自动寻找
         if (currentDigTarget == null) {
             currentDigTarget = findNearbyBlock(world, bot);
             if (currentDigTarget == null) {
                 return ActionResult.unable("附近没有可挖掘的方块");
             }
-        } else {
-            BlockState state = world.getBlockState(currentDigTarget);
-            if (state.isAir() || state.isOf(Blocks.BEDROCK)) {
-                currentDigTarget = findNearbyBlock(world, bot);
-                if (currentDigTarget == null) {
-                    return ActionResult.unable("附近没有可挖掘的方块");
-                }
-            }
         }
 
+        BlockState currentState = world.getBlockState(currentDigTarget);
+
+        // cancel guard：方块已变 air 或 bedrock → 重置
+        if (currentState.isAir() || currentState.isOf(Blocks.BEDROCK)) {
+            resetDigState();
+            return ActionResult.unable("目标方块已不存在");
+        }
+
+        // cancel guard：距离太远 → 取消挖掘
         double distance = bot.getPos().squaredDistanceTo(
                 currentDigTarget.getX() + 0.5, currentDigTarget.getY(), currentDigTarget.getZ() + 0.5);
         if (distance > 25.0) {
-            return ActionResult.partial(0.3, "距离太远");
+            resetDigState();
+            return ActionResult.unable("距离太远，取消挖掘");
         }
 
-        equipBestTool(bot, world.getBlockState(currentDigTarget));
+        // 首次破坏此方块时计算实际破坏时间
+        if (digBreakingTicks == 0) {
+            equipBestTool(bot, currentState);
+            digBreakTimeTicks = calculateBreakTime(currentState, bot);
+        }
 
         digBreakingTicks++;
-        if (digBreakingTicks >= BREAK_TIME_TICKS) {
-            digBreakingTicks = 0;
+
+        // swing 动画（每 7 tick ≈ mineflayer 的 350ms）
+        digSwingTicks++;
+        if (digSwingTicks >= SWING_INTERVAL) {
+            digSwingTicks = 0;
+            bot.swingHand(Hand.MAIN_HAND);
+        }
+
+        // 破坏进度（每 tick 更新）
+        world.setBlockBreakingInfo(bot.getId(), currentDigTarget,
+                Math.min(10, (int) (digBreakingTicks * 10.0 / digBreakTimeTicks)));
+
+        if (digBreakingTicks >= digBreakTimeTicks) {
             BlockPos completed = currentDigTarget;
-            currentDigTarget = null;
+            resetDigState();
             world.breakBlock(completed, true, bot);
             return ActionResult.success("挖掘完成");
         }
 
-        if (Math.random() < 0.1) {
-            world.setBlockBreakingInfo(bot.getId(), currentDigTarget, (int) (digBreakingTicks * 10.0 / BREAK_TIME_TICKS));
+        return ActionResult.partial(0.6, "挖掘中");
+    }
+
+    private void resetDigState() {
+        currentDigTarget = null;
+        digBreakingTicks = 0;
+        digBreakTimeTicks = 40;
+        digSwingTicks = 0;
+    }
+
+    private int calculateBreakTime(BlockState state, ServerPlayerEntity bot) {
+        float hardness = state.getHardness(bot.getServerWorld(), bot.getBlockPos());
+        if (hardness < 0) return 72000; // 不可破坏，永不完成
+        if (hardness >= 50) return MIN_BREAK_TICKS * 10; // 基岩级慢
+
+        // 获取工具速度
+        float toolSpeed = 1.0f;
+        ItemStack held = bot.getMainHandStack();
+        if (!held.isEmpty()) {
+            toolSpeed = Math.max(1.0f, held.getMiningSpeedMultiplier(state));
         }
 
-        return ActionResult.partial(0.6, "挖掘中");
+        // hardness * 30 / toolSpeed，强制最小值
+        int ticks = Math.max(MIN_BREAK_TICKS, Math.round(hardness * 30.0f / toolSpeed));
+        return ticks;
     }
 
     @Override
@@ -286,7 +329,12 @@ public class MinecraftActionAdapter implements BasicActionAdapter {
     @Override
     public ActionResult jump(ServerPlayerEntity bot) {
         if (bot == null) return ActionResult.unable("jump: bot为null");
-        bot.jump();
+        BotPlayer bp = BotPlayer.getByUUID(bot.getUuid());
+        if (bp != null) {
+            bp.setMoveInput(bp.getForward(), bp.getStrafe(), true);
+        } else {
+            bot.jump();
+        }
         return ActionResult.success("跳跃");
     }
 

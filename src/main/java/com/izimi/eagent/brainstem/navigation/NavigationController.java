@@ -17,7 +17,6 @@ public class NavigationController {
 
         double distance = bot.getPos().distanceTo(Vec3d.ofCenter(target));
         if (distance < ARRIVAL_THRESHOLD) {
-            bot.updateInput(0, 0, false, false);
             BotPlayer bp = BotPlayer.getByUUID(bot.getUuid());
             if (bp != null) bp.clearMoveInput();
             return true;
@@ -44,26 +43,20 @@ public class NavigationController {
 
             boolean shouldJump = bot.isOnGround()
                     && (waypoint.getY() > bot.getBlockY() || direction.y > 0.5);
-            bot.updateInput(FORWARD_SPEED, 0, shouldJump, false);
 
-            // Also store input in BotPlayer so it survives internal PlayerInput.reset()
+            // Store input in BotPlayer for physics loop consumption
             BotPlayer bp = BotPlayer.getByUUID(bot.getUuid());
             if (bp != null) {
                 bp.setMoveInput(FORWARD_SPEED, 0, shouldJump);
             }
 
-            LOGGER.info("[Navigation] moveToward -> updateInput({}, 0, jump={}), pos={}, onGround={}, y={}, waypoint={}",
+            LOGGER.info("[Navigation] moveToward -> forward={}, jump={}, pos={}, onGround={}, y={}, waypoint={}",
                     FORWARD_SPEED, shouldJump, bot.getBlockPos(), bot.isOnGround(), String.format("%.1f", bot.getY()), waypoint);
-
-            if (shouldJump) {
-                bot.jump();
-            }
         }
     }
 
     public void stopNavigation(ServerPlayerEntity bot) {
         if (bot != null) {
-            bot.updateInput(0, 0, false, false);
             BotPlayer bp = BotPlayer.getByUUID(bot.getUuid());
             if (bp != null) bp.clearMoveInput();
         }

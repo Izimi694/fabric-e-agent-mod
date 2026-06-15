@@ -29,6 +29,7 @@ import net.minecraft.registry.Registries;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Vec3d;
 
 public class CorrelationDetector {
 
@@ -43,6 +44,8 @@ public class CorrelationDetector {
     private final BasicActionAdapter adapter;
     private final Deque<TrialRecord> recentTrials = new ArrayDeque<>();
     private int cooldown = 0;
+    private BlockPos exploreTarget = null;
+    private int exploreCooldown = 0;
 
     record TrialRecord(String action, String target, String contextFingerprint, boolean success) {}
 
@@ -55,8 +58,25 @@ public class CorrelationDetector {
     }
 
     public boolean tryExplore(ServerPlayerEntity bot) {
-        if (cooldown > 0) { cooldown--; return false; }
         if (adapter == null || bot == null) return false;
+
+        // 持续导航: 向探索目标移动直至到达
+        if (exploreTarget != null) {
+            Vec3d targetCenter = Vec3d.ofCenter(exploreTarget);
+            if (bot.getPos().squaredDistanceTo(targetCenter) < 4.0) {
+                exploreTarget = null;
+                exploreCooldown = TRIAL_COOLDOWN_TICKS;
+                adapter.stopNavigation(bot.getUuid());
+                return true;
+            }
+            adapter.moveTo(bot, exploreTarget);
+            return true;
+        }
+
+        if (exploreCooldown > 0) {
+            exploreCooldown--;
+            return false;
+        }
 
         String action = pickRandomAction(bot);
         if (action == null) return false;
@@ -67,7 +87,15 @@ public class CorrelationDetector {
         boolean success = executeTrial(action, target, bot);
         if (!success && action.equals("dig")) {
             action = "jump";
-            success = executeTrial(action, "", bot);
+            target = "";
+            success = executeTrial(action, target, bot);
+        }
+
+        // moveTo 需要持续导航，存储目标供后续 tick 使用
+        if ("moveTo".equals(action) && target != null) {
+            exploreTarget = parseBlockPos(target);
+        } else {
+            exploreCooldown = TRIAL_COOLDOWN_TICKS;
         }
 
         recentTrials.addLast(new TrialRecord(action, target != null ? target : "", contextFp, success));
@@ -76,7 +104,6 @@ public class CorrelationDetector {
         }
 
         checkForPatterns(bot);
-        cooldown = TRIAL_COOLDOWN_TICKS;
         return true;
     }
 

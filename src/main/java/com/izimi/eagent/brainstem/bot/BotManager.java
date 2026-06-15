@@ -67,7 +67,8 @@ public class BotManager {
         entity.setHealth(20.0f);
         entity.getHungerManager().setFoodLevel(20);
 
-        world.spawnEntity(entity);
+        // onPlayerConnected 已处理 world.player 注册，spawnEntity 会重复注册导致 UUID 碰撞
+        // world.spawnEntity(entity);
 
         entity.getAbilities().flying = false;
         entity.getAbilities().allowFlying = false;

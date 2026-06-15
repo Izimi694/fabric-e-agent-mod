@@ -86,7 +86,7 @@ public class BotController {
             bot.updateInput(0, 0, false, false);
         }
 
-        LOGGER.info("[BotController] onTick={}, botPos=({:.1f},{:.1f},{:.1f})",
+        LOGGER.debug("[BotController] onTick={}, botPos=({:.1f},{:.1f},{:.1f})",
                 tickCounter, bot.getX(), bot.getY(), bot.getZ());
 
         if (tickCounter % stateSaveInterval == 0) {

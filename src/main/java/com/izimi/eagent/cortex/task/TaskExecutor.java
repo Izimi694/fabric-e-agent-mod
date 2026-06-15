@@ -20,7 +20,7 @@ public class TaskExecutor {
 
     private int executionTick = 0;
     private static final int SKILL_TIMEOUT_TICKS = 6000;
-    private static final double ACCEPTANCE_THRESHOLD = 0.3;
+    private static final double ACCEPTANCE_THRESHOLD = 0.6;
 
     private Consumer<Double> onAcceptDrift;
 
@@ -45,8 +45,15 @@ public class TaskExecutor {
 
         Task.SubTask current = getCurrentSubTask(task);
         if (current == null) {
-            LOGGER.warn("[TaskExecutor] 无待处理子任务: {}", task.getGoal());
-            taskManager.completeTask();
+            boolean anySucceeded = task.subTasks != null && task.subTasks.stream()
+                    .anyMatch(st -> "success".equals(st.status) || "accepted".equals(st.status));
+            if (anySucceeded) {
+                LOGGER.warn("[TaskExecutor] 子任务全部完成: {}", task.getGoal());
+                taskManager.completeTask();
+            } else {
+                LOGGER.warn("[TaskExecutor] 无成功子任务，取消: {}", task.getGoal());
+                taskManager.cancelActiveTask();
+            }
             executionTick = 0;
             return;
         }

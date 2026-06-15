@@ -247,6 +247,7 @@ public class MetaScheduler {
         if (state.getP3Cooldown() <= 0) {
             var autoReflex = conditioned.scanAndTrigger(bot, perspective);
             if (autoReflex != null) {
+                LOGGER.info("[MetaScheduler] HABIT scanAndTrigger: {} (auto)", autoReflex.getSkillId());
                 if (tryExecuteReflex(botCtx, bot, autoReflex.getSkillId(), autoReflex)) return true;
             }
         }
@@ -340,7 +341,7 @@ public class MetaScheduler {
     private boolean execute(DispatchReflex.DispatchAction action, BotContext botCtx, WorldContext worldCtx, ServerPlayerEntity bot, MetaState state, MinecraftServer server, Perspective perspective) {
         if (bot == null) return false;
 
-        LOGGER.info("[MetaScheduler] Dispatch: {} ({})", action.layer(), action.reason());
+        LOGGER.debug("[MetaScheduler] Dispatch: {} ({})", action.layer(), action.reason());
 
         return switch (action.layer()) {
             case "INSTINCT" -> LowLevelDispatcher.executeInstinctLayer(botCtx, worldCtx, bot, temporalScaler);
