@@ -31,16 +31,12 @@ public class BotController {
     private final TaskExecutor taskExecutor;
     private final StateManager stateManager;
     private final ConditionedReflex conditionedReflex;
-    private final AIChatHandler aiChatHandler;
-    private final AIClient aiClient;
     private final IdleBrain idleBrain;
     private final NaiveBayesClassifier socialClassifier;
-    private final InnateReflexRegistry reflexRegistry;
-    private final InhibitoryControl inhibitor;
     private final MemoryManager memoryManager;
+    private final WorldContext worldContext;
 
     private MetaScheduler metaScheduler;
-    private WorldContext worldContext;
 
     private int tickCounter = 0;
     private int stateSaveInterval = 200;
@@ -51,25 +47,25 @@ public class BotController {
     public BotController(BotSpawner botSpawner, TaskManager taskManager,
                          TaskExecutor taskExecutor, StateManager stateManager,
                          ConditionedReflex conditionedReflex,
-                         AIChatHandler aiChatHandler,
-                         AIClient aiClient, IdleBrain idleBrain,
-                          NaiveBayesClassifier socialClassifier,
-                          InnateReflexRegistry reflexRegistry,
-                          InhibitoryControl inhibitor,
-                          MemoryManager memoryManager) {
+                         IdleBrain idleBrain,
+                         NaiveBayesClassifier socialClassifier,
+                         MemoryManager memoryManager,
+                         WorldContext worldContext) {
         this.botSpawner = botSpawner;
         this.taskManager = taskManager;
         this.taskExecutor = taskExecutor;
         this.stateManager = stateManager;
         this.conditionedReflex = conditionedReflex;
-        this.aiChatHandler = aiChatHandler;
-        this.aiClient = aiClient;
         this.idleBrain = idleBrain;
         this.socialClassifier = socialClassifier;
-        this.reflexRegistry = reflexRegistry;
-        this.inhibitor = inhibitor;
         this.memoryManager = memoryManager;
+        this.worldContext = worldContext;
     }
+
+    private AIChatHandler aiChatHandler() { return worldContext.cortex().chatAI(); }
+    private AIClient aiClient() { return worldContext.cortex().aiClient(); }
+    private InnateReflexRegistry reflexRegistry() { return worldContext.brainstem().innateReflexes(); }
+    private InhibitoryControl inhibitor() { return worldContext.brainstem().inhibitor(); }
 
     public void onTick(MinecraftServer server) {
         tickCounter++;
@@ -93,13 +89,13 @@ public class BotController {
             stateManager.saveState(bot);
         }
 
-        if (tickCounter % aiPollInterval == 0 && aiClient != null && aiClient.isConfigured()) {
+        if (tickCounter % aiPollInterval == 0 && aiClient() != null && aiClient().isConfigured()) {
             pollAIResults(bot);
         }
 
         // P0: 安全反射 — 永远优先, 每 tick 检查, 0 API
         // P0.5: 前额叶抑制审核 — 否决不适当的安全反射
-        if (reflexRegistry != null && executeSafetyReflex(bot, server)) return;
+        if (reflexRegistry() != null && executeSafetyReflex(bot, server)) return;
 
         // P1: 玩家任务 → 固化反射匹配 → 本地执行, 0 API
         if (activeTask != null && "running".equals(activeTask.getStatus())) {
@@ -143,8 +139,8 @@ public class BotController {
 
         if (trySocialMirror(bot)) return;
 
-        if (reflexRegistry != null) {
-            InnateReflex nonSafety = reflexRegistry.matchWeighted(bot).stream()
+        if (reflexRegistry() != null) {
+            InnateReflex nonSafety = reflexRegistry().matchWeighted(bot).stream()
                     .filter(r -> r.priority() > 0)
                     .findFirst().orElse(null);
             if (nonSafety != null) {
@@ -173,19 +169,19 @@ public class BotController {
             case "collectItem" -> { var r = adapter.collectItem(bot, action.getDouble("speed", 0.15)); executed = r.executed(); success = r.success(); }
             case "sneak" -> { adapter.sneak(bot, true); executed = true; }
             case "invokeLLM" -> {
-                if (pendingChatMessage != null && aiChatHandler != null && aiClient.isConfigured()) {
+                if (pendingChatMessage != null && aiChatHandler() != null && aiClient().isConfigured()) {
                     var state = stateManager.loadState();
                     var task = taskManager.getActiveTask();
                     var mems = memoryManager.getRecentMemories();
-                    aiChatHandler.handleChat(pendingChatMessage, state, task, mems);
+                    aiChatHandler().handleChat(pendingChatMessage, state, task, mems);
                     pendingChatMessage = null;
                     executed = true;
                 }
             }
             default -> LOGGER.warn("[BotController] 未知反射动作: {}", action.type());
         }
-        if (executed && reflexRegistry != null) {
-            reflexRegistry.reinforceOnDispatch(reflex.id(), success);
+        if (executed && reflexRegistry() != null) {
+            reflexRegistry().reinforceOnDispatch(reflex.id(), success);
         }
     }
 
@@ -234,7 +230,7 @@ public class BotController {
     }
 
     private void pollAIResults(ServerPlayerEntity bot) {
-        var chatHandler = this.aiChatHandler;
+        var chatHandler = aiChatHandler();
         if (chatHandler != null && chatHandler.hasPendingResponse()) {
             AIResponse response = chatHandler.pollResponse();
             if (response != null && response.isChat() && !response.getMessage().isEmpty()) {
@@ -290,14 +286,10 @@ public class BotController {
         }
     }
 
-    public void setWorldContext(WorldContext worldContext) {
-        this.worldContext = worldContext;
-    }
-
     private boolean executeSafetyReflex(ServerPlayerEntity bot, MinecraftServer server) {
-        InnateReflex safety = reflexRegistry.highest(bot, 0);
+        InnateReflex safety = reflexRegistry().highest(bot, 0);
         if (safety == null) return false;
-        if (inhibitor != null && inhibitor.shouldVetoSafety(safety, bot, server, worldContext.behaviorStats())) {
+        if (inhibitor() != null && inhibitor().shouldVetoSafety(safety, bot, server, worldContext.behaviorStats())) {
             LOGGER.debug("[BotController] P0.5前额叶否决安全反射: {}", safety.id());
             return false;
         }

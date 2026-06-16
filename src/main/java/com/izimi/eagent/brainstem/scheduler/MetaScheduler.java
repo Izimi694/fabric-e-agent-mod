@@ -1,6 +1,11 @@
 package com.izimi.eagent.brainstem.scheduler;
 
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import com.izimi.eagent.amygdala.ReflexConstants;
+import com.izimi.eagent.amygdala.ReflexIO;
+import com.izimi.eagent.amygdala.learning.CategoryMapper;
+import com.izimi.eagent.amygdala.learning.ObservedSequence;
 import com.izimi.eagent.api.BotContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -24,10 +29,14 @@ import com.izimi.eagent.cortex.prefrontal.CognitiveControl;
 import com.izimi.eagent.EAgent;
 import com.izimi.eagent.hormonal.HormonalSystem;
 import com.izimi.eagent.brainstem.scheduler.SurvivalChallengeMonitor;
+import com.izimi.eagent.util.JsonUtil;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.text.Text;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -51,6 +60,9 @@ public class MetaScheduler {
     // ── Rollback ──
     private static final int MAX_RETRY_COUNT = 3;
     private static final double MIN_ALT_THRESHOLD = 0.3;
+
+    // ── Dormant check ──
+    private static final int DORMANT_CHECK_INTERVAL = 100;
 
     public record DeadEndResult(boolean isDeadEnd, String reason) {}
     public record RollbackStage(int stage, String action) {}
@@ -81,6 +93,7 @@ public class MetaScheduler {
     private final InputDigester inputDigester = new InputDigester();
 
     private boolean pendingTaskFailure = false;
+    private int dormantCheckTick = 0;
 
     public MetaScheduler(MotivationEngine motivationEngine) {
         this.motivationEngine = motivationEngine;
@@ -182,42 +195,44 @@ public class MetaScheduler {
         state.incrementTickSinceLastLLM();
         state.tickNovelEntities();
 
-        // 消费跨 tick 的任务失败升级
+        if (tickPhaseEscalation(worldCtx, state, botCtx, bot)) return;
+        tickPhaseTemplate(state, botCtx, worldCtx, bot);
+        tickPhaseRoutine(botCtx, worldCtx, bot, state, server);
+    }
+
+    private boolean tickPhaseEscalation(WorldContext worldCtx, MetaState state, BotContext botCtx, ServerPlayerEntity bot) {
         if (pendingTaskFailure) {
             pendingTaskFailure = false;
             Map<String, FailureContext> failures = Map.of();
             if (worldCtx != null && worldCtx.brainstem() != null) {
                 var router = worldCtx.brainstem().domainRouter();
-                if (router != null) {
-                    failures = router.getAllFailureContexts();
-                }
+                if (router != null) failures = router.getAllFailureContexts();
             }
             state.setFailureEscalation(failures, "task: unable exhausted");
         }
-
-        // 检查失败升级 → 强制路由到 LLM (TASK_REPLAN)
         if (state.hasFailureEscalation()) {
             LOGGER.warn("[MetaScheduler] 失败升级: {}", state.getFailureEscalationReason());
             String msg = state.consumePendingChat();
             if (msg == null) msg = state.getLastPlayerMessage();
-            if (msg != null) {
-                executeReplan(botCtx, worldCtx, state, bot, msg);
-            }
-            return;
+            if (msg != null) executeReplan(botCtx, worldCtx, state, bot, msg);
+            return true;
         }
+        return false;
+    }
 
-        // 检查模板结果 (异步 LLM)
-        if (state.hasPendingTemplateResult()) {
-            TemplateManager.TemplateType pendingType = state.getPendingTemplateType();
-            String pendingMsg = state.getPendingTemplateMessage();
-            CompletableFuture<JsonObject> future = state.consumePendingTemplateResult();
-            if (future != null && future.isDone()) {
-                processTemplateResult(future, botCtx, worldCtx, bot, state, pendingType, pendingMsg);
-            } else if (future != null) {
-                state.setPendingTemplateResult(future, pendingType, pendingMsg);
-            }
+    private void tickPhaseTemplate(MetaState state, BotContext botCtx, WorldContext worldCtx, ServerPlayerEntity bot) {
+        if (!state.hasPendingTemplateResult()) return;
+        TemplateManager.TemplateType pendingType = state.getPendingTemplateType();
+        String pendingMsg = state.getPendingTemplateMessage();
+        CompletableFuture<JsonObject> future = state.consumePendingTemplateResult();
+        if (future != null && future.isDone()) {
+            processTemplateResult(future, botCtx, worldCtx, bot, state, pendingType, pendingMsg);
+        } else if (future != null) {
+            state.setPendingTemplateResult(future, pendingType, pendingMsg);
         }
+    }
 
+    private void tickPhaseRoutine(BotContext botCtx, WorldContext worldCtx, ServerPlayerEntity bot, MetaState state, MinecraftServer server) {
         DriveState drives = motivationEngine.computeDrives(botCtx, worldCtx, bot);
         Perspective perspective = motivationEngine.select(botCtx, drives);
 
@@ -229,13 +244,8 @@ public class MetaScheduler {
         temporalScaler.update(botCtx.hormonalSystem(), bot, state.getTicksInCurrentLabel(), drives.pressure());
 
         DispatchReflex.DispatchAction action = null;
-        if (botCtx.dispatchReflex() != null) {
-            action = botCtx.dispatchReflex().match(label, flow);
-        }
-
-        if (action == null) {
-            action = fallbackDispatch(label, flow, state);
-        }
+        if (botCtx.dispatchReflex() != null) action = botCtx.dispatchReflex().match(label, flow);
+        if (action == null) action = fallbackDispatch(label, flow, state);
 
         if (isLLMAction(action) && !shouldInvokeLLM(worldCtx, state, label, flow)) {
             LOGGER.debug("[MetaScheduler] LLM gate denied: {} {}, falling back to HABIT", label, flow);
@@ -245,9 +255,7 @@ public class MetaScheduler {
         boolean success = execute(action, botCtx, worldCtx, bot, state, server, perspective);
 
         if (botCtx.dispatchReflex() != null) {
-            if ("llm_gate".equals(action.reason())) {
-                botCtx.dispatchReflex().recordGateEvent(success);
-            }
+            if ("llm_gate".equals(action.reason())) botCtx.dispatchReflex().recordGateEvent(success);
             botCtx.dispatchReflex().recordOutcome(label, flow, action, success);
         }
 
@@ -292,6 +300,15 @@ public class MetaScheduler {
 
     private boolean tryExecuteReflex(BotContext botCtx, WorldContext worldCtx, ServerPlayerEntity bot, MetaState state,
                                       String reflexId, com.izimi.eagent.brainstem.skill.Skill skill) {
+        if (!checkAllGates(botCtx, reflexId, bot)) return false;
+
+        botCtx.conditionedReflex().executeReflex(skill, bot);
+        lastExecutedNodeId = reflexId;
+
+        return !handleDeadEnd(botCtx, worldCtx, bot, reflexId, state);
+    }
+
+    private boolean checkAllGates(BotContext botCtx, String reflexId, ServerPlayerEntity bot) {
         var conditioned = botCtx.conditionedReflex();
         var bayesian = botCtx.bayesianModule();
         var h = botCtx.hormonalSystem();
@@ -303,13 +320,11 @@ public class MetaScheduler {
                 return false;
             }
         }
-
         var precond = conditioned.checkPreconditions(reflexId, bot, h);
         if (!precond.passed()) {
             LOGGER.debug("[MetaScheduler] Gate-Precondition: veto {} → {}", reflexId, precond.reason());
             return false;
         }
-
         if (cognitiveControl != null && h != null) {
             String veto = cognitiveControl.checkReflex(reflexId, h.getNeuroState());
             if (veto != null) {
@@ -317,38 +332,33 @@ public class MetaScheduler {
                 return false;
             }
         }
+        return true;
+    }
 
-        conditioned.executeReflex(skill, bot);
-        lastExecutedNodeId = reflexId;
-
+    private boolean handleDeadEnd(BotContext botCtx, WorldContext worldCtx, ServerPlayerEntity bot, String reflexId, MetaState state) {
         DeadEndResult deadEnd = isDeadEnd(botCtx, null, bot, reflexId);
-        if (deadEnd.isDeadEnd()) {
-            LOGGER.warn("[MetaScheduler] Dead-end: {} → {}", reflexId, deadEnd.reason());
-            if (reflectionCycle != null && conditioned != null) {
-                ReflectionCycle.Result rcResult = reflectionCycle.evaluate(
-                        conditioned, bayesian, landmarkCalibrator, bot);
-                if (rcResult == ReflectionCycle.Result.RESOLVED
-                        || rcResult == ReflectionCycle.Result.CALIBRATED) {
-                    LOGGER.info("[MetaScheduler] 反思周期解决死路: {} ({})", reflexId, rcResult);
-                    return true;
-                }
-            }
-            RollbackStage rb = rollback(botCtx, worldCtx, bot, reflexId, 0, 0);
-            LOGGER.info("[MetaScheduler] Rollback: stage={} action={}", rb.stage(), rb.action());
-            if (rb.stage() >= 5) {
-                // 阶段 5+ → 失败升级，通知 LLM
-                Map<String, FailureContext> failures = Map.of();
-                if (worldCtx != null && worldCtx.brainstem() != null) {
-                    var router = worldCtx.brainstem().domainRouter();
-                    if (router != null) {
-                        failures = router.getAllFailureContexts();
-                    }
-                }
-                state.setFailureEscalation(failures,
-                        "reflex: " + reflexId + " -> " + deadEnd.reason() + " (rollback stage " + rb.stage() + ")");
+        if (!deadEnd.isDeadEnd()) return false;
+
+        LOGGER.warn("[MetaScheduler] Dead-end: {} → {}", reflexId, deadEnd.reason());
+        if (reflectionCycle != null && botCtx.conditionedReflex() != null) {
+            ReflectionCycle.Result rcResult = reflectionCycle.evaluate(
+                    botCtx.conditionedReflex(), botCtx.bayesianModule(), landmarkCalibrator, bot);
+            if (rcResult == ReflectionCycle.Result.RESOLVED || rcResult == ReflectionCycle.Result.CALIBRATED) {
+                LOGGER.info("[MetaScheduler] 反思周期解决死路: {} ({})", reflexId, rcResult);
+                return false;
             }
         }
-
+        RollbackStage rb = rollback(botCtx, worldCtx, bot, reflexId, 0, 0);
+        LOGGER.info("[MetaScheduler] Rollback: stage={} action={}", rb.stage(), rb.action());
+        if (rb.stage() >= 5) {
+            Map<String, FailureContext> failures = Map.of();
+            if (worldCtx != null && worldCtx.brainstem() != null) {
+                var router = worldCtx.brainstem().domainRouter();
+                if (router != null) failures = router.getAllFailureContexts();
+            }
+            state.setFailureEscalation(failures,
+                    "reflex: " + reflexId + " -> " + deadEnd.reason() + " (rollback stage " + rb.stage() + ")");
+        }
         return true;
     }
 
@@ -397,6 +407,7 @@ public class MetaScheduler {
             case "CORTEX_LLM" -> executeCortexLLM(botCtx, worldCtx, state, bot);
             case "IDLE" -> {
                 LowLevelDispatcher.executeIdle(botCtx, bot, temporalScaler);
+                checkDormantArchives(botCtx, bot);
                 yield correlationDetector != null && correlationDetector.tryExplore(bot);
             }
             default -> false;
@@ -617,8 +628,48 @@ public class MetaScheduler {
             case REFLEX_CREATE -> {
                 String reflexId = result.has("reflex_id") ? result.get("reflex_id").getAsString() : "";
                 LOGGER.info("[MetaScheduler] 收到新反射: {}", reflexId);
-                // 反射固化通过 ConditionedReflex.solidifySequence() 完成,
-                // 这里先记录日志, 具体固化由填坑 hook 处理
+
+                var conditioned = botCtx.conditionedReflex();
+                if (conditioned == null) return;
+
+                List<ObservedSequence.Step> steps = new ArrayList<>();
+                if (result.has("steps") && result.get("steps").isJsonArray()) {
+                    for (JsonElement elem : result.get("steps").getAsJsonArray()) {
+                        JsonObject stepObj = elem.getAsJsonObject();
+                        String action = stepObj.has("action") ? stepObj.get("action").getAsString() : "";
+                        String target = stepObj.has("target") ? stepObj.get("target").getAsString() : "";
+                        if (!action.isEmpty()) {
+                            steps.add(new ObservedSequence.Step(action, target));
+                        }
+                    }
+                }
+
+                if (steps.isEmpty()) {
+                    LOGGER.warn("[MetaScheduler] LLM 返回的 REFLEX_CREATE 无有效步骤: {}", result);
+                    if (bot != null) bot.sendMessage(Text.literal("§b[E-Agent] §f学不会，这个技能描述无效..."));
+                    return;
+                }
+
+                String category = CategoryMapper.getCategory(steps.get(0).action(), steps.get(0).target());
+                long now = System.currentTimeMillis();
+                ObservedSequence sequence = new ObservedSequence(
+                    "llm_" + System.currentTimeMillis() / 1000,
+                    1,
+                    0.3,
+                    "LLM_TEMPLATE",
+                    steps.get(0).target(),
+                    new ObservedSequence.Trigger(List.of(), List.of(), "any"),
+                    steps,
+                    new ObservedSequence.ExpectedResult(steps.get(0).action(), steps.get(0).target()),
+                    now,
+                    now
+                );
+
+                conditioned.solidifySequence(sequence, category);
+
+                if (bot != null) {
+                    bot.sendMessage(Text.literal("§b[E-Agent] §f学会了 " + CategoryMapper.getCategoryDisplayName(category) + "，我试试看..."));
+                }
             }
             case TASK_REPLAN -> {
                 String taskId = result.has("task_id") ? result.get("task_id").getAsString() : "replan_" + System.currentTimeMillis();
@@ -720,4 +771,46 @@ public class MetaScheduler {
     }
 
     public TemporalScaler getTemporalScaler() { return temporalScaler; }
+
+    // ── P1: Dormant reflex auto-reactivation ──
+
+    private void checkDormantArchives(BotContext botCtx, ServerPlayerEntity bot) {
+        if (++dormantCheckTick < DORMANT_CHECK_INTERVAL) return;
+        dormantCheckTick = 0;
+
+        var conditioned = botCtx.conditionedReflex();
+        var bayesian = botCtx.bayesianModule();
+        if (conditioned == null || bayesian == null) return;
+
+        Path archivedDir = ReflexIO.archivedDir(botCtx.botId());
+        if (!Files.exists(archivedDir)) return;
+
+        try (var stream = Files.list(archivedDir)) {
+            for (Path path : stream.toList()) {
+                if (!path.toString().endsWith(".json")) continue;
+                String fileName = path.getFileName().toString();
+                String reflexId = fileName.substring(0, fileName.length() - 5);
+
+                Map<String, Object> data = JsonUtil.readMapFromFileSafe(path);
+                if (data == null) continue;
+
+                if (!ReflexConstants.STATUS_DORMANT.equals(data.get(ReflexConstants.KEY_STATUS))) continue;
+
+                var precond = conditioned.checkPreconditions(reflexId, bot, botCtx.hormonalSystem());
+                if (!precond.passed()) continue;
+
+                var features = conditioned.extractContextFeatures(bot);
+                double posterior = bayesian.predictSuccess(reflexId, features);
+                if (posterior > 0.5) {
+                    String displayName = (String) data.getOrDefault("displayName", reflexId);
+                    conditioned.tryReactivate(reflexId);
+                    if (bot != null) {
+                        bot.sendMessage(Text.literal("§b[E-Agent] §f想起了 " + displayName + " 怎么做，再试试..."));
+                    }
+                }
+            }
+        } catch (java.io.IOException e) {
+            LOGGER.debug("[MetaScheduler] 检查归档反射: {}", e.getMessage());
+        }
+    }
 }

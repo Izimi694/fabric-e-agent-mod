@@ -158,18 +158,7 @@ public class ReflexPackManager {
 
     @SuppressWarnings("unchecked")
     public boolean importPack(String packName, boolean reset) {
-        Path packsDir = FileUtil.getReflexPacksDir();
-        Path packFile = packsDir.resolve(packName + ".json");
-        if (!Files.exists(packFile)) {
-            try (var stream = Files.walk(packsDir, 1)) {
-                packFile = stream
-                        .filter(p -> p.toString().endsWith(".json"))
-                        .filter(p -> p.getFileName().toString().replace(".json", "").equals(packName))
-                        .findFirst().orElse(packFile);
-            } catch (IOException e) {
-                LOGGER.warn("[ReflexPack] 扫描子目录失败: {}", e.getMessage());
-            }
-        }
+        Path packFile = resolvePackFile(packName);
         Path conditionedDir = FileUtil.getBotConditionedDir(botId);
 
         Map<String, Object> pack = JsonUtil.readMapFromFileSafe(packFile);
@@ -178,21 +167,26 @@ public class ReflexPackManager {
             return false;
         }
 
-        Map<String, Object> incomingReflexes = (Map<String, Object>) pack.get("reflexes");
-        if (incomingReflexes == null || incomingReflexes.isEmpty()) {
+        Object rawReflexes = pack.get("reflexes");
+        if (!(rawReflexes instanceof Map)) {
             LOGGER.warn("[ReflexPack] 包内没有反射: {}", packName);
             return false;
         }
+        Map<?, ?> incomingReflexes = (Map<?, ?>) rawReflexes;
 
         try {
             Files.createDirectories(conditionedDir);
-
             int imported = 0;
             int skipped = 0;
 
             for (var entry : incomingReflexes.entrySet()) {
-                String reflexId = entry.getKey();
-                Map<String, Object> incomingData = (Map<String, Object>) entry.getValue();
+                String reflexId = (String) entry.getKey();
+                Object rawData = entry.getValue();
+                if (!(rawData instanceof Map)) {
+                    skipped++;
+                    continue;
+                }
+                Map<String, Object> incomingData = (Map<String, Object>) rawData;
 
                 Path reflexFile = conditionedDir.resolve(reflexId + ".json");
 
@@ -213,20 +207,7 @@ public class ReflexPackManager {
                 imported++;
             }
 
-            if (pack.containsKey("bayesian_prior")) {
-                Object rawPrior = pack.get("bayesian_prior");
-                if (rawPrior instanceof Map) {
-                    for (var entry : ((Map<String, Object>) rawPrior).entrySet()) {
-                        BayesianModule.setPrior(entry.getKey(), ((Number) entry.getValue()).doubleValue());
-                    }
-                    BayesianModule.saveSharedPrior();
-                }
-            }
-
-            if (pack.containsKey("memory_graph") && memoryGraph != null) {
-                Map<String, Object> skeleton = (Map<String, Object>) pack.get("memory_graph");
-                memoryGraph.importSkeleton(skeleton);
-            }
+            applyPriorAndGraph(pack);
 
             LOGGER.info("[ReflexPack] 导入完成: {} ({} 个, 跳过 {} 个, reset={})",
                     packName, imported, skipped, reset);
@@ -234,6 +215,40 @@ public class ReflexPackManager {
         } catch (IOException e) {
             LOGGER.error("[ReflexPack] 导入失败: {}", e.getMessage());
             return false;
+        }
+    }
+
+    private Path resolvePackFile(String packName) {
+        Path packsDir = FileUtil.getReflexPacksDir();
+        Path packFile = packsDir.resolve(packName + ".json");
+        if (Files.exists(packFile)) return packFile;
+        try (var stream = Files.walk(packsDir, 1)) {
+            return stream
+                    .filter(p -> p.toString().endsWith(".json"))
+                    .filter(p -> p.getFileName().toString().replace(".json", "").equals(packName))
+                    .findFirst().orElse(packFile);
+        } catch (IOException e) {
+            LOGGER.warn("[ReflexPack] 扫描子目录失败: {}", e.getMessage());
+            return packFile;
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private void applyPriorAndGraph(Map<String, Object> pack) {
+        if (pack.containsKey("bayesian_prior")) {
+            Object rawPrior = pack.get("bayesian_prior");
+            if (rawPrior instanceof Map) {
+                for (var entry : ((Map<String, Object>) rawPrior).entrySet()) {
+                    BayesianModule.setPrior(entry.getKey(), ((Number) entry.getValue()).doubleValue());
+                }
+                BayesianModule.saveSharedPrior();
+            }
+        }
+        if (pack.containsKey("memory_graph") && memoryGraph != null) {
+            Object rawSkeleton = pack.get("memory_graph");
+            if (rawSkeleton instanceof Map) {
+                memoryGraph.importSkeleton((Map<String, Object>) rawSkeleton);
+            }
         }
     }
 

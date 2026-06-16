@@ -27,28 +27,30 @@ public class CraftSkill extends Skill {
     @Override
     public SkillResult execute(ServerWorld world, ServerPlayerEntity bot, Map<String, Object> context) {
         var recipes = world.getRecipeManager().listAllOfType(RecipeType.CRAFTING);
-        if (recipes.isEmpty()) {
-            return SkillResult.partial(0.1, "暂无可用配方");
-        }
+        if (recipes.isEmpty()) return SkillResult.partial(0.1, "暂无可用配方");
 
+        return findFirstCraftable(bot, recipes)
+                .map(r -> SkillResult.partial(0.4, "找到可合成配方"))
+                .orElse(SkillResult.partial(0.2, "暂无可合成物品"));
+    }
+
+    private java.util.Optional<net.minecraft.recipe.CraftingRecipe> findFirstCraftable(
+            ServerPlayerEntity bot, java.util.List<? extends RecipeEntry<?>> recipes) {
         var inventory = bot.getInventory();
         for (RecipeEntry<?> entry : recipes) {
             Recipe<?> recipe = entry.value();
-            if (recipe.getType() == RecipeType.CRAFTING) {
+            if (recipe.getType() != RecipeType.CRAFTING) continue;
+            if (recipe instanceof net.minecraft.recipe.CraftingRecipe craftingRecipe) {
                 try {
-                    if (recipe instanceof net.minecraft.recipe.CraftingRecipe craftingRecipe) {
-                        boolean canCraft = canCraftRecipe(craftingRecipe, inventory);
-                        if (canCraft) {
-                            return SkillResult.partial(0.4, "找到可合成配方");
-                        }
+                    if (canCraftRecipe(craftingRecipe, inventory)) {
+                        return java.util.Optional.of(craftingRecipe);
                     }
                 } catch (Exception e) {
                     LOGGER.debug("检查合成配方时出错: {}", e.getMessage());
                 }
             }
         }
-
-        return SkillResult.partial(0.2, "暂无可合成物品");
+        return java.util.Optional.empty();
     }
 
     private boolean canCraftRecipe(net.minecraft.recipe.CraftingRecipe recipe,

@@ -249,30 +249,9 @@ public class ConditionedReflex {
         record Candidate(Skill skill, double score, int atomIndex) {}
         List<Candidate> candidates = new ArrayList<>();
         List<BayesianFeature> contextFeatures = extractContextFeatures(bot);
-
-        double timeScale = 1.0;
-        if (botInstance != null && botInstance.getBotContext() != null) {
-            var h = botInstance.getBotContext().hormonalSystem();
-            if (h != null) timeScale = TemporalScaler.computeTimeScale(h);
-        }
-
-        // ── 全局风险/资源因子 (per-candidate 部分在循环内计算) ──
-        double healthRatio = Math.max(0, bot.getHealth() / bot.getMaxHealth());
+        double timeScale = computeTimeScale();
         double hungerRatio = bot.getHungerManager().getFoodLevel() / 20.0;
-        boolean isNight = !bot.getWorld().isDay();
-        int consecFails = consecutiveFailures.get();
-        double dangerLevel = (1.0 - healthRatio) * 0.5;
-        if (botInstance != null && botInstance.getBotContext() != null) {
-            var h = botInstance.getBotContext().hormonalSystem();
-            if (h != null) {
-                dangerLevel = Math.max(dangerLevel, h.getNE() * 0.3);
-                if (h.getNE() < 0.5) dangerLevel += h.getSerotonin() * 0.15;
-            }
-        }
-        if (isNight) dangerLevel += 0.1;
-        dangerLevel += Math.min(0.15, consecFails * 0.04);
-        dangerLevel = Math.max(0, Math.min(1, dangerLevel));
-
+        double dangerLevel = computeDangerLevel(bot);
         boolean legacy = botInstance != null && botInstance.isLegacyScoring();
 
         for (Map.Entry<String, Skill> entry : skillManager.getSkills().entrySet()) {
@@ -287,9 +266,7 @@ public class ConditionedReflex {
             if (STATUS_DEPRECATED.equals(status) || STATUS_DORMANT.equals(status)) continue;
 
             double reflexWeight = effectiveWeight(data);
-
             double decayFactor = computeDecayFactor(data);
-
             double bayesianMultiplier = bayesianModule != null
                     ? Math.max(0.1, bayesianModule.predictSuccess(skill.getSkillId(), contextFeatures))
                     : 1.0;
@@ -302,28 +279,13 @@ public class ConditionedReflex {
                     Map<String, Object> atom = atoms.get(i);
                     String atomStatus = (String) atom.getOrDefault(KEY_STATUS, STATUS_HEALTHY);
                     if (STATUS_DEPRECATED.equals(atomStatus) || STATUS_IMPOSSIBLE.equals(atomStatus)) continue;
-
                     String atomTarget = (String) atom.get("atomTarget");
                     if (atomTarget == null) continue;
-
                     double atomProficiency = ((Number) atom.getOrDefault(KEY_PROFICIENCY, 0.0)).doubleValue();
                     if (isAtomTargetNearby(bot, (String) atom.get("action"), atomTarget)) {
-                        double score;
-                        if (legacy) {
-                            score = reflexWeight * atomProficiency * bayesianMultiplier * decayFactor;
-                        } else {
-                            double estimatedSec = ReflexSatisfaction.estimateSeconds(atoms.size());
-                            double riskScore = clampScore(1.0 - dangerLevel * (1.0 - bayesianMultiplier));
-                            double resourceScore = clampScore(0.3 + hungerRatio * 0.3 + bayesianMultiplier * 0.4);
-                            score = domain != null
-                                    ? ReflexSatisfaction.computeForDomainWithScale(estimatedSec, timeScale,
-                                            reflexWeight, atomProficiency, bayesianMultiplier, decayFactor,
-                                            riskScore, resourceScore, domain)
-                                    : ReflexSatisfaction.computeWithScale(
-                                            estimatedSec, timeScale, reflexWeight, atomProficiency,
-                                            bayesianMultiplier, decayFactor,
-                                            riskScore, resourceScore);
-                        }
+                        double memoryBoost = computeMemoryBoost(skill.getSkillId());
+                        double score = scoreReflex(reflexWeight, atomProficiency, bayesianMultiplier, memoryBoost,
+                                decayFactor, timeScale, dangerLevel, hungerRatio, legacy, domain, atoms.size());
                         candidates.add(new Candidate(skill, score, i));
                     }
                 }
@@ -331,29 +293,15 @@ public class ConditionedReflex {
                 String category = (String) data.get("category");
                 if (category != null && isTargetNearby(bot, category, data)) {
                     double compoundProficiency = ((Number) data.getOrDefault(KEY_PROFICIENCY, 0.0)).doubleValue();
-                    double score;
-                    if (legacy) {
-                        score = reflexWeight * compoundProficiency * bayesianMultiplier * decayFactor;
-                    } else {
-                        double estimatedSec = ReflexSatisfaction.estimateSeconds(1);
-                        double riskScore = clampScore(1.0 - dangerLevel * (1.0 - bayesianMultiplier));
-                        double resourceScore = clampScore(0.3 + hungerRatio * 0.3 + bayesianMultiplier * 0.4);
-                        score = domain != null
-                                ? ReflexSatisfaction.computeForDomainWithScale(estimatedSec, timeScale,
-                                        reflexWeight, compoundProficiency, bayesianMultiplier, decayFactor,
-                                        riskScore, resourceScore, domain)
-                                : ReflexSatisfaction.computeWithScale(
-                                        estimatedSec, timeScale, reflexWeight, compoundProficiency,
-                                        bayesianMultiplier, decayFactor,
-                                        riskScore, resourceScore);
-                    }
+                    double memoryBoost = computeMemoryBoost(skill.getSkillId());
+                    double score = scoreReflex(reflexWeight, compoundProficiency, bayesianMultiplier, memoryBoost,
+                            decayFactor, timeScale, dangerLevel, hungerRatio, legacy, domain, 1);
                     candidates.add(new Candidate(skill, score, -1));
                 }
             }
         }
 
         if (candidates.isEmpty()) return null;
-
         candidates.sort((a, b) -> Double.compare(b.score(), a.score()));
         Candidate best = candidates.get(0);
 
@@ -368,8 +316,61 @@ public class ConditionedReflex {
                 JsonUtil.writeToFileSafeAtomic(reflexPath, data);
             }
         }
-
         return best.skill();
+    }
+
+    private double computeTimeScale() {
+        if (botInstance == null || botInstance.getBotContext() == null) return 1.0;
+        var h = botInstance.getBotContext().hormonalSystem();
+        return h != null ? TemporalScaler.computeTimeScale(h) : 1.0;
+    }
+
+    private double computeDangerLevel(ServerPlayerEntity bot) {
+        double healthRatio = Math.max(0, bot.getHealth() / bot.getMaxHealth());
+        boolean isNight = !bot.getWorld().isDay();
+        int consecFails = consecutiveFailures.get();
+        double dangerLevel = (1.0 - healthRatio) * 0.5;
+        if (botInstance != null && botInstance.getBotContext() != null) {
+            var h = botInstance.getBotContext().hormonalSystem();
+            if (h != null) {
+                dangerLevel = Math.max(dangerLevel, h.getNE() * 0.3);
+                if (h.getNE() < 0.5) dangerLevel += h.getSerotonin() * 0.15;
+            }
+        }
+        if (isNight) dangerLevel += 0.1;
+        dangerLevel += Math.min(0.15, consecFails * 0.04);
+        return Math.max(0, Math.min(1, dangerLevel));
+    }
+
+    private double scoreReflex(double reflexWeight, double proficiency, double bayesianMultiplier,
+                               double memoryBoost, double decayFactor, double timeScale, double dangerLevel,
+                               double hungerRatio, boolean legacy, Perspective domain, int atomCount) {
+        if (legacy) return reflexWeight * proficiency * bayesianMultiplier * decayFactor * memoryBoost;
+        double estimatedSec = ReflexSatisfaction.estimateSeconds(atomCount);
+        double riskScore = clampScore(1.0 - dangerLevel * (1.0 - bayesianMultiplier));
+        double resourceScore = clampScore(0.3 + hungerRatio * 0.3 + bayesianMultiplier * 0.4);
+        double base = domain != null
+                ? ReflexSatisfaction.computeForDomainWithScale(estimatedSec, timeScale,
+                        reflexWeight, proficiency, bayesianMultiplier, decayFactor,
+                        riskScore, resourceScore, domain)
+                : ReflexSatisfaction.computeWithScale(estimatedSec, timeScale,
+                        reflexWeight, proficiency, bayesianMultiplier, decayFactor,
+                        riskScore, resourceScore);
+        return base * memoryBoost;
+    }
+
+    private double computeMemoryBoost(String reflexId) {
+        if (botInstance == null) return 1.0;
+        var ctx = botInstance.getBotContext();
+        if (ctx == null) return 1.0;
+        MemoryManager mem = ctx.memoryManager();
+        if (mem == null) return 1.0;
+        MemoryGraph mg = mem.getMemoryGraph();
+        if (mg == null) return 1.0;
+
+        List<String> nodeIds = mg.findNodeIdsByReflex(reflexId);
+        if (nodeIds == null || nodeIds.isEmpty()) return 1.0;
+        return 1.0 + Math.min(0.3, nodeIds.size() * 0.03);
     }
 
     private boolean isTargetNearby(ServerPlayerEntity bot, String category, Map<String, Object> reflexData) {
@@ -584,74 +585,64 @@ public class ConditionedReflex {
         List<Map<String, Object>> atoms = (List<Map<String, Object>>) data.get(KEY_ATOMS);
         int atomIdx = ((Number) data.getOrDefault("currentAtomIndex", 0)).intValue();
 
-        Skill.SkillResult result;
+        Skill.SkillResult result = executeAtomAction(reflex, skillId, data, atoms, atomIdx, bot);
+        if (result == null) return;
 
-        if (atoms != null && atomIdx >= 0 && atomIdx < atoms.size()) {
-            Map<String, Object> atom = atoms.get(atomIdx);
-            String atomStatus = (String) atom.getOrDefault(KEY_STATUS, STATUS_HEALTHY);
-
-            if (STATUS_IMPOSSIBLE.equals(atomStatus)) {
-                LOGGER.debug("[ConditionedReflex] 原子已标记不可能，跳过: {} [{}]",
-                        skillId, atom.get("action"));
-                return;
-            }
-
-            String action = (String) atom.get("action");
-            String target = (String) atom.get("target");
-            ActionResult adapterResult = dispatchAction(action, target, atom, bot);
-
-            if (adapterResult != null) {
-                result = new Skill.SkillResult(
-                        adapterResult.executed(), adapterResult.success(),
-                        adapterResult.effectiveness(), adapterResult.message());
-            } else {
-                Skill innate = skillManager.getSkill(action);
-                if (innate != null) {
-                    Map<String, Object> context = new HashMap<>();
-                    result = innate.execute(bot.getServerWorld(), bot, context);
-                } else {
-                    result = ((ConditionedSkill) reflex).execute(bot.getServerWorld(), bot, new HashMap<>());
-                }
-            }
-
-            LOGGER.debug("[ConditionedReflex] 原子{}/{}: {} {} → executed={} success={}",
-                    atomIdx + 1, atoms.size(), atom.get("action"), atom.get("target"),
-                    result.executed(), result.success());
-
-        } else {
-            result = ((ConditionedSkill) reflex).execute(bot.getServerWorld(), bot, new HashMap<>());
-        }
-
-        if (result != null && result.executed()) {
+        if (result.executed()) {
             lastExecutedReflexId = skillId;
             double delta = result.success() ? SELF_REINFORCE_SUCCESS : SELF_REINFORCE_FAIL;
             reinforce(data, delta);
         }
 
-        if (result == null) return;
+        recordReflexOutcome(skillId, bot, result, atoms, atomIdx);
+        updateLastAccessed(skillId);
+    }
 
-        updateReflexStats(skillId, result.success(), result.effectiveness());
-
-        if (bayesianModule != null) {
-            List<BayesianFeature> features = extractContextFeatures(bot);
-            bayesianModule.update(skillId, features, result.success());
+    private Skill.SkillResult executeAtomAction(Skill reflex, String skillId, Map<String, Object> data,
+                                                  List<Map<String, Object>> atoms, int atomIdx, ServerPlayerEntity bot) {
+        if (atoms != null && atomIdx >= 0 && atomIdx < atoms.size()) {
+            Map<String, Object> atom = atoms.get(atomIdx);
+            if (STATUS_IMPOSSIBLE.equals(atom.getOrDefault(KEY_STATUS, STATUS_HEALTHY))) {
+                LOGGER.debug("[ConditionedReflex] 原子已标记不可能，跳过: {} [{}]", skillId, atom.get("action"));
+                return null;
+            }
+            ActionResult adapterResult = dispatchAction((String) atom.get("action"), (String) atom.get("target"), atom, bot);
+            Skill.SkillResult result;
+            if (adapterResult != null) {
+                result = new Skill.SkillResult(adapterResult.executed(), adapterResult.success(),
+                        adapterResult.effectiveness(), adapterResult.message());
+            } else {
+                Skill innate = skillManager.getSkill((String) atom.get("action"));
+                if (innate != null) {
+                    result = innate.execute(bot.getServerWorld(), bot, new HashMap<>());
+                } else {
+                    result = ((ConditionedSkill) reflex).execute(bot.getServerWorld(), bot, new HashMap<>());
+                }
+            }
+            LOGGER.debug("[ConditionedReflex] 原子{}/{}: {} {} → executed={} success={}",
+                    atomIdx + 1, atoms.size(), atom.get("action"), atom.get("target"),
+                    result.executed(), result.success());
+            return result;
         }
+        return ((ConditionedSkill) reflex).execute(bot.getServerWorld(), bot, new HashMap<>());
+    }
 
+    private void recordReflexOutcome(String skillId, ServerPlayerEntity bot, Skill.SkillResult result,
+                                      List<Map<String, Object>> atoms, int atomIdx) {
+        updateReflexStats(skillId, result.success(), result.effectiveness());
+        if (bayesianModule != null) {
+            bayesianModule.update(skillId, extractContextFeatures(bot), result.success());
+        }
         reinforceMemoryGraph(skillId, result.success());
-
         if (result.success()) {
             LOGGER.info("[ConditionedReflex] 成功: {}", skillId);
             if (botInstance != null) {
                 String category = getReflexCategoryPublic(skillId);
-                if (category != null) {
-                    botInstance.getBotContext().world().botManager().notifyReflexSuccess(bot, category);
-                }
+                if (category != null) botInstance.getBotContext().world().botManager().notifyReflexSuccess(bot, category);
             }
         } else {
             handleReflexFailure(skillId, bot, atoms, atomIdx);
         }
-
-        updateLastAccessed(skillId);
     }
 
     public enum ReflexHealth { HEALTHY, WATCHING, DORMANT }
@@ -736,62 +727,58 @@ public class ConditionedReflex {
     }
 
     private void handleReflexFailure(String skillId, ServerPlayerEntity bot,
-                                     List<Map<String, Object>> atoms, int atomIdx) {
+                                      List<Map<String, Object>> atoms, int atomIdx) {
         Path path = reflexPath(skillId);
         Map<String, Object> data = JsonUtil.readMapFromFileSafe(path);
         if (data == null) return;
-
         if (STATUS_TRIAL.equals(data.getOrDefault(KEY_STATUS, STATUS_HEALTHY))) return;
-
-        String currentStatus = (String) data.getOrDefault(KEY_STATUS, STATUS_HEALTHY);
-
         if (bayesianModule == null) return;
 
         List<BayesianFeature> features = bot != null ? extractContextFeatures(bot) : Collections.emptyList();
         double posterior = bayesianModule.predictSuccess(skillId, features);
         boolean converged = bayesianModule.isConverged(skillId);
 
-        if (!converged) {
-            LOGGER.debug("[ConditionedReflex] 样本不足(未收敛)，重试: {}", skillId);
-            return;
-        }
+        classifyAndApplyFailure(skillId, bot, atoms, atomIdx, data, path, posterior, converged);
+    }
 
-        if (posterior > 0.4) {
-            LOGGER.debug("[ConditionedReflex] 概率性失败: {} (posterior={:.2f})", skillId, posterior);
-            return;
-        }
+    private enum FailureSeverity { RETRY, PROBABILISTIC, WATCH, IMPOSSIBLE_ATOM, DORMANT }
 
-        if (posterior > 0.2 && !STATUS_WATCHING.equals(currentStatus)) {
-            data.put(KEY_STATUS, STATUS_WATCHING);
-            JsonUtil.writeToFileSafeAtomic(path, data);
-            LOGGER.warn("[ConditionedReflex] 标记观察: {} (posterior={:.2f})", skillId, posterior);
-            return;
-        }
+    private void classifyAndApplyFailure(String skillId, ServerPlayerEntity bot,
+                                          List<Map<String, Object>> atoms, int atomIdx,
+                                          Map<String, Object> data, Path path,
+                                          double posterior, boolean converged) {
+        String currentStatus = (String) data.getOrDefault(KEY_STATUS, STATUS_HEALTHY);
+        FailureSeverity severity;
+        if (!converged) severity = FailureSeverity.RETRY;
+        else if (posterior > 0.4) severity = FailureSeverity.PROBABILISTIC;
+        else if (posterior > 0.2) severity = !STATUS_WATCHING.equals(currentStatus) ? FailureSeverity.WATCH : FailureSeverity.RETRY;
+        else if (atoms != null && atomIdx >= 0 && atomIdx < atoms.size()) severity = FailureSeverity.IMPOSSIBLE_ATOM;
+        else severity = FailureSeverity.DORMANT;
 
-        if (posterior <= 0.2) {
-            if (atoms != null && atomIdx >= 0 && atomIdx < atoms.size()) {
+        switch (severity) {
+            case RETRY -> LOGGER.debug("[ConditionedReflex] 样本不足(未收敛)，重试: {}", skillId);
+            case PROBABILISTIC -> LOGGER.debug("[ConditionedReflex] 概率性失败: {} (posterior={:.2f})", skillId, posterior);
+            case WATCH -> {
+                data.put(KEY_STATUS, STATUS_WATCHING);
+                JsonUtil.writeToFileSafeAtomic(path, data);
+                LOGGER.warn("[ConditionedReflex] 标记观察: {} (posterior={:.2f})", skillId, posterior);
+            }
+            case IMPOSSIBLE_ATOM -> {
                 Map<String, Object> atom = atoms.get(atomIdx);
                 String aTarget = (String) atom.getOrDefault("target", atom.get("action"));
                 atom.put(KEY_STATUS, STATUS_IMPOSSIBLE);
                 data.put(KEY_ATOMS, atoms);
                 JsonUtil.writeToFileSafeAtomic(path, data);
-                LOGGER.warn("[ConditionedReflex] 原子永久跳过: {} [{}] (posterior={:.2f})",
-                        skillId, aTarget, posterior);
-                if (bot != null) {
-                    bot.sendMessage(Text.literal("§c[E-Agent] §7" + aTarget +
-                            " 这个我做不了，跳过"));
-                }
-                return;
+                LOGGER.warn("[ConditionedReflex] 原子永久跳过: {} [{}] (posterior={:.2f})", skillId, aTarget, posterior);
+                if (bot != null) bot.sendMessage(Text.literal("§c[E-Agent] §7" + aTarget + " 这个我做不了，跳过"));
             }
-
-            if (!STATUS_DORMANT.equals(currentStatus)) {
-                data.put(KEY_STATUS, STATUS_DORMANT);
-                JsonUtil.writeToFileSafeAtomic(path, data);
-                moveToArchived(skillId, data);
-                LOGGER.warn("[ConditionedReflex] 标记休眠并归档: {} (posterior={:.2f})",
-                        skillId, posterior);
-                if (bot != null) {
-                    bot.sendMessage(Text.literal("§c[E-Agent] §7这个" +
+            case DORMANT -> {
+                if (!STATUS_DORMANT.equals(currentStatus)) {
+                    data.put(KEY_STATUS, STATUS_DORMANT);
+                    JsonUtil.writeToFileSafeAtomic(path, data);
+                    moveToArchived(skillId, data);
+                    LOGGER.warn("[ConditionedReflex] 标记休眠并归档: {} (posterior={:.2f})", skillId, posterior);
+                    if (bot != null) bot.sendMessage(Text.literal("§c[E-Agent] §7这个" +
                             data.getOrDefault("displayName", skillId) + "好像不太对，我先放一放..."));
                 }
             }

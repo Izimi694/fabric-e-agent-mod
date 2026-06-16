@@ -64,48 +64,31 @@ public class KnowledgeBase {
         return Collections.emptyMap();
     }
 
-    public Optional<Map<String, Object>> getRecipe(String itemId) {
+    @SuppressWarnings("unchecked")
+    private <T> Optional<T> getFromPlaystyleOrGlobal(String section, String key, Map<String, T> globalMap) {
         Map<String, Object> pk = activePlaystyleKnowledge();
-        if (!pk.isEmpty() && pk.containsKey("recipes")) {
-            @SuppressWarnings("unchecked")
-            Map<String, Object> pr = (Map<String, Object>) pk.get("recipes");
-            if (pr != null && pr.containsKey(itemId))
-                return Optional.ofNullable((Map<String, Object>) pr.get(itemId));
+        if (!pk.isEmpty() && pk.containsKey(section)) {
+            Map<String, T> psMap = (Map<String, T>) pk.get(section);
+            if (psMap != null && psMap.containsKey(key))
+                return Optional.ofNullable(psMap.get(key));
         }
-        return Optional.ofNullable(recipes.get(itemId));
+        return Optional.ofNullable(globalMap.get(key));
+    }
+
+    public Optional<Map<String, Object>> getRecipe(String itemId) {
+        return getFromPlaystyleOrGlobal("recipes", itemId, recipes);
     }
 
     public Optional<Map<String, Object>> getEntity(String name) {
-        Map<String, Object> pk = activePlaystyleKnowledge();
-        if (!pk.isEmpty() && pk.containsKey("entities")) {
-            @SuppressWarnings("unchecked")
-            Map<String, Object> pe = (Map<String, Object>) pk.get("entities");
-            if (pe != null && pe.containsKey(name))
-                return Optional.ofNullable((Map<String, Object>) pe.get(name));
-        }
-        return Optional.ofNullable(entities.get(name));
+        return getFromPlaystyleOrGlobal("entities", name, entities);
     }
 
     public Optional<List<String>> getItemUses(String itemId) {
-        Map<String, Object> pk = activePlaystyleKnowledge();
-        if (!pk.isEmpty() && pk.containsKey("item_uses")) {
-            @SuppressWarnings("unchecked")
-            Map<String, List<String>> pu = (Map<String, List<String>>) pk.get("item_uses");
-            if (pu != null && pu.containsKey(itemId))
-                return Optional.ofNullable(pu.get(itemId));
-        }
-        return Optional.ofNullable(itemUses.get(itemId));
+        return getFromPlaystyleOrGlobal("item_uses", itemId, itemUses);
     }
 
     public Optional<String> getTool(String blockId) {
-        Map<String, Object> pk = activePlaystyleKnowledge();
-        if (!pk.isEmpty() && pk.containsKey("tool_map")) {
-            @SuppressWarnings("unchecked")
-            Map<String, String> pt = (Map<String, String>) pk.get("tool_map");
-            if (pt != null && pt.containsKey(blockId))
-                return Optional.ofNullable(pt.get(blockId));
-        }
-        return Optional.ofNullable(toolMap.get(blockId));
+        return getFromPlaystyleOrGlobal("tool_map", blockId, toolMap);
     }
 
     public Optional<Template> matchTemplate(String input) {
@@ -141,7 +124,6 @@ public class KnowledgeBase {
         Map<String, Map<String, Object>> recipes = new LinkedHashMap<>();
         Map<String, List<String>> itemUses = new LinkedHashMap<>();
         Map<String, Map<String, Object>> entities = new LinkedHashMap<>();
-        Map<String, Template> templates = new LinkedHashMap<>();
         Map<String, String> toolMap = new LinkedHashMap<>();
 
         if (data.containsKey("recipes")) {
@@ -158,29 +140,35 @@ public class KnowledgeBase {
             Map<String, String> raw = (Map<String, String>) data.get("tool_map");
             toolMap.putAll(raw);
         }
-        if (data.containsKey("templates")) {
-            Map<String, Map<String, Object>> raw = (Map<String, Map<String, Object>>) data.get("templates");
-            for (var e : raw.entrySet()) {
-                String name = e.getKey();
-                Map<String, Object> tm = e.getValue();
-                String pattern = (String) tm.get("pattern");
-                List<Map<String, Object>> stepsRaw = (List<Map<String, Object>>) tm.get("steps");
-                List<TemplateStep> steps = new ArrayList<>();
-                if (stepsRaw != null) {
-                    for (Map<String, Object> sm : stepsRaw) {
-                        steps.add(new TemplateStep(
-                                (String) sm.get("skillId"),
-                                (String) sm.get("action"),
-                                (String) sm.getOrDefault("target", ""),
-                                sm.containsKey("amount") ? ((Number) sm.get("amount")).intValue() : 1
-                        ));
-                    }
-                }
-                templates.put(name, new Template(name, Pattern.compile(pattern), steps));
-            }
-        }
+        Map<String, Template> templates = parseTemplates(data);
 
         return new KnowledgeBase(recipes, entities, itemUses, templates, toolMap);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Template> parseTemplates(Map<String, Object> data) {
+        Map<String, Template> templates = new LinkedHashMap<>();
+        if (!data.containsKey("templates")) return templates;
+        Map<String, Map<String, Object>> raw = (Map<String, Map<String, Object>>) data.get("templates");
+        for (var e : raw.entrySet()) {
+            String name = e.getKey();
+            Map<String, Object> tm = e.getValue();
+            String pattern = (String) tm.get("pattern");
+            List<Map<String, Object>> stepsRaw = (List<Map<String, Object>>) tm.get("steps");
+            List<TemplateStep> steps = new ArrayList<>();
+            if (stepsRaw != null) {
+                for (Map<String, Object> sm : stepsRaw) {
+                    steps.add(new TemplateStep(
+                            (String) sm.get("skillId"),
+                            (String) sm.get("action"),
+                            (String) sm.getOrDefault("target", ""),
+                            sm.containsKey("amount") ? ((Number) sm.get("amount")).intValue() : 1
+                    ));
+                }
+            }
+            templates.put(name, new Template(name, Pattern.compile(pattern), steps));
+        }
+        return templates;
     }
 
     public List<String> allKeys() {

@@ -227,10 +227,50 @@ Phase Persona Extension (角色系统扩展):
 Phase Cleanup (死代码清理):
   ├── CL.1 — 移除 ~30 个未使用 import/field/method/local
   ├── CL.2 — 移除 3 个不必要的 @SuppressWarnings("unchecked")
-  └── CL.3 — 移除 MemoryQuery 字段/引用/EAgent/LinkedHashSet/EXPLORE_THRESHOLD 等
+   └── CL.3 — 移除 MemoryQuery 字段/引用/EAgent/LinkedHashSet/EXPLORE_THRESHOLD 等
 ```
 
----
+### 本轮新增 (2026-06-16)
+
+**Phase RF (重构 — 降低复杂度 & 错误处理)**
+
+```
+Phase RF (重构 — 降低复杂度 & 错误处理):
+  ├── RF.0 — CraftSkill: 提取 findFirstCraftable(), 嵌套 5→2
+  ├── RF.1 — KnowledgeBase: 提取泛型 getFromPlaystyleOrGlobal(), 4 重复模式消除
+  ├── RF.1b — KnowledgeBase: fromMap 提取 parseTemplates(), 降低 CogC 18→10
+  ├── RF.2 — BotController: 构造函数 12→8 参数, 加入 WorldContext 替换 4 个分离字段
+  ├── RF.3 — MemoryGraph: 统一两个 traverse BFS, 提取私有 traverseBFS()
+  ├── RF.4 — TaskExecutor: executeTask 拆为 7 方法 (checkTimeout/handleNoSubTask/executeOneSubTask/handleSuccess/handleAccepted/handleFailure)
+  ├── RF.5 — ReflexPackManager: importPack 提取 resolvePackFile() + applyPriorAndGraph(); instanceof 检查替代 3 处 raw cast
+  ├── RF.6 — MetaScheduler: tick 拆三阶段 (tickPhaseEscalation/tickPhaseTemplate/tickPhaseRoutine); tryExecuteReflex 拆 checkAllGates + handleDeadEnd
+  ├── RF.7 — MinecraftActionAdapter: craft 拆 5 方法 (findCraftingRecipe/openCraftingInterface/placeItemsInGrid/collectCraftResult/cleanupCraft)
+  ├── RF.8 — ConditionedReflex: scanAndTrigger 拆 computeTimeScale + computeDangerLevel + scoreReflex; executeReflex 拆 executeAtomAction + recordReflexOutcome; handleReflexFailure 拆 classifyAndApplyFailure
+  └── RF.9 — AICommand: loadPlaystylePack 拆 parseV2Pack + autoSwitchPersona; exportPlaystylePack 拆 buildExportEnvelope/buildExportProfile/buildExportReflexes; despawnBot 拆 despawnByName + despawnNearest
+```
+
+**Phase RFX (REFLEX_CREATE 钩子修复 — 降低 LLM 成本)**
+
+```
+Phase RFX (REFLEX_CREATE 钩子修复):
+  └── RFX.0 — MetaScheduler.processTemplateResult(): REFLEX_CREATE 分支替换为完整固化流水线
+      LLM 返回 JSON → 提取 steps → CategoryMapper 分类 → 构造 ObservedSequence(source=LLM_TEMPLATE)
+      → ConditionedReflex.solidifySequence(sequence, category) → 以 trial 状态写入 conditioned/*.json
+      → 下个 tick 自动参与 scanAndTrigger → 环境裁决晋升/休眠
+       效果: 玩家说"学挖矿" → LLM 填坑 1 次 → 永久反射 → 0 次额外 LLM
+```
+
+**Phase RFA (反射寿命周期 & 记��支撑 — 提升拦截率)**
+
+```
+Phase RFA (反射寿命周期 & 记忆支撑):
+  ├── RFA.1 — MetaScheduler.checkDormantArchives(): 每 100 tick 扫描 archived/ 下 dormant 反射
+  │   条件: 后验 > 0.5 + preconditions 通过 → conditionedReflex.tryReactivate() 自动复活
+  │   效果: 环境变化后反射自动恢复，不依赖手动 /ai import
+  └── RFA.2 — ConditionedReflex.computeMemoryBoost(): scoreReflex 乘记忆系数 1.0 + min(0.3, nodeCount×0.03)
+       MemoryGraph.findNodeIdsByReflex() 查询关联记忆 → 有经验的反射得分更高 → 更容易被选中
+       效果: 相同情境下成功历史越多的反射优先，不用 LLM
+```
 
 ## 3. 已知问题
 

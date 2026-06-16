@@ -200,38 +200,51 @@ public class MemoryGraph {
     // ── Graph traversal ──
 
     public List<MemoryNode> traverse(String startId, MemoryEdge.RelationType type, int maxDepth) {
-        if (!nodes.containsKey(startId) || maxDepth <= 0) return List.of();
+        return traverseBFS(startId, type, maxDepth, 0.0).stream()
+                .map(nodes::get)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toList());
+    }
 
-        Set<String> visited = new HashSet<>();
-        List<MemoryNode> result = new ArrayList<>();
+    public Set<String> traverse(String startId, MemoryEdge.RelationType type, int maxDepth, double minWeight) {
+        return traverseBFS(startId, type, maxDepth, minWeight);
+    }
+
+    private Set<String> traverseBFS(String startId, MemoryEdge.RelationType type, int maxDepth, double minWeight) {
+        if (!nodes.containsKey(startId) || maxDepth <= 0) return Set.of();
+
+        Set<String> activated = new LinkedHashSet<>();
         Queue<String> queue = new LinkedList<>();
+        Map<String, Integer> depthMap = new HashMap<>();
         queue.add(startId);
-        visited.add(startId);
+        depthMap.put(startId, 0);
 
-        int depth = 0;
-        while (!queue.isEmpty() && depth < maxDepth) {
-            int levelSize = queue.size();
-            for (int i = 0; i < levelSize; i++) {
-                String current = queue.poll();
-                for (MemoryEdge edge : edges) {
-                    String neighbor = null;
-                    if (edge.fromId().equals(current) && (type == null || edge.type() == type)) {
-                        neighbor = edge.toId();
-                    } else if (edge.toId().equals(current) && (type == null || edge.type() == type)) {
-                        neighbor = edge.fromId();
-                    }
-                    if (neighbor != null && !visited.contains(neighbor)) {
-                        visited.add(neighbor);
-                        MemoryNode node = nodes.get(neighbor);
-                        if (node != null) result.add(node);
+        while (!queue.isEmpty()) {
+            String current = queue.poll();
+            int curDepth = depthMap.get(current);
+            if (curDepth >= maxDepth) continue;
+            for (MemoryEdge edge : edges) {
+                if (edge.weight() < minWeight) continue;
+                if (type != null && edge.type() != type) continue;
+                String neighbor;
+                if (edge.fromId().equals(current)) {
+                    neighbor = edge.toId();
+                } else if (edge.toId().equals(current)) {
+                    neighbor = edge.fromId();
+                } else {
+                    continue;
+                }
+                if (!depthMap.containsKey(neighbor)) {
+                    int neighborDepth = curDepth + 1;
+                    depthMap.put(neighbor, neighborDepth);
+                    if (neighborDepth <= maxDepth) {
+                        activated.add(neighbor);
                         queue.add(neighbor);
                     }
                 }
             }
-            depth++;
         }
-
-        return result;
+        return activated;
     }
 
     public List<MemoryNode> findSimilar(String memoryId, int topK) {
@@ -484,47 +497,6 @@ public class MemoryGraph {
     }
 
     // ── Diffusion Activation (Phase 2) ──
-
-    public Set<String> traverse(String startId, MemoryEdge.RelationType type, int maxDepth, double minWeight) {
-        if (!nodes.containsKey(startId) || maxDepth <= 0) return Set.of();
-
-        Set<String> activated = new LinkedHashSet<>();
-        Queue<String> queue = new LinkedList<>();
-        Map<String, Integer> depthMap = new HashMap<>();
-        queue.add(startId);
-        depthMap.put(startId, 0);
-
-        while (!queue.isEmpty()) {
-            String current = queue.poll();
-            int curDepth = depthMap.get(current);
-            if (curDepth >= maxDepth) continue;
-
-            for (MemoryEdge edge : edges) {
-                if (edge.weight() < minWeight) continue;
-                if (type != null && edge.type() != type) continue;
-
-                String neighbor;
-                if (edge.fromId().equals(current)) {
-                    neighbor = edge.toId();
-                } else if (edge.toId().equals(current)) {
-                    neighbor = edge.fromId();
-                } else {
-                    continue;
-                }
-
-                if (!depthMap.containsKey(neighbor)) {
-                    int neighborDepth = curDepth + 1;
-                    depthMap.put(neighbor, neighborDepth);
-                    if (neighborDepth <= maxDepth) {
-                        activated.add(neighbor);
-                        queue.add(neighbor);
-                    }
-                }
-            }
-        }
-
-        return activated;
-    }
 
     // ── Skeleton Export/Import (Phase 3) ──
 

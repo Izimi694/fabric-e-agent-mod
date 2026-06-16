@@ -201,9 +201,7 @@ public class EAgent implements ModInitializer {
         cognitiveBrain = new CognitiveBrain(worldContext, botManager);
 
         botController = new BotController(botSpawner, taskManager, taskExecutor, stateManager,
-                conditionedReflex, aiChatHandler, aiClient, idleBrain,
-                socialClassifier, reflexRegistry, inhibitor, memoryManager);
-        botController.setWorldContext(worldContext);
+                conditionedReflex, idleBrain, socialClassifier, memoryManager, worldContext);
 
         MotivationEngine motivationEngine = new MotivationEngine();
         MetaScheduler metaScheduler = new MetaScheduler(motivationEngine);

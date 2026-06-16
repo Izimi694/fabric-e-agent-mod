@@ -10,6 +10,8 @@ import com.izimi.eagent.cortex.api.PlaystylePack;
 import com.izimi.eagent.util.FileUtil;
 import com.izimi.eagent.util.JsonUtil;
 import com.izimi.eagent.brainstem.scheduler.SurvivalChallengeMonitor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
@@ -30,6 +32,7 @@ import static net.minecraft.server.command.CommandManager.literal;
 
 public class AICommand {
 
+    private static final Logger LOGGER = LoggerFactory.getLogger("e-agent");
     private static WorldContext worldContext;
 
     public static void setWorldContext(WorldContext ctx) {
@@ -563,25 +566,30 @@ public class AICommand {
                 source.sendFeedback(() -> Text.literal("§7[E-Agent] 没有活动的AI"), false);
                 return 0;
             }
-
-            if (name != null) {
-                BotInstance bot = mgr.getByName(name);
-                if (bot == null) {
-                    source.sendFeedback(() -> Text.literal("§7[E-Agent] 未找到AI: " + name), false);
-                    return 0;
-                }
-                mgr.despawn(bot.getBotId());
-                source.sendFeedback(() -> Text.literal("§a[E-Agent] AI已移除: " + name), false);
-            } else {
-                // Despawn nearest
-                BotInstance nearest = resolveBot(source, null);
-                if (nearest != null) {
-                    mgr.despawn(nearest.getBotId());
-                    source.sendFeedback(() -> Text.literal("§a[E-Agent] AI已移除: " + nearest.getBotName()), false);
-                }
-            }
+            if (name != null) return despawnByName(source, mgr, name);
+            return despawnNearest(source, mgr);
         } catch (Exception e) {
             source.sendFeedback(() -> Text.literal("§c[E-Agent] 移除失败: " + e.getMessage()), false);
+            return 1;
+        }
+    }
+
+    private static int despawnByName(ServerCommandSource source, BotManager mgr, String name) {
+        BotInstance bot = mgr.getByName(name);
+        if (bot == null) {
+            source.sendFeedback(() -> Text.literal("§7[E-Agent] 未找到AI: " + name), false);
+            return 0;
+        }
+        mgr.despawn(bot.getBotId());
+        source.sendFeedback(() -> Text.literal("§a[E-Agent] AI已移除: " + name), false);
+        return 1;
+    }
+
+    private static int despawnNearest(ServerCommandSource source, BotManager mgr) {
+        BotInstance nearest = resolveBot(source, null);
+        if (nearest != null) {
+            mgr.despawn(nearest.getBotId());
+            source.sendFeedback(() -> Text.literal("§a[E-Agent] AI已移除: " + nearest.getBotName()), false);
         }
         return 1;
     }
@@ -850,30 +858,11 @@ public class AICommand {
                 return bot.getReflexPackManager().importPack(packName, false) ? 1 : 0;
             }
 
-            // Parse V2 pack
-            Map<String, Object> profileMap = (Map<String, Object>) data.get("profile");
-            PlaystylePack.PackProfile profile = profileMap != null ? ReflexPackManager.parseProfile(profileMap) : null;
-            Map<String, Object> reflexes = (Map<String, Object>) data.get("reflexes");
-            Map<String, Object> knowledge = (Map<String, Object>) data.get("knowledge");
-            Map<String, Object> config = (Map<String, Object>) data.get("config");
-
-            PlaystylePack pack = new PlaystylePack(packName,
-                (String) data.getOrDefault("description", ""), 2,
-                profile, reflexes, knowledge, config,
-                (String) data.getOrDefault("persona", ""));
-
+            PlaystylePack pack = parseV2Pack(packName, data);
             boolean ok = bot.applyPlaystylePack(pack);
             if (ok) {
                 source.sendFeedback(() -> Text.literal("§a[Playstyle] 玩法包已加载: " + packName), false);
-                // 自动切换人设 (仅当未被手动锁定)
-                String personaName = pack.persona();
-                if (!personaName.isEmpty()) {
-                    PersonaManager pm = EAgent.getPersonaManager();
-                    if (pm != null && !pm.isPersonaLocked()) {
-                        pm.loadProfile(personaName);
-                        source.sendFeedback(() -> Text.literal("§7  └ 自动切换人设: " + personaName), false);
-                    }
-                }
+                autoSwitchPersona(source, pack.persona());
             } else {
                 source.sendFeedback(() -> Text.literal("§c[Playstyle] 加载失败: " + packName), false);
             }
@@ -881,6 +870,28 @@ public class AICommand {
         } catch (Exception e) {
             source.sendFeedback(() -> Text.literal("§c[Playstyle] 加载异常: " + e.getMessage()), false);
             return 0;
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static PlaystylePack parseV2Pack(String packName, Map<String, Object> data) {
+        Map<String, Object> profileMap = (Map<String, Object>) data.get("profile");
+        PlaystylePack.PackProfile profile = profileMap != null ? ReflexPackManager.parseProfile(profileMap) : null;
+        Map<String, Object> reflexes = (Map<String, Object>) data.get("reflexes");
+        Map<String, Object> knowledge = (Map<String, Object>) data.get("knowledge");
+        Map<String, Object> config = (Map<String, Object>) data.get("config");
+        return new PlaystylePack(packName,
+                (String) data.getOrDefault("description", ""), 2,
+                profile, reflexes, knowledge, config,
+                (String) data.getOrDefault("persona", ""));
+    }
+
+    private static void autoSwitchPersona(ServerCommandSource source, String personaName) {
+        if (personaName == null || personaName.isEmpty()) return;
+        PersonaManager pm = EAgent.getPersonaManager();
+        if (pm != null && !pm.isPersonaLocked()) {
+            pm.loadProfile(personaName);
+            source.sendFeedback(() -> Text.literal("§7  └ 自动切换人设: " + personaName), false);
         }
     }
 
@@ -915,50 +926,9 @@ public class AICommand {
             }
 
             Path packFile = FileUtil.getReflexPacksDir().resolve(packName + ".json");
-            Map<String, Object> pack = new java.util.LinkedHashMap<>();
-            pack.put("version", 2);
-            pack.put("source", "E-Agent");
-            pack.put("source_bot", bot.getBotId().toString());
-            pack.put("packName", packName);
-            pack.put("description", "");
-            pack.put("exported_at", java.time.Instant.now().toString());
-
-            // Profile
-            var bp = bot.getBotParams();
-            var h = bot.getHormonalSystem();
-            Map<String, Object> profile = new java.util.LinkedHashMap<>();
-            profile.put("alpha", bp.getAlpha());
-            profile.put("beta", bp.getBeta());
-            profile.put("temperature", bp.getTemperature());
-            Map<String, Object> hp = new java.util.LinkedHashMap<>();
-            hp.put("stress", h.getStress());
-            hp.put("aggression", h.getAggression());
-            hp.put("curiosity", h.getCuriosity());
-            hp.put("ne", h.getNE());
-            hp.put("da", h.getDA());
-            hp.put("serotonin", h.getSerotonin());
-            hp.put("ach", h.getACh());
-            profile.put("hormonal_preset", hp);
-            var weights = bot.getMotivationEngine().getPerspectiveWeights();
-            if (weights != null) profile.put("perspective_weights", weights);
-            pack.put("profile", profile);
-
-            // Reflexes
-            Path conditionedDir = FileUtil.getBotConditionedDir(bot.getBotId());
-            Map<String, Object> reflexes = new java.util.LinkedHashMap<>();
-            if (java.nio.file.Files.exists(conditionedDir)) {
-                try (var stream = java.nio.file.Files.list(conditionedDir)) {
-                    for (Path rf : stream.toList()) {
-                        if (!rf.toString().endsWith(".json")) continue;
-                        Map<String, Object> rd = JsonUtil.readMapFromFileSafe(rf);
-                        if (rd != null) {
-                            String sid = (String) rd.getOrDefault("skillId",
-                                rf.getFileName().toString().replace(".json", ""));
-                            reflexes.put(sid, rd);
-                        }
-                    }
-                }
-            }
+            Map<String, Object> pack = buildExportEnvelope(packName, bot);
+            pack.put("profile", buildExportProfile(bot));
+            Map<String, Object> reflexes = buildExportReflexes(bot);
             pack.put("reflexes", reflexes);
             pack.put("knowledge", new java.util.LinkedHashMap<>());
             pack.put("config", new java.util.LinkedHashMap<>());
@@ -970,6 +940,57 @@ public class AICommand {
             source.sendFeedback(() -> Text.literal("§c[Playstyle] 导出异常: " + e.getMessage()), false);
             return 0;
         }
+    }
+
+    private static Map<String, Object> buildExportEnvelope(String packName, BotInstance bot) {
+        Map<String, Object> pack = new java.util.LinkedHashMap<>();
+        pack.put("version", 2);
+        pack.put("source", "E-Agent");
+        pack.put("source_bot", bot.getBotId().toString());
+        pack.put("packName", packName);
+        pack.put("description", "");
+        pack.put("exported_at", java.time.Instant.now().toString());
+        return pack;
+    }
+
+    private static Map<String, Object> buildExportProfile(BotInstance bot) {
+        var bp = bot.getBotParams();
+        var h = bot.getHormonalSystem();
+        Map<String, Object> profile = new java.util.LinkedHashMap<>();
+        profile.put("alpha", bp.getAlpha());
+        profile.put("beta", bp.getBeta());
+        profile.put("temperature", bp.getTemperature());
+        Map<String, Object> hp = new java.util.LinkedHashMap<>();
+        hp.put("stress", h.getStress());
+        hp.put("aggression", h.getAggression());
+        hp.put("curiosity", h.getCuriosity());
+        hp.put("ne", h.getNE());
+        hp.put("da", h.getDA());
+        hp.put("serotonin", h.getSerotonin());
+        hp.put("ach", h.getACh());
+        profile.put("hormonal_preset", hp);
+        var weights = bot.getMotivationEngine().getPerspectiveWeights();
+        if (weights != null) profile.put("perspective_weights", weights);
+        return profile;
+    }
+
+    private static Map<String, Object> buildExportReflexes(BotInstance bot) {
+        Path conditionedDir = FileUtil.getBotConditionedDir(bot.getBotId());
+        Map<String, Object> reflexes = new java.util.LinkedHashMap<>();
+        if (!java.nio.file.Files.exists(conditionedDir)) return reflexes;
+        try (var stream = java.nio.file.Files.list(conditionedDir)) {
+            for (Path rf : stream.toList()) {
+                if (!rf.toString().endsWith(".json")) continue;
+                Map<String, Object> rd = JsonUtil.readMapFromFileSafe(rf);
+                if (rd != null) {
+                    reflexes.put(rd.getOrDefault("skillId",
+                            rf.getFileName().toString().replace(".json", "")).toString(), rd);
+                }
+            }
+        } catch (java.io.IOException e) {
+            LOGGER.warn("[Playstyle] 读取反射目录失败: {}", e.getMessage());
+        }
+        return reflexes;
     }
 
     private static int showCurrentPlaystyle(ServerCommandSource source, String botName) {

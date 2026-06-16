@@ -15,6 +15,7 @@ import net.minecraft.recipe.RecipeType;
 import net.minecraft.recipe.ShapedRecipe;
 import net.minecraft.recipe.RecipeEntry;
 import net.minecraft.registry.Registries;
+import net.minecraft.screen.CraftingScreenHandler;
 import net.minecraft.screen.ScreenHandler;
 import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.server.network.ServerPlayerEntity;
@@ -373,68 +374,74 @@ public class MinecraftActionAdapter implements BasicActionAdapter {
         if (bot == null || itemId == null || itemId.isEmpty())
             return ActionResult.unable("craft: 参数无效");
 
-        ServerWorld world = bot.getServerWorld();
         Identifier id = Identifier.tryParse(itemId);
         if (id == null) return ActionResult.fail("无效物品ID: " + itemId);
 
-        var recipeManager = world.getRecipeManager();
-        List<RecipeEntry<CraftingRecipe>> allRecipes = recipeManager.listAllOfType(RecipeType.CRAFTING);
-
-        // Step 1: Find recipe that produces target item
-        CraftingRecipe recipe = null;
-        for (RecipeEntry<CraftingRecipe> entry : allRecipes) {
-            ItemStack result = entry.value().getResult(world.getRegistryManager());
-            if (Registries.ITEM.getId(result.getItem()).equals(id)) {
-                recipe = entry.value();
-                break;
-            }
-        }
+        CraftingRecipe recipe = findCraftingRecipe(bot.getServerWorld(), id);
         if (recipe == null) return ActionResult.fail("无此配方: " + itemId);
 
-        // Step 2: Determine grid size
-        boolean needsTable = !recipe.fits(2, 2);
-        List<Ingredient> ingredients = recipe.getIngredients();
-        int craftableCount = countCraftable(recipe, bot);
-        if (craftableCount <= 0) return ActionResult.fail("材料不足: " + itemId);
+        ScreenHandler handler = openCraftingInterface(bot, recipe);
+        if (handler == null) return ActionResult.fail("无法打开合成界面");
 
-        // Step 3: Open crafting interface
+        try {
+            placeItemsInGrid(bot, recipe, handler);
+            return collectCraftResult(bot, handler, itemId);
+        } catch (Exception e) {
+            return cleanupCraft(bot, e);
+        }
+    }
+
+    private CraftingRecipe findCraftingRecipe(ServerWorld world, Identifier itemId) {
+        var allRecipes = world.getRecipeManager().listAllOfType(RecipeType.CRAFTING);
+        for (RecipeEntry<CraftingRecipe> entry : allRecipes) {
+            ItemStack result = entry.value().getResult(world.getRegistryManager());
+            if (Registries.ITEM.getId(result.getItem()).equals(itemId)) return entry.value();
+        }
+        return null;
+    }
+
+    private ScreenHandler openCraftingInterface(ServerPlayerEntity bot, CraftingRecipe recipe) {
+        boolean needsTable = !recipe.fits(2, 2);
+        int craftableCount = countCraftable(recipe, bot);
+        if (craftableCount <= 0) return null;
+
         if (needsTable) {
-            BlockPos tablePos = findBlockPosByName(world, bot, "crafting_table");
-            if (tablePos == null) return ActionResult.fail("需要工作台");
+            BlockPos tablePos = findBlockPosByName(bot.getServerWorld(), bot, "crafting_table");
+            if (tablePos == null) return null;
             openBlock(bot, tablePos);
         } else {
             openInventory(bot);
         }
+        return bot.currentScreenHandler;
+    }
 
-        // Wait one tick for screen to open
-        ScreenHandler handler = bot.currentScreenHandler;
-        if (handler == null) return ActionResult.fail("无法打开合成界面");
+    private void placeItemsInGrid(ServerPlayerEntity bot, CraftingRecipe recipe, ScreenHandler handler) {
+        boolean needsTable = handler instanceof CraftingScreenHandler;
+        int gridWidth = needsTable ? CT_GRID_WIDTH : INV_GRID_WIDTH;
+        int gridStart = needsTable ? CT_GRID_START : INV_GRID_START;
+        int invStart = needsTable ? CT_INV_START : INV_INV_START;
+        int hotbarStart = needsTable ? CT_HOTBAR_START : INV_HOTBAR_START;
+        placeIngredients(recipe, recipe.getIngredients(), bot,
+                gridWidth, gridStart, invStart, hotbarStart, needsTable);
+    }
 
-        try {
-            // Step 4: Place ingredients in grid
-            int gridWidth = needsTable ? CT_GRID_WIDTH : INV_GRID_WIDTH;
-            int gridStart = needsTable ? CT_GRID_START : INV_GRID_START;
-            int invStart = needsTable ? CT_INV_START : INV_INV_START;
-            int hotbarStart = needsTable ? CT_HOTBAR_START : INV_HOTBAR_START;
-
-            placeIngredients(recipe, ingredients, bot, gridWidth, gridStart, invStart, hotbarStart, needsTable);
-
-            // Step 5: Check result slot and take output
-            ItemStack resultStack = handler.getSlot(needsTable ? CT_RESULT : INV_RESULT).getStack();
-            if (resultStack.isEmpty()) {
-                closeWindow(bot);
-                return ActionResult.fail("合成失败: 材料摆放有误");
-            }
-
-            handler.onSlotClick(needsTable ? CT_RESULT : INV_RESULT, 0, SlotActionType.PICKUP, bot);
-            int resultCount = resultStack.getCount();
+    private ActionResult collectCraftResult(ServerPlayerEntity bot, ScreenHandler handler, String itemId) {
+        boolean needsTable = handler instanceof CraftingScreenHandler;
+        int resultSlot = needsTable ? CT_RESULT : INV_RESULT;
+        ItemStack resultStack = handler.getSlot(resultSlot).getStack();
+        if (resultStack.isEmpty()) {
             closeWindow(bot);
-
-            return ActionResult.success("合成 " + itemId + " x" + resultCount + " 完成");
-        } catch (Exception e) {
-            try { closeWindow(bot); } catch (Exception ignored) {}
-            return ActionResult.fail("合成失败: " + e.getMessage());
+            return ActionResult.fail("合成失败: 材料摆放有误");
         }
+        handler.onSlotClick(resultSlot, 0, SlotActionType.PICKUP, bot);
+        int resultCount = resultStack.getCount();
+        closeWindow(bot);
+        return ActionResult.success("合成 " + itemId + " x" + resultCount + " 完成");
+    }
+
+    private ActionResult cleanupCraft(ServerPlayerEntity bot, Exception e) {
+        try { closeWindow(bot); } catch (Exception ignored) {}
+        return ActionResult.fail("合成失败: " + e.getMessage());
     }
 
     private void openInventory(ServerPlayerEntity bot) {
