@@ -10,6 +10,16 @@ import com.izimi.eagent.cortex.api.PlaystylePack;
 import com.izimi.eagent.util.FileUtil;
 import com.izimi.eagent.util.JsonUtil;
 import com.izimi.eagent.brainstem.scheduler.SurvivalChallengeMonitor;
+import com.izimi.eagent.brainstem.scheduler.ChallengeMilestone;
+import com.izimi.eagent.brainstem.scheduler.ChallengeMilestoneTracker;
+import com.izimi.eagent.brainstem.domain.GameConceptDetector;
+import com.izimi.eagent.cortex.planner.KnowledgeBase;
+
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import com.mojang.brigadier.CommandDispatcher;
@@ -312,6 +322,17 @@ public class AICommand {
             }
             newBot.setLegacyScoring(false);
 
+            // Initialize milestone tracker — 加载3-tier挑战目标
+            KnowledgeBase kb = KnowledgeBase.load();
+            GameConceptDetector detector = new GameConceptDetector(kb);
+            List<ChallengeMilestone> milestones = loadMilestonesFromFile();
+            if (milestones == null) {
+                milestones = defaultMilestones();
+                LOGGER.info("[挑战] 使用默认3-tier里程碑");
+            }
+            ChallengeMilestoneTracker tracker = new ChallengeMilestoneTracker(milestones, detector);
+            SurvivalChallengeMonitor.setMilestoneTracker(tracker);
+
             // Reset and start challenge monitor
             SurvivalChallengeMonitor.startChallenge(days);
 
@@ -349,6 +370,102 @@ public class AICommand {
         }
         source.sendFeedback(() -> Text.literal("§a[挑战] 已终止并生成最终报告"), false);
         return 1;
+    }
+
+    /** 默认 3-tier 里程碑定义 — 对应 challenge_milestones.json */
+    private static List<ChallengeMilestone> defaultMilestones() {
+        return List.of(
+            new ChallengeMilestone(1, 1, "石器时代", true,
+                "制作工作台，获取食物，制作床",
+                List.of(
+                    new ChallengeMilestone.InventoryCheck("crafting_table", 1),
+                    new ChallengeMilestone.InventoryCheck("bed", 1)),
+                List.of(), List.of(),
+                List.of(
+                    new ChallengeMilestone.AbstractConceptCheck("is_well_lit", true),
+                    new ChallengeMilestone.AbstractConceptCheck("has_shelter", true)),
+                java.util.Map.of("torch", 2, "coal", 5), 100),
+            new ChallengeMilestone(2, 3, "铁器时代", true,
+                "挖铁矿石，制作铁镐/铁剑/盾牌",
+                List.of(
+                    new ChallengeMilestone.InventoryCheck("iron_pickaxe", 1),
+                    new ChallengeMilestone.InventoryCheck("iron_sword", 1),
+                    new ChallengeMilestone.InventoryCheck("shield", 1)),
+                List.of(), List.of(), List.of(),
+                java.util.Map.of("iron_ingot", 10), 200),
+            new ChallengeMilestone(4, 15, "建造与繁荣", false,
+                "建造房屋，开垦农田，采集钻石",
+                List.of(
+                    new ChallengeMilestone.InventoryCheck("diamond_pickaxe", 1)),
+                List.of(), List.of(),
+                List.of(
+                    new ChallengeMilestone.AbstractConceptCheck("has_shelter", true),
+                    new ChallengeMilestone.AbstractConceptCheck("has_food_supply", true)),
+                java.util.Map.of("diamond", 20, "bread", 3), 300)
+        );
+    }
+
+    /**
+     * 从 eagent/config/challenge_milestones.json 加载里程碑。
+     * 文件不存在或格式错误返回 null（调用方回退到默认值）。
+     */
+    @SuppressWarnings("unchecked")
+    private static List<ChallengeMilestone> loadMilestonesFromFile() {
+        Path path = FileUtil.getConfigDir().resolve("challenge_milestones.json");
+        List<Map<String, Object>> raw = JsonUtil.readListFromFileSafe(path);
+        if (raw == null || raw.isEmpty()) return null;
+
+        List<ChallengeMilestone> result = new ArrayList<>();
+        for (Map<String, Object> item : raw) {
+            try {
+                result.add(parseMilestoneItem(item));
+            } catch (Exception e) {
+                LOGGER.warn("[挑战] 跳过解析失败的里程碑项: {}", e.getMessage());
+            }
+        }
+        return result.isEmpty() ? null : result;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static ChallengeMilestone parseMilestoneItem(Map<String, Object> item) {
+        int fromDay = ((Number) item.get("fromDay")).intValue();
+        int toDay = ((Number) item.get("toDay")).intValue();
+        String tierName = (String) item.get("tierName");
+        boolean obligatory = Boolean.TRUE.equals(item.get("obligatory"));
+        String description = (String) item.get("description");
+        int score = ((Number) item.getOrDefault("scoreOnComplete", 0)).intValue();
+
+        List<ChallengeMilestone.InventoryCheck> requiredItems = parseChecks(
+                (List<Map<String, Object>>) item.get("requiredItems"),
+                m -> new ChallengeMilestone.InventoryCheck(
+                        (String) m.get("itemId"), ((Number) m.get("minCount")).intValue()));
+
+        List<ChallengeMilestone.AbstractConceptCheck> conceptChecks = parseChecks(
+                (List<Map<String, Object>>) item.get("conceptChecks"),
+                m -> new ChallengeMilestone.AbstractConceptCheck(
+                        (String) m.get("conceptName"),
+                        Boolean.TRUE.equals(m.get("expectedValue"))));
+
+        Map<String, Object> rawBonus = (Map<String, Object>) item.get("bonusItems");
+        Map<String, Integer> bonusItems = new HashMap<>();
+        if (rawBonus != null) {
+            for (var e : rawBonus.entrySet()) {
+                bonusItems.put(e.getKey(), ((Number) e.getValue()).intValue());
+            }
+        }
+
+        return new ChallengeMilestone(fromDay, toDay, tierName, obligatory, description,
+                requiredItems, List.of(), List.of(), conceptChecks, bonusItems, score);
+    }
+
+    private static <T> List<T> parseChecks(List<Map<String, Object>> raw,
+                                            java.util.function.Function<Map<String, Object>, T> mapper) {
+        if (raw == null) return List.of();
+        List<T> result = new ArrayList<>();
+        for (Map<String, Object> m : raw) {
+            if (m != null) result.add(mapper.apply(m));
+        }
+        return result;
     }
 
     private static int challengeStatus(ServerCommandSource source) {

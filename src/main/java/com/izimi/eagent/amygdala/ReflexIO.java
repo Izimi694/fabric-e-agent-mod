@@ -18,7 +18,14 @@ public final class ReflexIO {
 
     private ReflexIO() {}
 
+    static Path testOverrideDir;
+
+    public static void setOverrideDir(Path dir) {
+        testOverrideDir = dir;
+    }
+
     public static Path conditionedDir(UUID botId) {
+        if (testOverrideDir != null) return testOverrideDir;
         return botId != null ? FileUtil.getBotConditionedDir(botId) : FileUtil.getConditionedDir();
     }
 
@@ -124,6 +131,32 @@ public final class ReflexIO {
         } catch (java.io.IOException e) {
             LOGGER.warn("[ReflexIO] 归档反射失败: {} — {}", reflexId, e.getMessage());
         }
+    }
+
+    @SuppressWarnings("unchecked")
+    public static void appendFailureReason(String reflexId, UUID botId,
+                                            String reason, Map<String, Object> context) {
+        Map<String, Object> data = loadData(reflexId, botId);
+        if (data == null) return;
+        List<Map<String, Object>> reasons = (List<Map<String, Object>>)
+                data.computeIfAbsent(KEY_FAILURE_REASONS, k -> new java.util.ArrayList<>());
+        Map<String, Object> entry = new java.util.LinkedHashMap<>();
+        entry.put(KEY_FAILURE_REASON, reason);
+        entry.put(KEY_FAILURE_CONTEXT, context != null ? new java.util.LinkedHashMap<>(context) : Map.of());
+        entry.put(KEY_FAILURE_TIMESTAMP, System.currentTimeMillis());
+        reasons.add(entry);
+        while (reasons.size() > MAX_FAILURE_REASONS) reasons.remove(0);
+        saveData(reflexId, botId, data);
+    }
+
+    @SuppressWarnings("unchecked")
+    public static List<Map<String, Object>> getFailureReasons(String reflexId, UUID botId, int maxCount) {
+        Map<String, Object> data = loadData(reflexId, botId);
+        if (data == null) return List.of();
+        List<Map<String, Object>> reasons = (List<Map<String, Object>>) data.get(KEY_FAILURE_REASONS);
+        if (reasons == null) return List.of();
+        int from = Math.max(0, reasons.size() - maxCount);
+        return reasons.subList(from, reasons.size());
     }
 
     public static boolean tryReactivate(String reflexId, UUID botId) {

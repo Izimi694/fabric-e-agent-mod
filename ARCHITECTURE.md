@@ -11,6 +11,8 @@
 | 层 | 模组组件 | 触发条件 | 成本 |
 |----|---------|---------|:---:|
 | **L0** 生存本能 | `InnateReflexRegistry` | 熔岩/虚空/HP<2 | 0 |
+>
+> **L0 触发机制**：L0 反射不是事件驱动的中断，而是在 MetaScheduler.tick() 的 `executeHabitLayerWithGating()` 阶段被逐项扫描调用（poll 模式）。这意味着即使 bot 掉入虚空，也要等下一个 tick（≤50ms）才能触发逃生反应。在 50ms 尺度上这个延迟对生存场景可接受。未来如需要亚 tick 响应，需引入 Fabric 事件监听器。
 | **L1** 先天预警 | `OneShotAlarmSystem` | 玩家说过"坏" | 0 |
 | **L2** 条件反射 | `ConditionedReflex` | 匹配已有反射 | 0 |
 | **L3** 模仿学习 | `SocialObserver` + 贝叶斯 | 附近有人在做 | 0 |
@@ -241,7 +243,19 @@ Stage 1-3 引入的领域执行架构，将原子动作按领域分组封装：
 
 Adapter 委派：`MinecraftActionAdapter.dig()` → `DomainRouter.dispatch(BreakCommand(...))` → `DigExecutor.execute()`。同域动作走同一 executor，失败统计按 router 聚合。
 
-**注**：PlaceCommand/CraftCommand/CombatCommand/InventoryCommand 为 Stage 4 占位，当前仅抛出 UnsupportedOperationException。
+**注**：PlaceCommand/CraftCommand/CombatCommand/InventoryCommand 为 Stage 4 占位。
+- **当前行为**：通过 DomainRouter.dispatch() 抛 UnsupportedOperationException（明确失败，非静默 null）
+- **Stage 4 计划**：为每个 Command 实现对应的 Executor
+- **各类型状态**：
+
+  | Command | Executor | 状态 |
+  |:-------:|:--------:|:----:|
+  | BreakCommand | DigExecutor | ✅ Stage 2 完成 |
+  | MotionCommand | MotionExecutor | ✅ Stage 3 完成 |
+  | CombatCommand | ❌ 无 | ⏳ Stage 4 待实现 |
+  | CraftCommand | ❌ 无 | ⏳ Stage 4 待实现 |
+  | PlaceCommand | ❌ 无 | ⏳ Stage 4 待实现 |
+  | InventoryCommand | ❌ 无 | ⏳ Stage 4 待实现 |
 
 ### 4.2 抑制控制 (InhibitoryControl + CognitiveControl)
 
@@ -638,6 +652,8 @@ PersonaManager 管理角色设定注入:
 | `dropItem(slot)` | 丢弃物品 | boolean |
 
 > **注**：上表为 14 个核心原子动作。`BasicActionAdapter` 实际有 22 个方法（14 原子 + 8 复合）：原子动作同左表，复合动作包括 `craft`、`flee`、`eat`、`retreat`、`avoidLava`、`seekShelter`、`collectItem`、`sneak`。
+>
+> **注意**：目前只有 moveTo/lookAt/dig/jump/sprint/sneak 通过 DomainRouter → Executor 执行链（见 §4.1a）。attack/placeBlock/craft 等其余动作仍在 MinecraftActionAdapter 中直接实现，**计划在 Stage 4 迁移到 DomainRouter 统一路由**。
 
 ---
 
@@ -854,7 +870,12 @@ copyReflexesFromMentor()
 
 ## 14. 组件归属表
 
-> **注**：此处使用 §12 的硬编码分级维度（L0-L4 对应 Kernel/Config/Scheduler/Knowledge/Reflexes），与 §1 的运行时拦截层维度（L0-L6 六层拦截器）不同。ConditionedReflex 在 §1 是 L2（时机匹配执行），在 §12/§14 是 L4（可学习可遗传的反射文件）。
+> ⚠️ **重要：双分类体系注意**
+> 本文档使用两套互不兼容的分类维度：
+> - **§1 运行时拦截层 (L0-L6)：** 按执行时机和触发条件分类。L0=生存本能, L1=先天预警, L2=条件反射, L3=模仿学习, L4=自组织, L5=本地规划, L6=LLM。
+> - **§12/§14 硬编码分级：** 按可配置性/可学习性/可遗传性分类。L0=Kernel(永硬编码), L1=Config(可配置), L2=Scheduler, L3=Knowledge, L4=Reflexes。
+> - **ConditionedReflex 在两种分类中位置不同：** §1 运行时 → L2（条件反射执行时机），§12/§14 分级 → L4（可学习可遗传）。
+> - **讨论归属时请标注分类体系**，例如"在 §1 运行时视角下，ConditionedReflex 属 L2"。
 
 | 组件 | 归属层 | 存储位置 |
 |------|:------:|---------|
@@ -919,6 +940,13 @@ copyReflexesFromMentor()
 | GreedyNavigator | L3 (brainstem/navigation) | 内存 |
 | NavigationController | L3 (brainstem/navigation) | 内存 |
 | Skill / SkillManager | L2 (brainstem/skill) | 内存 |
+| DomainRouter | 待定 (brainstem/domain) | 内存 — 命令分发路由 |
+| DigExecutor | 待定 (brainstem/domain) | 内存 — Break 域挖掘 |
+| MotionExecutor | 待定 (brainstem/domain) | 内存 — Motion 域移动 |
+| CombatExecutor | ⏳ Stage 4 (brainstem/domain) | 内存 — Combat 域攻击 |
+| CraftExecutor | ⏳ Stage 4 (brainstem/domain) | 内存 — Craft 域合成 |
+| PlaceExecutor | ⏳ Stage 4 (brainstem/domain) | 内存 — Place 域放置 |
+| InventoryExecutor | ⏳ Stage 4 (brainstem/domain) | 内存 — Inventory 域物品操作 |
 | InnateReflex | L0 (brainstem/innate) | 硬编码 + `innate_reflex_weights.json` |
 
 ---

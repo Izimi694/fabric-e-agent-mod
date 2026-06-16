@@ -33,6 +33,20 @@ public class TaskExecutor {
         this.executionLogger = executionLogger;
     }
 
+    private void logSubTaskOutcome(Task task, Task.SubTask current, boolean success, double effectiveness) {
+        logSubTaskOutcome(task, current, success, effectiveness, null);
+    }
+
+    private void logSubTaskOutcome(Task task, Task.SubTask current, boolean success,
+                                    double effectiveness, String failReason) {
+        TaskLogger logger = taskManager.getTaskLogger();
+        if (logger != null) {
+            int dagOrder = task.subTasks != null ? task.subTasks.indexOf(current) : 0;
+            logger.logSubTask(task.taskId, current.skillId, current.skillId,
+                    current.goal, success, effectiveness, dagOrder, failReason);
+        }
+    }
+
     public void executeTask(ServerPlayerEntity bot, Task task) {
         if (bot == null || task == null) return;
         executionTick++;
@@ -101,6 +115,7 @@ public class TaskExecutor {
         current.status = "success";
         task.progress.completedCount++;
         taskManager.saveActiveTask();
+        logSubTaskOutcome(task, current, true, result.effectiveness());
         LOGGER.info("[TaskExecutor] 子任务完成: {} ({}/{})",
                 current.goal, task.progress.completedCount, task.progress.targetCount);
         if (task.progress.completedCount >= task.progress.targetCount) {
@@ -113,6 +128,7 @@ public class TaskExecutor {
         current.status = "accepted";
         task.progress.completedCount++;
         taskManager.saveActiveTask();
+        logSubTaskOutcome(task, current, true, result.effectiveness());
         double drift = 1.0 - result.effectiveness();
         if (onAcceptDrift != null) onAcceptDrift.accept(drift);
         LOGGER.info("[TaskExecutor] 子任务接受(漂移{:.2f}): {} ({}/{})",
@@ -124,6 +140,9 @@ public class TaskExecutor {
     }
 
     private void handleFailure(ServerPlayerEntity bot, Task task, Task.SubTask current, Skill.SkillResult result) {
+        String failReason = result.message() != null && !result.message().isEmpty()
+                ? result.message() : "effectiveness_" + String.format("%.2f", result.effectiveness());
+        logSubTaskOutcome(task, current, false, result.effectiveness(), failReason);
         if (!result.executed()) {
             current.unableCount++;
             if (current.unableCount >= MAX_UNABLE_RETRIES) {

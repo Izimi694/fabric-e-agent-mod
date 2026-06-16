@@ -177,6 +177,7 @@
 | 神经调质组合 | AES / Emotion-Modulated Architectures | 4 维向量余弦匹配 + 反射配方 |
 | 认知控制 | MATE (2026) / EvoEmo (2025) | InhibitoryControl 硬门 + CognitiveControl 连续调制 |
 | 客户端 Bot 架构 | [Mineflayer](https://github.com/PrismarineJS/mineflayer) (MIT) | 服务端 mod，controlState 意图分离、挖掘协议三态、复活延迟 1500ms |
+| 上下文预算 + 结构化失败 | [AutoSci](https://github.com/skyllwt/AutoSci) (北京大学 DAIR Lab, MIT) | ContextBudget token 预算 + failure_reasons JSON 链 |
 
 ---
 

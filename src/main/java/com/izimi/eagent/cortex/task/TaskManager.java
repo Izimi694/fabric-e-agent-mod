@@ -19,6 +19,7 @@ public class TaskManager {
     private Task activeTask;
     private Task lastTask;
     private final UUID botId;
+    private TaskLogger taskLogger;
 
     public TaskManager() {
         this(null);
@@ -26,9 +27,13 @@ public class TaskManager {
 
     public TaskManager(UUID botId) {
         this.botId = botId;
+        this.taskLogger = new TaskLogger(botId);
         activeTask = loadActiveTask();
         lastTask = loadLastTask();
     }
+
+    public void setTaskLogger(TaskLogger logger) { this.taskLogger = logger; }
+    public TaskLogger getTaskLogger() { return taskLogger; }
 
     private Path activeTaskPath() {
         return botId != null
@@ -55,6 +60,7 @@ public class TaskManager {
         activeTask = new Task(taskId, type, goal);
         decomposeTask(activeTask);
         saveActiveTask();
+        if (taskLogger != null) taskLogger.logCreated(taskId, goal, type);
         LOGGER.info("[TaskManager] 任务创建: {} - {} ({}子任务)", taskId, goal, activeTask.subTasks.size());
         return taskId;
     }
@@ -112,6 +118,7 @@ public class TaskManager {
 
     public void cancelActiveTask() {
         if (activeTask != null && "running".equals(activeTask.getStatus())) {
+            if (taskLogger != null) taskLogger.logCancelled(activeTask.taskId, "cancelled_by_user");
             activeTask.status = "paused";
             saveActiveTask();
             lastTask = activeTask;
@@ -140,6 +147,8 @@ public class TaskManager {
         if (activeTask == null) return;
         activeTask.status = "completed";
         LOGGER.info("[TaskManager] 任务完成: {}", activeTask.getGoal());
+
+        if (taskLogger != null) taskLogger.logCompleted(activeTask.taskId, true);
 
         var memoryManager = EAgent.getMemoryManager();
         if (memoryManager != null) {

@@ -62,16 +62,22 @@ public class ReflexChain {
     private final String taskId;
     private final Map<String, ReflexNode> nodeMap = new LinkedHashMap<>();
     private final List<String> rootNodes = new ArrayList<>();
+    private ReflexGraph reflexGraph;
 
     public ReflexChain(String taskId) {
         this.taskId = taskId;
     }
 
     public String taskId() { return taskId; }
+    public void setReflexGraph(ReflexGraph graph) { this.reflexGraph = graph; }
+    public ReflexGraph getReflexGraph() { return reflexGraph; }
 
     public ReflexNode addNode(String id, String reflexId, double baseWeight, boolean isBottleneck) {
         ReflexNode node = new ReflexNode(id, reflexId, baseWeight, isBottleneck);
         nodeMap.put(id, node);
+        if (reflexGraph != null) {
+            reflexGraph.addNode(reflexId, baseWeight, 0.3, 1);
+        }
         return node;
     }
 
@@ -81,6 +87,9 @@ public class ReflexChain {
         if (from != null && to != null) {
             from.next().add(toId);
             to.prev().add(fromId);
+        }
+        if (reflexGraph != null && from != null && to != null) {
+            reflexGraph.addEdge(from.reflexId, to.reflexId, ReflexGraph.EdgeType.PRECEDES);
         }
     }
 
@@ -106,6 +115,9 @@ public class ReflexChain {
     }
 
     public List<String> traceUpstream(String nodeId) {
+        if (reflexGraph != null) {
+            return reflexGraph.getPredecessors(nodeId).stream().toList();
+        }
         List<String> upstream = new ArrayList<>();
         ReflexNode n = nodeMap.get(nodeId);
         if (n == null) return upstream;
@@ -120,11 +132,19 @@ public class ReflexChain {
         ReflexNode n = nodeMap.get(nodeId);
         if (n == null) return false;
         n.recordOutcome(success, taskId);
+        if (reflexGraph != null && n != null) {
+            reflexGraph.recordEdgeOutcome(n.reflexId, n.id(), success, null);
+        }
         return n.consecutiveFailures == 0;
     }
 
     public static ReflexChain buildFromDAG(TaskDAG dag) {
+        return buildFromDAG(dag, null);
+    }
+
+    public static ReflexChain buildFromDAG(TaskDAG dag, ReflexGraph globalGraph) {
         ReflexChain chain = new ReflexChain(dag.taskId());
+        chain.setReflexGraph(globalGraph);
         for (SubtaskNode sn : dag.nodes()) {
             chain.addNode(sn.id(), sn.action(), 0.5, sn.isBottleneck());
         }
@@ -140,6 +160,14 @@ public class ReflexChain {
     }
 
     public void autoDetectBottlenecks() {
+        if (reflexGraph != null) {
+            reflexGraph.autoDetectBottlenecks();
+            for (ReflexNode n : nodeMap.values()) {
+                var gn = reflexGraph.getNode(n.reflexId);
+                if (gn != null) n.setBottleneck(gn.isBottleneck());
+            }
+            return;
+        }
         Map<String, Integer> inDegree = new HashMap<>();
         for (ReflexNode n : nodeMap.values()) {
             inDegree.putIfAbsent(n.id(), 0);

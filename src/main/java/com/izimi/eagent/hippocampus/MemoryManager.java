@@ -232,6 +232,50 @@ public class MemoryManager {
         return results;
     }
 
+    public List<MemoryEntry> retrieveExpanded(String query, HormonalSystem hormones,
+                                                BayesianModule bayes, int topK) {
+        Set<String> seen = new LinkedHashSet<>();
+        List<MemoryEntry> results = new ArrayList<>();
+
+        // Phase 1: standard retrieval
+        List<MemoryEntry> base = retrieve(query, hormones, bayes, topK);
+        for (MemoryEntry entry : base) {
+            if (seen.add(entry.id)) results.add(entry);
+        }
+
+        // Phase 2: cluster expansion — find context cluster for each base result
+        if (memoryGraph != null) {
+            for (MemoryEntry entry : base) {
+                List<MemoryNode> cluster = memoryGraph.findContextCluster(entry.id, 0.4, 3);
+                for (MemoryNode node : cluster) {
+                    if (seen.add(node.memoryId())) {
+                        MemoryEntry memEntry = getEntry(node.memoryId());
+                        if (memEntry != null) results.add(memEntry);
+                    }
+                }
+            }
+
+            // Phase 3: cross-session enrichment — if results are thin, add past memories
+            if (results.size() < topK && query != null && !query.isEmpty()) {
+                String[] words = query.split("[\\s,，]+");
+                for (String word : words) {
+                    if (word.length() < 2) continue;
+                    List<MemoryNode> cross = memoryGraph.findCrossSessionMemories(this, word, topK - results.size());
+                    for (MemoryNode node : cross) {
+                        if (seen.add(node.memoryId())) {
+                            MemoryEntry memEntry = getEntry(node.memoryId());
+                            if (memEntry != null) results.add(memEntry);
+                        }
+                    }
+                    if (results.size() >= topK) break;
+                }
+            }
+        }
+
+        results.forEach(this::touchMemory);
+        return results.stream().limit(topK > 0 ? topK : 5).collect(Collectors.toList());
+    }
+
     public boolean hasNotSeenRecently(String entityType, long maxAgeMs) {
         refreshCacheIfNeeded();
         long cutoff = System.currentTimeMillis() - maxAgeMs;

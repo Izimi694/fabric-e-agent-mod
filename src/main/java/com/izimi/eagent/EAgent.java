@@ -11,6 +11,11 @@ import com.izimi.eagent.cortex.chat.LocalChatHandler;
 import com.izimi.eagent.brainstem.adapter.BasicActionAdapter;
 import com.izimi.eagent.brainstem.adapter.MinecraftActionAdapter;
 import com.izimi.eagent.brainstem.domain.DomainRouter;
+import com.izimi.eagent.brainstem.domain.CombatExecutor;
+import com.izimi.eagent.brainstem.domain.CraftExecutor;
+import com.izimi.eagent.brainstem.domain.PlaceExecutor;
+import com.izimi.eagent.brainstem.domain.InventoryExecutor;
+import com.izimi.eagent.brainstem.domain.GameConceptDetector;
 import com.izimi.eagent.brainstem.scheduler.*;
 
 import com.izimi.eagent.cortex.api.AIClient;
@@ -170,9 +175,14 @@ public class EAgent implements ModInitializer {
         conditionedReflex = new ConditionedReflex(skillManager, config, actionAdapter);
 
         // 初始化领域执行器
+        MinecraftActionAdapter adapter = (MinecraftActionAdapter) actionAdapter;
         DomainRouter domainRouter = new DomainRouter();
-        domainRouter.register(actionAdapter.getDigExecutor());
-        domainRouter.register(actionAdapter.getMotionExecutor());
+        domainRouter.register(adapter.getDigExecutor());
+        domainRouter.register(adapter.getMotionExecutor());
+        domainRouter.register(new CombatExecutor());
+        domainRouter.register(new CraftExecutor());
+        domainRouter.register(new PlaceExecutor());
+        domainRouter.register(new InventoryExecutor());
         taskExecutor = new TaskExecutor(taskManager, skillManager, executionLogger);
         behaviorStats = new BehaviorStats();
         behaviorEventHandler = new BehaviorEventHandler(behaviorStats);
@@ -184,6 +194,7 @@ public class EAgent implements ModInitializer {
         socialObserver = new SocialObserver(familiarityTracker);
         bayesianModule = new BayesianModule(null);
         conditionedReflex.setBayesianModule(bayesianModule);
+        conditionedReflex.setConceptDetector(new GameConceptDetector(knowledgeBase));
         socialClassifier = new NaiveBayesClassifier(thresholdConfig, bayesianModule);
         inhibitor = new InhibitoryControl();
 

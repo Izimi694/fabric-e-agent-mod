@@ -1,0 +1,65 @@
+[
+  {
+    "fromDay": 1, "toDay": 1,
+    "tierName": "石器时代",
+    "obligatory": true,
+    "description": "制作工作台，获取食物，制作床",
+    "requiredItems": [
+      {"itemId": "crafting_table", "minCount": 1},
+      {"itemId": "bed", "minCount": 1}
+    ],
+    "requiredNearby": [],
+    "requiredReflexes": [
+      {"reflexPrefix": "craft_crafting_table", "minProficiency": 30},
+      {"reflexPrefix": "craft_bed", "minProficiency": 30}
+    ],
+    "conceptChecks": [
+      {"conceptName": "is_well_lit", "expectedValue": true},
+      {"conceptName": "has_shelter", "expectedValue": true}
+    ],
+    "bonusItems": {"torch": 2, "coal": 5, "copper_ingot": 3, "copper_pickaxe": 10},
+    "scoreOnComplete": 100
+  },
+  {
+    "fromDay": 2, "toDay": 3,
+    "tierName": "铁器时代",
+    "obligatory": true,
+    "description": "挖铁矿石，制作铁镐/铁剑/盾牌",
+    "requiredItems": [
+      {"itemId": "iron_pickaxe", "minCount": 1},
+      {"itemId": "iron_sword", "minCount": 1},
+      {"itemId": "shield", "minCount": 1}
+    ],
+    "requiredNearby": [],
+    "requiredReflexes": [
+      {"reflexPrefix": "mine_iron", "minProficiency": 40},
+      {"reflexPrefix": "craft_iron_pickaxe", "minProficiency": 30}
+    ],
+    "conceptChecks": [],
+    "bonusItems": {"iron_ingot": 10, "coal": 20},
+    "scoreOnComplete": 200
+  },
+  {
+    "fromDay": 4, "toDay": 15,
+    "tierName": "建造与繁荣",
+    "obligatory": false,
+    "description": "建造房屋，开垦农田，采集钻石",
+    "requiredItems": [
+      {"itemId": "diamond_pickaxe", "minCount": 1}
+    ],
+    "requiredNearby": [
+      {"blockId": "farmland", "maxDistance": 20},
+      {"blockId": "chest", "maxDistance": 10}
+    ],
+    "requiredReflexes": [
+      {"reflexPrefix": "build_house", "minProficiency": 30},
+      {"reflexPrefix": "plant_wheat", "minProficiency": 30}
+    ],
+    "conceptChecks": [
+      {"conceptName": "has_shelter", "expectedValue": true},
+      {"conceptName": "has_food_supply", "expectedValue": true}
+    ],
+    "bonusItems": {"diamond": 20, "emerald": 30, "bread": 3, "cooked_beef": 5, "golden_apple": 50},
+    "scoreOnComplete": 300
+  }
+]

@@ -263,6 +263,17 @@ public class MemoryGraph {
                 .collect(Collectors.toList());
     }
 
+    // ── Context Cluster (similarity transitive closure) ──
+
+    public List<MemoryNode> findContextCluster(String memoryId, double minWeight, int maxDepth) {
+        Set<String> activated = traverseBFS(memoryId, MemoryEdge.RelationType.SIMILARITY, maxDepth, minWeight);
+        activated.remove(memoryId);
+        return activated.stream()
+                .map(nodes::get)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toList());
+    }
+
     public List<MemoryNode> traceCausalChain(String memoryId, boolean upstream) {
         if (!nodes.containsKey(memoryId)) return List.of();
 
@@ -479,6 +490,48 @@ public class MemoryGraph {
         }
     }
 
+    // ── Edge Decay / Pruning ──
+
+    public void applyEdgeDecay(long currentTime, double halfLifeMs) {
+        for (MemoryEdge edge : edges) {
+            long gap = currentTime - edge.lastReinforcedAt();
+            if (gap <= 0) continue;
+            double decayFactor = Math.pow(0.5, (double) gap / halfLifeMs);
+            double newWeight = edge.weight() * decayFactor;
+            edge.setWeight(Math.max(0.1, newWeight));
+        }
+    }
+
+    public int pruneEdges(double minWeight) {
+        int before = edges.size();
+        edges.removeIf(e -> e.weight() < minWeight);
+        return before - edges.size();
+    }
+
+    // ── Cross-session Association ──
+
+    public List<MemoryNode> findCrossSessionMemories(MemoryManager memMgr, String keyword, int topK) {
+        if (memMgr == null || keyword == null) return List.of();
+        return nodes.values().stream()
+                .filter(n -> {
+                    MemoryEntry entry = memMgr.getEntry(n.memoryId());
+                    if (entry == null) return false;
+                    String text = (entry.summary != null ? entry.summary : "")
+                            + (entry.keyLearnings != null ? " " + String.join(" ", entry.keyLearnings) : "");
+                    return text.toLowerCase().contains(keyword.toLowerCase());
+                })
+                .limit(topK > 0 ? topK : 5)
+                .collect(Collectors.toList());
+    }
+
+    public List<MemoryNode> findCrossSessionMemoriesByDay(int targetDay) {
+        return nodes.values().stream()
+                .filter(n -> n.gameDay() != targetDay)
+                .sorted(Comparator.comparingLong(MemoryNode::timestamp).reversed())
+                .limit(10)
+                .collect(Collectors.toList());
+    }
+
     private MemoryEdge findEdge(String fromId, String toId) {
         for (MemoryEdge e : edges) {
             if (e.fromId().equals(fromId) && e.toId().equals(toId)) return e;
@@ -494,6 +547,71 @@ public class MemoryGraph {
             if (e.fromId().equals(toId) && e.toId().equals(fromId)) return e;
         }
         return null;
+    }
+
+    // ── Graph Distance (BFS shortest path) ──
+
+    public int graphDistance(String startId, String targetId) {
+        if (startId == null || targetId == null || startId.equals(targetId)) return 0;
+        if (!nodes.containsKey(startId) || !nodes.containsKey(targetId)) return -1;
+
+        Queue<String> queue = new LinkedList<>();
+        Map<String, Integer> distance = new HashMap<>();
+        queue.add(startId);
+        distance.put(startId, 0);
+
+        while (!queue.isEmpty()) {
+            String current = queue.poll();
+            int curDist = distance.get(current);
+            for (MemoryEdge edge : edges) {
+                String neighbor = null;
+                if (edge.fromId().equals(current)) neighbor = edge.toId();
+                else if (edge.toId().equals(current)) neighbor = edge.fromId();
+                if (neighbor == null || distance.containsKey(neighbor)) continue;
+                distance.put(neighbor, curDist + 1);
+                if (neighbor.equals(targetId)) return curDist + 1;
+                queue.add(neighbor);
+            }
+        }
+        return -1;
+    }
+
+    // ── Infer reflex from memory ──
+
+    public Set<String> inferReflexFromMemory(MemoryManager memMgr, String reflexId) {
+        Set<String> result = new LinkedHashSet<>();
+        if (memMgr == null || reflexId == null) return result;
+        List<String> nodeIds = findNodeIdsByReflex(reflexId);
+        if (nodeIds.isEmpty()) return result;
+
+        Set<String> visited = new HashSet<>();
+        Queue<String> queue = new LinkedList<>(nodeIds);
+        visited.addAll(nodeIds);
+
+        while (!queue.isEmpty()) {
+            String current = queue.poll();
+            for (MemoryEdge edge : edges) {
+                String neighbor;
+                if (edge.fromId().equals(current)) neighbor = edge.toId();
+                else if (edge.toId().equals(current)) neighbor = edge.fromId();
+                else continue;
+                if (visited.add(neighbor)) {
+                    queue.add(neighbor);
+                    MemoryNode node = nodes.get(neighbor);
+                    if (node != null) {
+                        MemoryEntry entry = memMgr.getEntry(node.memoryId());
+                        if (entry != null && entry.relatedSkills != null) {
+                            for (String skill : entry.relatedSkills) {
+                                if (!reflexId.equals("reflex_" + skill)) {
+                                    result.add("reflex_" + skill);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return result;
     }
 
     // ── Diffusion Activation (Phase 2) ──

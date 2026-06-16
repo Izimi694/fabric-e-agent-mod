@@ -259,6 +259,7 @@ minecraft/eagent/
 | 项目 | 许可证 | 关系 |
 |------|--------|------|
 | [Mineflayer](https://github.com/PrismarineJS/mineflayer) | MIT | **客户端 Bot 框架**（Node.js）。本系统借用了三个设计：controlState 意图分离（setControlState → 物理循环单向消费）、挖掘协议三态（start/cancel/finish + swing 动画）、复活延迟 1500ms 防 Invalid move。本系统为 Fabric 服务端 mod，非客户端注入。 |
+| [AutoSci](https://github.com/skyllwt/AutoSci) | MIT | **AI 科研全生命周期平台**（北京大学 DAIR Lab）。本系统借鉴了两个设计：上下文预算编译（`ContextBudget.compileReflexSummary` 按 Perspective 裁剪 token 预算）、结构化失败原因传播（`failure_reasons` JSON 链 + `FailureContext` 诊断收集）。 |
 
 ---
 

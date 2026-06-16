@@ -19,6 +19,7 @@ public class KnowledgeBase {
     private final Map<String, List<String>> itemUses;
     private final Map<String, Template> templates;
     private final Map<String, String> toolMap;
+    private final Map<String, Object> gameRules;
 
     private final Map<String, Map<String, Object>> playstyleKnowledge;
     private String activePlaystyleId;
@@ -31,12 +32,14 @@ public class KnowledgeBase {
                           Map<String, Map<String, Object>> entities,
                           Map<String, List<String>> itemUses,
                           Map<String, Template> templates,
-                          Map<String, String> toolMap) {
+                          Map<String, String> toolMap,
+                          Map<String, Object> gameRules) {
         this.recipes = recipes;
         this.entities = entities;
         this.itemUses = itemUses;
         this.templates = templates;
         this.toolMap = toolMap;
+        this.gameRules = gameRules;
         this.playstyleKnowledge = new HashMap<>();
         this.activePlaystyleId = null;
     }
@@ -91,6 +94,47 @@ public class KnowledgeBase {
         return getFromPlaystyleOrGlobal("tool_map", blockId, toolMap);
     }
 
+    // ════════════════════════════════════════════════════════════════════
+    //  Game Rules — 硬编码游戏规则查询
+    // ════════════════════════════════════════════════════════════════════
+
+    public int getGameRuleInt(String key, int fallback) {
+        Object v = gameRules.get(key);
+        if (v instanceof Number n) return n.intValue();
+        return fallback;
+    }
+
+    public double getGameRuleDouble(String key, double fallback) {
+        Object v = gameRules.get(key);
+        if (v instanceof Number n) return n.doubleValue();
+        return fallback;
+    }
+
+    public boolean getGameRuleBool(String key, boolean fallback) {
+        Object v = gameRules.get(key);
+        if (v instanceof Boolean b) return b;
+        return fallback;
+    }
+
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> getGameRuleMap(String key) {
+        Object v = gameRules.get(key);
+        if (v instanceof Map) return (Map<String, Object>) v;
+        return Map.of();
+    }
+
+    public Collection<String> getGameRuleKeys() {
+        return gameRules.keySet();
+    }
+
+    /** 获取高效挖矿模式定义（由 game_rules.mining_patterns 加载） */
+    public Map<String, Object> getMiningPattern(String name) {
+        Map<String, Object> patterns = getGameRuleMap("mining_patterns");
+        Object v = patterns.get(name);
+        if (v instanceof Map) return (Map<String, Object>) v;
+        return Map.of();
+    }
+
     public Optional<Template> matchTemplate(String input) {
         for (Template t : templates.values()) {
             if (t.pattern().matcher(input).find()) {
@@ -125,6 +169,7 @@ public class KnowledgeBase {
         Map<String, List<String>> itemUses = new LinkedHashMap<>();
         Map<String, Map<String, Object>> entities = new LinkedHashMap<>();
         Map<String, String> toolMap = new LinkedHashMap<>();
+        Map<String, Object> gameRules = new LinkedHashMap<>();
 
         if (data.containsKey("recipes")) {
             recipes.putAll((Map<String, Map<String, Object>>) data.get("recipes"));
@@ -140,9 +185,12 @@ public class KnowledgeBase {
             Map<String, String> raw = (Map<String, String>) data.get("tool_map");
             toolMap.putAll(raw);
         }
+        if (data.containsKey("game_rules")) {
+            gameRules.putAll((Map<String, Object>) data.get("game_rules"));
+        }
         Map<String, Template> templates = parseTemplates(data);
 
-        return new KnowledgeBase(recipes, entities, itemUses, templates, toolMap);
+        return new KnowledgeBase(recipes, entities, itemUses, templates, toolMap, gameRules);
     }
 
     @SuppressWarnings("unchecked")
@@ -276,6 +324,51 @@ public class KnowledgeBase {
     "stone": "wooden_pickaxe",
     "log": "wooden_axe",
     "coal_ore": "wooden_pickaxe"
+  },
+  "game_rules": {
+    "monster_spawn_light_max": 7,
+    "safe_light_level": 8,
+    "torch_light_level": 14,
+    "shelter_enclosed_walls_min": 3,
+    "shelter_roof_required": true,
+    "food_tracker": {
+      "bread": 5,
+      "cooked_beef": 8,
+      "apple": 4,
+      "golden_apple": 20
+    },
+    "tool_efficiency": {
+      "wooden_pickaxe": {"base_speed": 2.0, "tier": 0},
+      "stone_pickaxe": {"base_speed": 4.0, "tier": 1},
+      "iron_pickaxe": {"base_speed": 6.0, "tier": 2},
+      "diamond_pickaxe": {"base_speed": 8.0, "tier": 3}
+    },
+    "ore_mining_levels": {
+      "coal_ore": 0,
+      "copper_ore": 0,
+      "iron_ore": 1,
+      "diamond_ore": 2,
+      "obsidian": 3
+    },
+    "mining_patterns": {
+      "strip_mining": {
+        "description": "在 Y=-59 水平直线挖 2x1 隧道，每 3 格分岔",
+        "optimal_y_levels": [-59, 11],
+        "tunnel_spacing": 3,
+        "tunnel_height": 2,
+        "efficiency_factor": 0.8
+      },
+      "branch_mining": {
+        "description": "主隧道两侧每 3 格挖分支隧道 20 格深",
+        "branch_spacing": 3,
+        "branch_length": 20,
+        "efficiency_factor": 0.9
+      },
+      "cave_mining": {
+        "description": "探索天然洞穴，优先检查裸露矿石",
+        "efficiency_factor": 1.5
+      }
+    }
   }
 }""";
 }

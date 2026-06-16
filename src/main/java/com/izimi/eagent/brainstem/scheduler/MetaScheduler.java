@@ -22,10 +22,13 @@ import com.izimi.eagent.brainstem.innate.InnateReflex;
 import com.izimi.eagent.brainstem.innate.InnateReflexRegistry;
 import com.izimi.eagent.cortex.api.TemplateManager;
 import com.izimi.eagent.cortex.api.TemplateMatcher;
+import com.izimi.eagent.cortex.planner.TaskDAG;
 import com.izimi.eagent.brainstem.navigation.LandmarkCalibrator;
 import com.izimi.eagent.cortex.api.PersonaManager;
 import com.izimi.eagent.cortex.chat.InputDigester;
 import com.izimi.eagent.cortex.prefrontal.CognitiveControl;
+import com.izimi.eagent.cortex.prefrontal.ReflexRecipe;
+import com.izimi.eagent.hormonal.NeuroState;
 import com.izimi.eagent.EAgent;
 import com.izimi.eagent.hormonal.HormonalSystem;
 import com.izimi.eagent.brainstem.scheduler.SurvivalChallengeMonitor;
@@ -39,6 +42,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
 public class MetaScheduler {
@@ -94,6 +98,9 @@ public class MetaScheduler {
 
     private boolean pendingTaskFailure = false;
     private int dormantCheckTick = 0;
+    private ReflexGraph reflexGraph;
+    private int pruneTick = 0;
+    private static final int PRUNE_INTERVAL_TICKS = 600;
 
     public MetaScheduler(MotivationEngine motivationEngine) {
         this.motivationEngine = motivationEngine;
@@ -121,6 +128,12 @@ public class MetaScheduler {
     public void setLandmarkCalibrator(LandmarkCalibrator lc) {
         this.landmarkCalibrator = lc;
     }
+
+    public void setReflexGraph(ReflexGraph graph) {
+        this.reflexGraph = graph;
+    }
+
+    public ReflexGraph getReflexGraph() { return reflexGraph; }
 
     private ProblemLabel labelProblem(BotContext botCtx, WorldContext worldCtx, ServerPlayerEntity bot, Perspective perspective) {
         InnateReflexRegistry reflex = worldCtx.brainstem().innateReflexes();
@@ -194,6 +207,12 @@ public class MetaScheduler {
     public void tick(BotContext botCtx, WorldContext worldCtx, ServerPlayerEntity bot, MetaState state, MinecraftServer server) {
         state.incrementTickSinceLastLLM();
         state.tickNovelEntities();
+
+        if (reflexGraph != null && ++pruneTick >= PRUNE_INTERVAL_TICKS) {
+            pruneTick = 0;
+            NeuroState ns = botCtx.hormonalSystem() != null ? botCtx.hormonalSystem().getNeuroState() : new NeuroState(0.5, 0.5, 0.5, 0.5);
+            reflexGraph.lazyPrune(ns);
+        }
 
         if (tickPhaseEscalation(worldCtx, state, botCtx, bot)) return;
         tickPhaseTemplate(state, botCtx, worldCtx, bot);
@@ -379,12 +398,19 @@ public class MetaScheduler {
         return true;
     }
 
+    private boolean isZeroReflex() {
+        return reflexGraph == null || reflexGraph.nodeCount() == 0;
+    }
+
     private DispatchReflex.DispatchAction fallbackDispatch(ProblemLabel label, FlowLevel flow, MetaState state) {
         if (flow == FlowLevel.OVERRIDE) {
             if (state != null && state.hasPendingChat()) {
                 return new DispatchReflex.DispatchAction("CORTEX_LLM", "override_llm");
             }
             return new DispatchReflex.DispatchAction("CORTEX_LOCAL", "override");
+        }
+        if (label == ProblemLabel.NOVEL && isZeroReflex()) {
+            return new DispatchReflex.DispatchAction("CORTEX_LLM", "zero_reflex_novel");
         }
         return switch (label) {
             case SURVIVAL, LEARNED_THREAT -> new DispatchReflex.DispatchAction("INSTINCT", label.name());
@@ -404,7 +430,7 @@ public class MetaScheduler {
             case "INSTINCT" -> LowLevelDispatcher.executeInstinctLayer(botCtx, worldCtx, bot, temporalScaler);
             case "HABIT" -> executeHabitLayerWithGating(botCtx, worldCtx, state, bot, perspective);
             case "CORTEX_LOCAL" -> LowLevelDispatcher.executeCortexLocal(botCtx, worldCtx, state, bot);
-            case "CORTEX_LLM" -> executeCortexLLM(botCtx, worldCtx, state, bot);
+            case "CORTEX_LLM" -> executeCortexLLM(botCtx, worldCtx, state, bot, perspective);
             case "IDLE" -> {
                 LowLevelDispatcher.executeIdle(botCtx, bot, temporalScaler);
                 checkDormantArchives(botCtx, bot);
@@ -415,7 +441,7 @@ public class MetaScheduler {
     }
 
 
-    private boolean executeCortexLLM(BotContext botCtx, WorldContext worldCtx, MetaState state, ServerPlayerEntity bot) {
+    private boolean executeCortexLLM(BotContext botCtx, WorldContext worldCtx, MetaState state, ServerPlayerEntity bot, Perspective perspective) {
         var templateManager = worldCtx.cortex().templateManager();
         if (templateManager == null) return false;
 
@@ -454,7 +480,7 @@ public class MetaScheduler {
         }
 
         // 构建模板上下文
-        Map<String, Object> context = buildTemplateContext(templateType, msg, botCtx, worldCtx);
+        Map<String, Object> context = buildTemplateContext(templateType, msg, botCtx, worldCtx, state, perspective);
 
         state.resetTickSinceLastLLM();
         try {
@@ -531,7 +557,8 @@ public class MetaScheduler {
     }
 
     private Map<String, Object> buildTemplateContext(TemplateManager.TemplateType type, String msg,
-                                                     BotContext botCtx, WorldContext worldCtx) {
+                                                      BotContext botCtx, WorldContext worldCtx,
+                                                      MetaState state, Perspective perspective) {
         Map<String, Object> ctx = new java.util.HashMap<>();
         var hormonal = botCtx.hormonalSystem();
         switch (type) {
@@ -546,6 +573,23 @@ public class MetaScheduler {
             case TASK_PLAN -> {
                 ctx.put("goal", msg);
                 ctx.put("availableActions", "moveTo, dig, attack, placeBlock, useItem, equipItem, craft, chat, jump, lookAt, openBlock, closeWindow, clickSlot");
+                if (reflexGraph != null) {
+                    ctx.put("knownReflexCount", reflexGraph.nodeCount());
+                    ctx.put("knownEdgeCount", reflexGraph.allEdges().size());
+                    String reflexContext = ContextBudget.compileReflexSummary(
+                            perspective, reflexGraph.allNodes(), reflexGraph.allEdges(), msg);
+                    ctx.put("relevantReflexes", reflexContext);
+                    List<String> cp = reflexGraph.criticalPath();
+                    if (!cp.isEmpty()) {
+                        ctx.put("criticalPath", String.join(", ", cp));
+                        ctx.put("estimatedTicks", (long) (cp.size() * ReflexGraph.CRITICAL_PATH_TICK_PER_ATOM));
+                    }
+                }
+                ctx.put("perspective", perspective != null ? perspective.name() : "TASK");
+                int budget = ContextBudget.getBudget(perspective);
+                ctx.put("contextBudget", budget);
+                String failedReflexes = buildFailedReflexesSummary(5, botCtx.botId(), worldCtx);
+                if (!failedReflexes.isEmpty()) ctx.put("failedReflexes", failedReflexes);
             }
             case REFLEX_CREATE -> {
                 String[] parts = msg.split(" ");
@@ -566,6 +610,54 @@ public class MetaScheduler {
             }
         }
         return ctx;
+    }
+
+    private String buildFailedReflexesSummary(int maxCount, UUID botId, WorldContext worldCtx) {
+        try {
+            List<String> reflexIds = listAllReflexFileIds(botId);
+            var router = worldCtx.brainstem().domainRouter();
+            java.util.Map<String, FailureContext> failures = router.getAllFailureContexts();
+            StringBuilder sb = new StringBuilder();
+            int count = 0;
+            for (String id : reflexIds) {
+                if (count >= maxCount) break;
+                FailureContext fc = failures.get(id);
+                String reason = fc != null ? fc.reason() : null;
+                if (reason == null) {
+                    java.util.List<Map<String, Object>> recent = ReflexIO.getFailureReasons(id, botId, 1);
+                    if (!recent.isEmpty()) {
+                        reason = (String) recent.get(0).get("reason");
+                    }
+                }
+                if (reason != null) {
+                    if (sb.length() > 0) sb.append("; ");
+                    sb.append(id).append(": ").append(reason);
+                    count++;
+                }
+            }
+            return sb.toString();
+        } catch (Exception e) {
+            LOGGER.debug("[MetaScheduler] 构建失败摘要异常", e);
+            return "";
+        }
+    }
+
+    private List<String> listAllReflexFileIds(UUID botId) {
+        List<String> ids = new ArrayList<>();
+        try {
+            Path dir = ReflexIO.conditionedDir(botId);
+            if (Files.isDirectory(dir)) {
+                try (var stream = Files.list(dir)) {
+                    stream.filter(p -> p.toString().endsWith(".json"))
+                            .map(p -> p.getFileName().toString().replace(".json", ""))
+                            .filter(n -> n.startsWith("reflex_"))
+                            .forEach(ids::add);
+                }
+            }
+        } catch (java.io.IOException e) {
+            LOGGER.debug("[MetaScheduler] 列取反射文件异常", e);
+        }
+        return ids;
     }
 
     /** 4D 状态向量 → 简短情绪摘要，比原始数值更省 token */
@@ -614,15 +706,53 @@ public class MetaScheduler {
                 }
             }
             case TASK_PLAN -> {
-                // 将 LLM 填的 DAG 固化为 TaskDAG + ReflexChain
                 String taskId = result.has("task_id") ? result.get("task_id").getAsString() : "task_" + System.currentTimeMillis();
                 LOGGER.info("[MetaScheduler] 收到任务DAG: {} ({} subtasks)", taskId,
                     result.has("subtasks") ? result.getAsJsonArray("subtasks").size() : 0);
-                // TaskDAG.fromLLMJson() 将被调用来解析;
-                // 目前集成点在 TaskManager, 这里先创建普通任务
                 var taskManager = botCtx.taskManager();
                 if (taskManager != null) {
                     taskManager.createTask(originalMsg != null ? originalMsg : taskId);
+                }
+                if (reflexGraph != null && result.has("subtasks")) {
+                    List<Map<String, Object>> subtaskMaps = new ArrayList<>();
+                    for (var elem : result.getAsJsonArray("subtasks")) {
+                        if (elem.isJsonObject()) {
+                            Map<String, Object> m = new java.util.LinkedHashMap<>();
+                            var obj = elem.getAsJsonObject();
+                            if (obj.has("id")) m.put("id", obj.get("id").getAsString());
+                            if (obj.has("action")) m.put("action", obj.get("action").getAsString());
+                            if (obj.has("target")) m.put("target", obj.get("target").getAsString());
+                            if (obj.has("count")) m.put("count", obj.get("count").getAsInt());
+                            if (obj.has("depends_on")) {
+                                List<Map<String, Object>> deps = new ArrayList<>();
+                                for (var dElem : obj.getAsJsonArray("depends_on")) {
+                                    if (dElem.isJsonObject()) {
+                                        Map<String, Object> depMap = new java.util.LinkedHashMap<>();
+                                        var depObj = dElem.getAsJsonObject();
+                                        if (depObj.has("id")) depMap.put("id", depObj.get("id").getAsString());
+                                        if (depObj.has("type")) depMap.put("type", depObj.get("type").getAsString());
+                                        deps.add(depMap);
+                                    }
+                                }
+                                m.put("depends_on", deps);
+                            }
+                            subtaskMaps.add(m);
+                        }
+                    }
+                    TaskDAG dag = TaskDAG.fromLLMJson(taskId, subtaskMaps);
+                    ReflexGraph dagGraph = ReflexGraph.fromTaskDAG(dag);
+                    for (var n : dagGraph.allNodes()) {
+                        reflexGraph.addNode(n.reflexId(), n.baseWeight(), n.proficiency(), n.atomCount());
+                    }
+                    for (var e : dagGraph.allEdges()) {
+                        reflexGraph.addEdge(e.fromId(), e.toId(), e.type(), e.priorAlpha, e.priorBeta);
+                    }
+                    List<String> criticalPath = reflexGraph.criticalPath();
+                    if (!criticalPath.isEmpty()) {
+                        LOGGER.info("[MetaScheduler] 关键路径: {} ({} 步, ~{} ticks)",
+                                String.join("->", criticalPath), criticalPath.size(),
+                                (long) (criticalPath.size() * ReflexGraph.CRITICAL_PATH_TICK_PER_ATOM));
+                    }
                 }
             }
             case REFLEX_CREATE -> {
@@ -666,6 +796,28 @@ public class MetaScheduler {
                 );
 
                 conditioned.solidifySequence(sequence, category);
+
+                if (reflexGraph != null) {
+                    String newReflexId = "reflex_" + category;
+                    ReflexGraph.ReflexGraphNode gn = reflexGraph.addNode(newReflexId, 0.5, 0.3, steps.size());
+                    if (gn != null) {
+                        gn.displayName = CategoryMapper.getCategoryDisplayName(category);
+                        List<String> similar = reflexGraph.bfs(newReflexId);
+                        for (String otherId : similar) {
+                            if (!otherId.equals(newReflexId)) {
+                                reflexGraph.addEdge(otherId, newReflexId, ReflexGraph.EdgeType.ALTERNATIVE);
+                            }
+                        }
+                    }
+                }
+
+                // 自动生成 CognitiveControl 反射配方
+                String firstAction = steps.get(0).action();
+                ReflexRecipe recipe = generateDefaultRecipeForAction(reflexId, firstAction);
+                if (cognitiveControl != null) {
+                    cognitiveControl.registerRecipe(recipe);
+                    LOGGER.info("[ReflexRecipe] 自动生成配方: {} → action={}", reflexId, firstAction);
+                }
 
                 if (bot != null) {
                     bot.sendMessage(Text.literal("§b[E-Agent] §f学会了 " + CategoryMapper.getCategoryDisplayName(category) + "，我试试看..."));
@@ -812,5 +964,53 @@ public class MetaScheduler {
         } catch (java.io.IOException e) {
             LOGGER.debug("[MetaScheduler] 检查归档反射: {}", e.getMessage());
         }
+    }
+
+    // ════════════════════════════════════════════════════════════════════
+    //  REFLEX_CREATE 自动配方生成
+    // ════════════════════════════════════════════════════════════════════
+
+    /**
+     * 基于动作类型推断默认的神经递质配方向量。
+     * 在 REFLEX_CREATE 钩子中调用，确保 CognitiveControl 对新反射有基线调制能力。
+     */
+    private static ReflexRecipe generateDefaultRecipeForAction(String reflexId, String action) {
+        double ne = 0.5, da = 0.5, serotonin = 0.5, ach = 0.5;
+        double safetyDistance = 3;
+        double neModulation = 1.0;
+
+        switch (action) {
+            case "attack" -> {
+                ne = 0.7; da = 0.6; serotonin = 0.2; ach = 0.8;
+                safetyDistance = 3; neModulation = 1.5;
+            }
+            case "dig", "mine" -> {
+                ne = 0.4; da = 0.5; serotonin = 0.4; ach = 0.7;
+            }
+            case "moveTo", "flee" -> {
+                ne = 0.8; da = 0.3; serotonin = 0.3; ach = 0.4;
+                safetyDistance = 5; neModulation = 2.0;
+            }
+            case "eat" -> {
+                ne = 0.3; da = 0.5; serotonin = 0.7; ach = 0.3;
+            }
+            case "craft", "placeBlock" -> {
+                ne = 0.3; da = 0.6; serotonin = 0.6; ach = 0.8;
+            }
+            case "equipItem", "openBlock", "closeWindow", "clickSlot" -> {
+                ne = 0.4; da = 0.5; serotonin = 0.5; ach = 0.6;
+            }
+            default -> {
+                // 保持 0.5 中性
+            }
+        }
+
+        return new ReflexRecipe(
+            reflexId,
+            new NeuroState(ne, da, serotonin, ach),
+            java.util.Map.of(),
+            safetyDistance,
+            neModulation
+        );
     }
 }

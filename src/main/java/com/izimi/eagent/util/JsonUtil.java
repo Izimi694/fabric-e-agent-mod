@@ -12,6 +12,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.util.List;
 import java.util.Map;
 
 public class JsonUtil {
@@ -105,5 +106,10 @@ public class JsonUtil {
             }
             LOGGER.warn("原子写入失败: {} — {}", path, e.getMessage());
         }
+    }
+
+    /** 从文件安全读取 JSON 数组。文件不存在或解析失败返回 null。 */
+    public static List<Map<String, Object>> readListFromFileSafe(Path path) {
+        return readFromFileSafe(path, new TypeToken<List<Map<String, Object>>>(){}.getType());
     }
 }

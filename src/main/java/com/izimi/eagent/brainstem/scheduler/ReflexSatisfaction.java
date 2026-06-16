@@ -12,20 +12,21 @@ public class ReflexSatisfaction {
 
     // ── Default weights ──
     public static final double W_TIME = 0.3;
-    public static final double W_SUCCESS = 0.7;
+    public static final double W_SUCCESS = 0.5;
+    public static final double W_COMPRESSION = 0.2;
 
     // ── Domain-adaptive weight profiles per Perspective ──
-    /** [w_time, w_risk (reserved), w_success, w_resource (reserved)] */
-    public record DomainWeights(double wTime, double wRisk, double wSuccess, double wResource) {
-        public static final DomainWeights DEFAULT = new DomainWeights(0.3, 0.0, 0.7, 0.0);
+    /** [w_time, w_risk, w_success, w_resource, w_compression] */
+    public record DomainWeights(double wTime, double wRisk, double wSuccess, double wResource, double wCompression) {
+        public static final DomainWeights DEFAULT = new DomainWeights(0.3, 0.0, 0.5, 0.0, 0.2);
     }
 
     private static final Map<Perspective, DomainWeights> DOMAIN_WEIGHTS = new HashMap<>(Map.of(
-        Perspective.SURVIVAL, new DomainWeights(0.2, 0.4, 0.4, 0.0),
-        Perspective.TASK,     new DomainWeights(0.4, 0.0, 0.5, 0.1),
-        Perspective.SOCIAL,   new DomainWeights(0.2, 0.0, 0.5, 0.3),
-        Perspective.CURIOUS,  new DomainWeights(0.1, 0.0, 0.6, 0.3),
-        Perspective.CAUTIOUS, new DomainWeights(0.3, 0.3, 0.3, 0.1)
+        Perspective.SURVIVAL, new DomainWeights(0.2, 0.4, 0.3, 0.0, 0.1),
+        Perspective.TASK,     new DomainWeights(0.3, 0.0, 0.4, 0.1, 0.2),
+        Perspective.SOCIAL,   new DomainWeights(0.2, 0.0, 0.4, 0.3, 0.1),
+        Perspective.CURIOUS,  new DomainWeights(0.1, 0.0, 0.4, 0.3, 0.2),
+        Perspective.CAUTIOUS, new DomainWeights(0.3, 0.3, 0.25, 0.1, 0.05)
     ));
 
     /** 根据 Perspective 获取领域自适应权重 */
@@ -70,7 +71,7 @@ public class ReflexSatisfaction {
     }
 
     /**
-     * 综合满意度 (加权和), 含时间缩放 + 风险 + 资源
+     * 综合满意度 (加权和), 含时间缩放 + 风险 + 资源 + 压缩
      *
      * @param estimatedSec      预计耗时 (秒，外部已通过 timeScale 缩放)
      * @param reflexWeight      反射权重 (stw×0.7 + ltb×0.3)
@@ -81,67 +82,69 @@ public class ReflexSatisfaction {
      * @param wRisk             riskScore 权重
      * @param wSuccess          successScore 权重
      * @param wResource         resourceScore 权重
+     * @param wCompression      compressionScore 权重
      * @param riskScore         风险评分 (0-1, 1=极安全)
      * @param resourceScore     资源评分 (0-1, 1=资源充足)
+     * @param compressionScore  压缩评分 (0-1, 1=高度压缩)
      */
     public static double compute(double estimatedSec, double reflexWeight, double atomProficiency,
-                                   double bayesianPosterior, double decayFactor,
-                                   double wTime, double wRisk, double wSuccess, double wResource,
-                                   double riskScore, double resourceScore) {
+                                    double bayesianPosterior, double decayFactor,
+                                    double wTime, double wRisk, double wSuccess, double wResource, double wCompression,
+                                    double riskScore, double resourceScore, double compressionScore) {
         double tScore = timeScore(estimatedSec);
         double sScore = reflexWeight * atomProficiency * bayesianPosterior * decayFactor;
-        return wTime * tScore + wRisk * riskScore + wSuccess * sScore + wResource * resourceScore;
+        return wTime * tScore + wRisk * riskScore + wSuccess * sScore + wResource * resourceScore + wCompression * compressionScore;
     }
 
-    /** 向后兼容: riskScore=1.0, resourceScore=1.0 */
+    /** 向后兼容: riskScore=1.0, resourceScore=1.0, compressionScore=1.0 */
     public static double compute(double estimatedSec, double reflexWeight, double atomProficiency,
-                                   double bayesianPosterior, double decayFactor,
-                                   double wTime, double wRisk, double wSuccess, double wResource) {
+                                    double bayesianPosterior, double decayFactor,
+                                    double wTime, double wRisk, double wSuccess, double wResource, double wCompression) {
         return compute(estimatedSec, reflexWeight, atomProficiency,
                 bayesianPosterior, decayFactor,
-                wTime, wRisk, wSuccess, wResource, 1.0, 1.0);
+                wTime, wRisk, wSuccess, wResource, wCompression, 1.0, 1.0, 1.0);
     }
 
     /** 指定 timeScale 缩放 estimatedSec 后计算 (默认权重) */
     public static double computeWithScale(double rawEstimatedSec, double timeScale,
-                                           double reflexWeight, double atomProficiency,
-                                           double bayesianPosterior, double decayFactor) {
+                                            double reflexWeight, double atomProficiency,
+                                            double bayesianPosterior, double decayFactor) {
         return compute(rawEstimatedSec * timeScale, reflexWeight, atomProficiency,
-                bayesianPosterior, decayFactor, W_TIME, 0.0, W_SUCCESS, 0.0);
+                bayesianPosterior, decayFactor, W_TIME, 0.0, W_SUCCESS, 0.0, W_COMPRESSION);
     }
 
     /** 指定 timeScale + 显式权重 */
     public static double computeWithScale(double rawEstimatedSec, double timeScale,
-                                           double reflexWeight, double atomProficiency,
-                                           double bayesianPosterior, double decayFactor,
-                                           double wTime, double wRisk, double wSuccess, double wResource) {
+                                            double reflexWeight, double atomProficiency,
+                                            double bayesianPosterior, double decayFactor,
+                                            double wTime, double wRisk, double wSuccess, double wResource, double wCompression) {
         return compute(rawEstimatedSec * timeScale, reflexWeight, atomProficiency,
-                bayesianPosterior, decayFactor, wTime, wRisk, wSuccess, wResource);
+                bayesianPosterior, decayFactor, wTime, wRisk, wSuccess, wResource, wCompression);
     }
 
     /** 带风险/资源评分的 timeScale + 默认权重 */
     public static double computeWithScale(double rawEstimatedSec, double timeScale,
-                                           double reflexWeight, double atomProficiency,
-                                           double bayesianPosterior, double decayFactor,
-                                           double riskScore, double resourceScore) {
+                                            double reflexWeight, double atomProficiency,
+                                            double bayesianPosterior, double decayFactor,
+                                            double riskScore, double resourceScore) {
         return compute(rawEstimatedSec * timeScale, reflexWeight, atomProficiency,
-                bayesianPosterior, decayFactor, W_TIME, 0.0, W_SUCCESS, 0.0,
-                riskScore, resourceScore);
+                bayesianPosterior, decayFactor, W_TIME, 0.0, W_SUCCESS, 0.0, W_COMPRESSION,
+                riskScore, resourceScore, 1.0);
     }
 
     /** 使用默认权重的综合满意度 (timeScale=1.0) */
     public static double compute(double estimatedSec, double reflexWeight, double atomProficiency,
                                   double bayesianPosterior, double decayFactor) {
         return compute(estimatedSec, reflexWeight, atomProficiency, bayesianPosterior, decayFactor,
-                W_TIME, 0.0, W_SUCCESS, 0.0);
+                W_TIME, 0.0, W_SUCCESS, 0.0, W_COMPRESSION);
     }
 
     /**
      * 使用领域自适应权重的综合满意度 (无时间缩放)
      */
     public static double computeForDomain(double estimatedSec, double reflexWeight, double atomProficiency,
-                                           double bayesianPosterior, double decayFactor,
-                                           Perspective perspective) {
+                                            double bayesianPosterior, double decayFactor,
+                                            Perspective perspective) {
         return computeForDomainWithScale(estimatedSec, 1.0, reflexWeight, atomProficiency,
                 bayesianPosterior, decayFactor, perspective);
     }
@@ -150,24 +153,24 @@ public class ReflexSatisfaction {
      * 使用领域自适应权重 + 时间缩放的综合满意度
      */
     public static double computeForDomainWithScale(double rawEstimatedSec, double timeScale,
-                                                     double reflexWeight, double atomProficiency,
-                                                     double bayesianPosterior, double decayFactor,
-                                                     Perspective perspective) {
+                                                      double reflexWeight, double atomProficiency,
+                                                      double bayesianPosterior, double decayFactor,
+                                                      Perspective perspective) {
         DomainWeights w = getWeights(perspective);
         return compute(rawEstimatedSec * timeScale, reflexWeight, atomProficiency,
-                bayesianPosterior, decayFactor, w.wTime(), w.wRisk(), w.wSuccess(), w.wResource());
+                bayesianPosterior, decayFactor, w.wTime(), w.wRisk(), w.wSuccess(), w.wResource(), w.wCompression());
     }
 
     /** 带风险/资源评分的领域自适应 + 时间缩放 */
     public static double computeForDomainWithScale(double rawEstimatedSec, double timeScale,
-                                                     double reflexWeight, double atomProficiency,
-                                                     double bayesianPosterior, double decayFactor,
-                                                     double riskScore, double resourceScore,
-                                                     Perspective perspective) {
+                                                      double reflexWeight, double atomProficiency,
+                                                      double bayesianPosterior, double decayFactor,
+                                                      double riskScore, double resourceScore,
+                                                      Perspective perspective) {
         DomainWeights w = getWeights(perspective);
         return compute(rawEstimatedSec * timeScale, reflexWeight, atomProficiency,
-                bayesianPosterior, decayFactor, w.wTime(), w.wRisk(), w.wSuccess(), w.wResource(),
-                riskScore, resourceScore);
+                bayesianPosterior, decayFactor, w.wTime(), w.wRisk(), w.wSuccess(), w.wResource(), w.wCompression(),
+                riskScore, resourceScore, 1.0);
     }
 
     /** 从原子数估算总耗时 (秒) */

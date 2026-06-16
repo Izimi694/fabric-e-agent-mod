@@ -5,6 +5,7 @@ import com.izimi.eagent.bayesian.BayesianModule;
 import com.izimi.eagent.brainstem.adapter.ActionResult;
 import com.izimi.eagent.brainstem.adapter.BasicActionAdapter;
 import com.izimi.eagent.brainstem.adapter.TemporalScaler;
+import com.izimi.eagent.brainstem.domain.GameConceptDetector;
 import com.izimi.eagent.brainstem.scheduler.DeviationCounter;
 import com.izimi.eagent.brainstem.scheduler.Perspective;
 import com.izimi.eagent.brainstem.scheduler.ReflexSatisfaction;
@@ -55,6 +56,7 @@ public class ConditionedReflex {
     private final UUID botId;
     private BayesianModule bayesianModule;
     private BotInstance botInstance;
+    private GameConceptDetector conceptDetector;
 
     private final Map<String, List<Double>> actionHistory = new ConcurrentHashMap<>();
     private int actionCount = 0;
@@ -63,26 +65,52 @@ public class ConditionedReflex {
     private int recentSuccessCount = 0;
     private final DeviationCounter deviationCounter = new DeviationCounter();
 
+    private com.izimi.eagent.brainstem.scheduler.ReflexGraph reflexGraph;
+
+    public void setReflexGraph(com.izimi.eagent.brainstem.scheduler.ReflexGraph graph) {
+        this.reflexGraph = graph;
+    }
+
+    @Deprecated
     private final Map<String, Set<String>> prevPointers = new ConcurrentHashMap<>();
+    @Deprecated
     private final Map<String, Set<String>> nextPointers = new ConcurrentHashMap<>();
+    @Deprecated
     private final Map<String, Boolean> bottleneckCache = new ConcurrentHashMap<>();
 
+    @Deprecated
     public void setPrev(String reflexId, String prevId) {
         prevPointers.computeIfAbsent(reflexId, k -> ConcurrentHashMap.newKeySet()).add(prevId);
+        if (reflexGraph != null) {
+            reflexGraph.addEdge(prevId, reflexId, com.izimi.eagent.brainstem.scheduler.ReflexGraph.EdgeType.PRECEDES);
+        }
     }
 
+    @Deprecated
     public void setNext(String reflexId, String nextId) {
         nextPointers.computeIfAbsent(reflexId, k -> ConcurrentHashMap.newKeySet()).add(nextId);
+        if (reflexGraph != null) {
+            reflexGraph.addEdge(reflexId, nextId, com.izimi.eagent.brainstem.scheduler.ReflexGraph.EdgeType.PRECEDES);
+        }
     }
 
+    @Deprecated
     public Set<String> getPrev(String reflexId) {
+        if (reflexGraph != null) {
+            return reflexGraph.getPredecessors(reflexId);
+        }
         return prevPointers.getOrDefault(reflexId, Collections.emptySet());
     }
 
+    @Deprecated
     public Set<String> getNext(String reflexId) {
+        if (reflexGraph != null) {
+            return reflexGraph.getSuccessors(reflexId);
+        }
         return nextPointers.getOrDefault(reflexId, Collections.emptySet());
     }
 
+    @Deprecated
     public void markBottleneck(String reflexId, boolean isBottleneck) {
         bottleneckCache.put(reflexId, isBottleneck);
         Path reflexPath = reflexPath(reflexId);
@@ -93,6 +121,7 @@ public class ConditionedReflex {
         }
     }
 
+    @Deprecated
     public boolean isBottleneck(String reflexId) {
         return bottleneckCache.getOrDefault(reflexId, false);
     }
@@ -149,6 +178,7 @@ public class ConditionedReflex {
             boolean passed = switch (type) {
                 case "item" -> checkItemPrecondition(bot, key, match);
                 case "state" -> checkStatePrecondition(bot, key, operator, value, hormonalSystem);
+                case "concept" -> checkConceptPrecondition(bot, key, value);
                 default -> true;
             };
 
@@ -192,6 +222,18 @@ public class ConditionedReflex {
         };
     }
 
+    /**
+     * 检查抽象概念前置条件 — 通过 GameConceptDetector 将"光源充足""有庇护所"
+     * 等概念级断言翻译为可测量的世界状态。
+     * value=1.0 → 期望概念为 true, value=0.0 → 期望概念为 false
+     */
+    private boolean checkConceptPrecondition(ServerPlayerEntity bot, String conceptName, double expectedValue) {
+        if (conceptDetector == null) return true;  // 无检测器时宽松通过（降级）
+        boolean expected = expectedValue != 0.0;
+        boolean actual = conceptDetector.checkConcept(conceptName, bot);
+        return actual == expected;
+    }
+
     public ConditionedReflex(SkillManager skillManager, ModConfig config, BasicActionAdapter actionAdapter) {
         this(skillManager, config, actionAdapter, null);
     }
@@ -202,6 +244,10 @@ public class ConditionedReflex {
 
     public void setBotInstance(BotInstance botInstance) {
         this.botInstance = botInstance;
+    }
+
+    public void setConceptDetector(GameConceptDetector conceptDetector) {
+        this.conceptDetector = conceptDetector;
     }
 
     public ConditionedReflex(SkillManager skillManager, ModConfig config, BasicActionAdapter actionAdapter, UUID botId) {
@@ -744,9 +790,9 @@ public class ConditionedReflex {
     private enum FailureSeverity { RETRY, PROBABILISTIC, WATCH, IMPOSSIBLE_ATOM, DORMANT }
 
     private void classifyAndApplyFailure(String skillId, ServerPlayerEntity bot,
-                                          List<Map<String, Object>> atoms, int atomIdx,
-                                          Map<String, Object> data, Path path,
-                                          double posterior, boolean converged) {
+                                           List<Map<String, Object>> atoms, int atomIdx,
+                                           Map<String, Object> data, Path path,
+                                           double posterior, boolean converged) {
         String currentStatus = (String) data.getOrDefault(KEY_STATUS, STATUS_HEALTHY);
         FailureSeverity severity;
         if (!converged) severity = FailureSeverity.RETRY;
@@ -754,6 +800,20 @@ public class ConditionedReflex {
         else if (posterior > 0.2) severity = !STATUS_WATCHING.equals(currentStatus) ? FailureSeverity.WATCH : FailureSeverity.RETRY;
         else if (atoms != null && atomIdx >= 0 && atomIdx < atoms.size()) severity = FailureSeverity.IMPOSSIBLE_ATOM;
         else severity = FailureSeverity.DORMANT;
+
+        // Record failure reason
+        String severityStr = severity.name();
+        String failureReason = severityStr + "_POSTERIOR_" + String.format("%.2f", posterior);
+        Map<String, Object> failureCtx = new LinkedHashMap<>();
+        failureCtx.put("severity", severityStr);
+        failureCtx.put("posterior", posterior);
+        failureCtx.put("converged", converged);
+        failureCtx.put("consecutiveFailures", consecutiveFailures.get());
+        if (atoms != null && atomIdx >= 0 && atomIdx < atoms.size()) {
+            failureCtx.put("atomIndex", atomIdx);
+            failureCtx.put("atomAction", atoms.get(atomIdx).get("action"));
+        }
+        ReflexIO.appendFailureReason(skillId, botId, failureReason, failureCtx);
 
         switch (severity) {
             case RETRY -> LOGGER.debug("[ConditionedReflex] 样本不足(未收敛)，重试: {}", skillId);

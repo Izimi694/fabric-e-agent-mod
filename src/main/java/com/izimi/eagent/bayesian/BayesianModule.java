@@ -12,6 +12,7 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 
 import com.izimi.eagent.hippocampus.MemoryEntry;
+import com.izimi.eagent.hormonal.NeuroState;
 import com.izimi.eagent.util.FileUtil;
 import com.izimi.eagent.util.JsonUtil;
 import com.izimi.eagent.util.api.FileSystem;
@@ -172,20 +173,29 @@ public class BayesianModule {
     // ── Public API: Update (error distillation core) ──
 
     public void update(String reflexId, List<BayesianFeature> features, boolean outcome) {
-        updatePrior(reflexId, outcome);
+        update(reflexId, features, outcome, null);
+    }
+
+    public void update(String reflexId, List<BayesianFeature> features, boolean outcome, NeuroState neuroState) {
+        double learningRate = neuroState != null ? PRIOR_LEARNING_RATE * (1.0 + neuroState.da() * 1.5) : PRIOR_LEARNING_RATE;
+        updatePrior(reflexId, outcome, learningRate);
         updatePosterior(features, outcome);
     }
 
     private void updatePrior(String reflexId, boolean outcome) {
+        updatePrior(reflexId, outcome, PRIOR_LEARNING_RATE);
+    }
+
+    private void updatePrior(String reflexId, boolean outcome, double learningRate) {
         double current = sharedPrior.getOrDefault(reflexId, DEFAULT_PRIOR);
-        double updated = current * (1.0 - PRIOR_LEARNING_RATE) + (outcome ? PRIOR_LEARNING_RATE : 0.0);
+        double updated = current * (1.0 - learningRate) + (outcome ? learningRate : 0.0);
         updated = Math.max(0, Math.min(1, updated));
         sharedPrior.put(reflexId, updated);
 
         PosteriorSnapshot prev = convergenceHistory.get(reflexId);
         if (prev == null) {
             double deviation = Math.abs(updated - DEFAULT_PRIOR);
-            double variance = Math.max(deviation, PRIOR_LEARNING_RATE);
+            double variance = Math.max(deviation, learningRate);
             convergenceHistory.put(reflexId, new PosteriorSnapshot(reflexId, current, updated, variance, 1));
         } else {
             convergenceHistory.put(reflexId, new PosteriorSnapshot(
@@ -315,8 +325,16 @@ public class BayesianModule {
     }
 
     public boolean isConverged(String reflexId) {
+        return isConverged(reflexId, null);
+    }
+
+    public boolean isConverged(String reflexId, NeuroState neuroState) {
         PosteriorSnapshot snap = convergenceHistory.get(reflexId);
-        return snap != null && snap.isConverged();
+        if (snap == null) return false;
+        double threshold = neuroState != null
+                ? CONVERGENCE_THRESHOLD * (1.0 + Math.max(0, neuroState.ne() - 0.5) * 0.5)
+                : CONVERGENCE_THRESHOLD;
+        return snap.sampleCount() >= 5 && snap.changeRate() < threshold;
     }
 
     public PosteriorSnapshot getConvergence(String reflexId) {

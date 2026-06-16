@@ -550,4 +550,119 @@ class MemoryGraphTest {
 
         assertEquals(0.1, graph.getEdges().get(0).weight(), 0.001);
     }
+
+    // ── Context Cluster ──
+
+    @Test
+    @DisplayName("findContextCluster returns connected nodes via SIMILARITY edges")
+    void findContextCluster() {
+        MemoryEntry a = entry("mem_001", "A", 1000, 1, null, null);
+        MemoryEntry b = entry("mem_002", "B", 2000, 1, null, null);
+        MemoryEntry c = entry("mem_003", "C", 3000, 1, null, null);
+        graph.addNode(a);
+        graph.addNode(b);
+        graph.addNode(c);
+        graph.addEdge("mem_001", "mem_002", MemoryEdge.RelationType.SIMILARITY, 0.8);
+        graph.addEdge("mem_002", "mem_003", MemoryEdge.RelationType.SIMILARITY, 0.9);
+
+        List<MemoryNode> cluster = graph.findContextCluster("mem_001", 0.4, 3);
+        assertEquals(2, cluster.size());
+    }
+
+    @Test
+    @DisplayName("findContextCluster returns empty for isolated node")
+    void findContextClusterIsolated() {
+        MemoryEntry a = entry("mem_001", "孤立", 1000, 1, null, null);
+        graph.addNode(a);
+
+        List<MemoryNode> cluster = graph.findContextCluster("mem_001", 0.4, 3);
+        assertTrue(cluster.isEmpty());
+    }
+
+    @Test
+    @DisplayName("findContextCluster respects minWeight threshold")
+    void findContextClusterMinWeight() {
+        MemoryEntry a = entry("mem_001", "A", 1000, 1, null, null);
+        MemoryEntry b = entry("mem_002", "B", 2000, 1, null, null);
+        graph.addNode(a);
+        graph.addNode(b);
+        graph.addEdge("mem_001", "mem_002", MemoryEdge.RelationType.SIMILARITY, 0.3);
+
+        List<MemoryNode> cluster = graph.findContextCluster("mem_001", 0.5, 3);
+        assertTrue(cluster.isEmpty());
+    }
+
+    // ── Edge Decay ──
+
+    @Test
+    @DisplayName("applyEdgeDecay reduces edge weights over time")
+    void applyEdgeDecayReducesWeight() {
+        MemoryEntry a = entry("mem_001", "A", 1000, 1, null, null);
+        MemoryEntry b = entry("mem_002", "B", 2000, 1, null, null);
+        graph.addNode(a);
+        graph.addNode(b);
+        graph.addEdge("mem_001", "mem_002", MemoryEdge.RelationType.CAUSAL, 0.8);
+
+        graph.applyEdgeDecay(System.currentTimeMillis() + 3600000, 3600000);
+
+        assertTrue(graph.getEdges().get(0).weight() < 0.8);
+        assertTrue(graph.getEdges().get(0).weight() >= 0.1);
+    }
+
+    @Test
+    @DisplayName("applyEdgeDecay clamps weight to minimum 0.1")
+    void applyEdgeDecayClampsMin() {
+        MemoryEntry a = entry("mem_001", "A", 1000, 1, null, null);
+        MemoryEntry b = entry("mem_002", "B", 2000, 1, null, null);
+        graph.addNode(a);
+        graph.addNode(b);
+        graph.addEdge("mem_001", "mem_002", MemoryEdge.RelationType.CAUSAL, 0.5);
+
+        graph.applyEdgeDecay(System.currentTimeMillis() + 86400000L * 30, 3600000);
+
+        assertEquals(0.1, graph.getEdges().get(0).weight(), 0.001);
+    }
+
+    @Test
+    @DisplayName("pruneEdges removes edges below threshold and returns count")
+    void pruneEdgesRemovesLowEdges() {
+        MemoryEntry a = entry("mem_001", "A", 1000, 1, null, null);
+        MemoryEntry b = entry("mem_002", "B", 2000, 1, null, null);
+        MemoryEntry c = entry("mem_003", "C", 3000, 1, null, null);
+        graph.addNode(a);
+        graph.addNode(b);
+        graph.addNode(c);
+        graph.addEdge("mem_001", "mem_002", MemoryEdge.RelationType.TEMPORAL, 0.8);
+        graph.addEdge("mem_002", "mem_003", MemoryEdge.RelationType.TEMPORAL, 0.2);
+
+        int removed = graph.pruneEdges(0.5);
+        assertEquals(1, removed);
+        assertEquals(1, graph.edgeCount());
+    }
+
+    // ── Cross-session ──
+
+    @Test
+    @DisplayName("findCrossSessionMemoriesByDay excludes current day")
+    void findCrossSessionMemoriesByDay() {
+        MemoryEntry a = entry("mem_001", "day1", 1000, 1, null, null);
+        MemoryEntry b = entry("mem_002", "day2", 2000, 2, null, null);
+        MemoryEntry c = entry("mem_003", "day2b", 3000, 2, null, null);
+        graph.addNode(a);
+        graph.addNode(b);
+        graph.addNode(c);
+
+        List<MemoryNode> result = graph.findCrossSessionMemoriesByDay(2);
+        assertEquals(1, result.size());
+        assertEquals("mem_001", result.get(0).memoryId());
+    }
+
+    @Test
+    @DisplayName("findCrossSessionMemoriesByDay returns empty when no other days")
+    void findCrossSessionMemoriesByDayEmpty() {
+        MemoryEntry a = entry("mem_001", "only", 1000, 1, null, null);
+        graph.addNode(a);
+
+        assertTrue(graph.findCrossSessionMemoriesByDay(1).isEmpty());
+    }
 }

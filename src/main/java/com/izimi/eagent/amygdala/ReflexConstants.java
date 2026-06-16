@@ -33,6 +33,12 @@ public final class ReflexConstants {
     public static final String KEY_TRIAL_FAILURES = "trialFailures";
     public static final String KEY_LAST_ACCESSED = "lastAccessedAt";
 
+    public static final String KEY_FAILURE_REASONS = "failureReasons";
+    public static final String KEY_FAILURE_REASON = "reason";
+    public static final String KEY_FAILURE_CONTEXT = "context";
+    public static final String KEY_FAILURE_TIMESTAMP = "timestamp";
+    public static final int MAX_FAILURE_REASONS = 10;
+
     // ── Decay ──
     public static final double DECAY_RATE_PER_HOUR = 0.0003;
     public static final double DECAY_MIN = 0.3;

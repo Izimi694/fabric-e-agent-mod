@@ -31,8 +31,9 @@ public class DomainRouter {
                 return (CompletableFuture<R>) raw.submit(cmd);
             }
         }
-        LOGGER.warn("[DomainRouter] No executor for: {}", cmd.commandType());
-        return CompletableFuture.completedFuture(null);
+        String msg = "[DomainRouter] No executor registered for command type: " + cmd.commandType();
+        LOGGER.error(msg);
+        return CompletableFuture.failedFuture(new UnsupportedOperationException(msg));
     }
 
     public void tickAll() {

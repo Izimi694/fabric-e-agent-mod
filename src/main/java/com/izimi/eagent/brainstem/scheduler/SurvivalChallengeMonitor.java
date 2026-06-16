@@ -36,7 +36,15 @@ public class SurvivalChallengeMonitor {
     // ── 挑战生命周期 ──
     private static int challengeEndDay = -1;  // -1 = 无限
 
+    // ── 里程碑追踪器 ──
+    private static ChallengeMilestoneTracker milestoneTracker;
+
     private SurvivalChallengeMonitor() {}
+
+    /** 注入里程碑追踪器（由 AICommand 在挑战开始时调用） */
+    public static void setMilestoneTracker(ChallengeMilestoneTracker tracker) {
+        milestoneTracker = tracker;
+    }
 
     // ════════════════════════════════════════════════════════════════════
     //  钩子 API
@@ -56,6 +64,7 @@ public class SurvivalChallengeMonitor {
         deathCounters.clear();
         lastDayPrinted = -1;
         challengeEndDay = -1;
+        if (milestoneTracker != null) milestoneTracker.reset();
     }
 
     /** 启动挑战 (days <= 0 = 无限) */
@@ -110,6 +119,27 @@ public class SurvivalChallengeMonitor {
                     day, b.getBotName(), detailedLine(b));
         }
 
+        // ── 里程碑检查 ──
+        if (milestoneTracker != null) {
+            for (BotInstance b : bots) {
+                if (b == null) continue;
+                ServerPlayerEntity entity = b.asEntity();
+                if (entity == null) continue;
+                InvSummary inv = summarizeInventory(entity);
+                var result = milestoneTracker.checkDay(day, b.getBotId(), entity, inv);
+                if (!result.passed().isEmpty()) {
+                    LOGGER.info("[挑战] {} Day{} ✅ 达标: {} (+{}分)",
+                            b.getBotName(), day,
+                            String.join(", ", result.passed()), result.newScore());
+                }
+                if (!result.failed().isEmpty()) {
+                    LOGGER.warn("[挑战] {} Day{} ❌ 未达标: {}",
+                            b.getBotName(), day,
+                            String.join(", ", result.failed()));
+                }
+            }
+        }
+
         // ── 挑战结束自动报告 ──
         if (shouldEnd) {
             printFinalReport(bots);
@@ -132,9 +162,17 @@ public class SurvivalChallengeMonitor {
         int llm = llmCounters.getOrDefault(bot.getBotId(), new AtomicInteger()).get();
         InvSummary inv = summarizeInventory(entity);
 
-        return String.format("%s[HP:%d/%d 饿:%d 🪓:%d ⛏:%d 💎:%d 💀:%d 🤖:%d]",
-                bot.getBotName(), hp, (int) entity.getMaxHealth(), food,
-                inv.pickaxe, inv.iron, inv.diamond, deaths, llm);
+        // 里程碑达标符号
+        int milestonesPassed = 0;
+        if (milestoneTracker != null) {
+            milestonesPassed = milestoneTracker.getPassedCount(bot.getBotId());
+        }
+        String star = milestonesPassed >= 3 ? "★" : milestonesPassed >= 1 ? "☆" : "";
+
+        return String.format("%s[HP:%d 饿:%d 🪓:%d⚔:%d🛡:%d 🔥:%d 🛏:%d ⛏:%d 💎:%d 💀:%d 🤖:%d]%s",
+                bot.getBotName(), hp, food,
+                inv.totalPickaxes(), inv.totalSwords(), inv.shield,
+                inv.torch, inv.bed, inv.ironIngot, inv.diamond, deaths, llm, star);
     }
 
     private static String detailedLine(BotInstance bot) {
@@ -149,11 +187,17 @@ public class SurvivalChallengeMonitor {
         boolean legacy = bot.isLegacyScoring();
         InvSummary inv = summarizeInventory(entity);
 
-        return String.format("pos=[%d,%d,%d] HP=%d Hung=%d legacy=%s 物品:木镐=%d 石镐=%d 铁镐=%d 钻石镐=%d 铁锭=%d 钻石=%d 死亡=%d LLM=%d",
-                pos.getX(), pos.getY(), pos.getZ(),
-                hp, food, legacy,
+        return String.format("pos=[%d,%d,%d] HP=%d Hung=%d legacy=%s " +
+                        "镐:木=%d石=%d铁=%d钻=%d 剑:木=%d石=%d铁=%d钻=%d 盾=%d弓=%d " +
+                        "矿:铁锭=%d钻石=%d铜=%d煤=%d 建筑:工作台=%d熔炉=%d箱子=%d床=%d " +
+                        "食物:%d 死亡=%d LLM=%d",
+                pos.getX(), pos.getY(), pos.getZ(), hp, food, legacy,
                 inv.woodPick, inv.stonePick, inv.ironPick, inv.diamondPick,
-                inv.iron, inv.diamond, deaths, llm);
+                inv.woodSword, inv.stoneSword, inv.ironSword, inv.diamondSword,
+                inv.shield, inv.bow,
+                inv.ironIngot, inv.diamond, inv.copperIngot, inv.coal,
+                inv.craftingTable, inv.furnace, inv.chest, inv.bed,
+                inv.totalFood(), deaths, llm);
     }
 
     // ════════════════════════════════════════════════════════════════════
@@ -165,21 +209,100 @@ public class SurvivalChallengeMonitor {
         for (ItemStack stack : entity.getInventory().main) {
             if (stack.isEmpty()) continue;
             int cnt = stack.getCount();
-            if (stack.isOf(Items.WOODEN_PICKAXE))  s.woodPick += cnt;
-            if (stack.isOf(Items.STONE_PICKAXE))   s.stonePick += cnt;
-            if (stack.isOf(Items.IRON_PICKAXE))    s.ironPick += cnt;
-            if (stack.isOf(Items.DIAMOND_PICKAXE)) s.diamondPick += cnt;
-            if (stack.isOf(Items.IRON_INGOT))      s.iron += cnt;
-            if (stack.isOf(Items.DIAMOND))         s.diamond += cnt;
+
+            // 工具
+            if (stack.isOf(Items.WOODEN_PICKAXE))   s.woodPick += cnt;
+            if (stack.isOf(Items.STONE_PICKAXE))    s.stonePick += cnt;
+            if (stack.isOf(Items.IRON_PICKAXE))     s.ironPick += cnt;
+            if (stack.isOf(Items.DIAMOND_PICKAXE))  s.diamondPick += cnt;
+            if (stack.isOf(Items.WOODEN_SWORD))     s.woodSword += cnt;
+            if (stack.isOf(Items.STONE_SWORD))      s.stoneSword += cnt;
+            if (stack.isOf(Items.IRON_SWORD))       s.ironSword += cnt;
+            if (stack.isOf(Items.DIAMOND_SWORD))    s.diamondSword += cnt;
+            if (stack.isOf(Items.SHIELD))           s.shield += cnt;
+            if (stack.isOf(Items.BOW))              s.bow += cnt;
+
+            // 矿物
+            if (stack.isOf(Items.COAL))             s.coal += cnt;
+            if (stack.isOf(Items.RAW_COPPER))       s.copperRaw += cnt;
+            if (stack.isOf(Items.COPPER_INGOT))     s.copperIngot += cnt;
+            if (stack.isOf(Items.RAW_IRON))         s.ironRaw += cnt;
+            if (stack.isOf(Items.IRON_INGOT))       s.ironIngot += cnt;
+            if (stack.isOf(Items.DIAMOND))          s.diamond += cnt;
+            if (stack.isOf(Items.EMERALD))          s.emerald += cnt;
+
+            // 建筑/生存
+            if (stack.isOf(Items.CRAFTING_TABLE))   s.craftingTable += cnt;
+            if (stack.isOf(Items.WHITE_BED))         s.bed += cnt;
+            if (stack.isOf(Items.FURNACE))          s.furnace += cnt;
+            if (stack.isOf(Items.CHEST))            s.chest += cnt;
+            if (stack.isOf(Items.TORCH))            s.torch += cnt;
+            if (stack.isOf(Items.CAMPFIRE))         s.campfire += cnt;
+
+            // 食物
+            if (stack.isOf(Items.BREAD))            s.bread += cnt;
+            if (stack.isOf(Items.COOKED_BEEF))      s.cookedBeef += cnt;
+            if (stack.isOf(Items.APPLE))            s.apple += cnt;
+            if (stack.isOf(Items.GOLDEN_APPLE))     s.goldenApple += cnt;
         }
-        s.pickaxe = (s.woodPick + s.stonePick + s.ironPick + s.diamondPick) > 0 ? 1 : 0;
         return s;
     }
 
-    private static class InvSummary {
-        int woodPick, stonePick, ironPick, diamondPick;
-        int iron, diamond;
-        int pickaxe; // 有无任何镐
+    public static class InvSummary {
+        // 工具 (7)
+        public int woodPick, stonePick, ironPick, diamondPick;
+        public int woodSword, stoneSword, ironSword, diamondSword;
+        public int shield, bow;
+
+        // 矿物 (7)
+        public int coal, copperRaw, copperIngot, ironRaw, ironIngot, diamond, emerald;
+
+        // 建筑/生存 (6)
+        public int craftingTable, bed, furnace, chest, torch, campfire;
+
+        // 食物 (4)
+        public int bread, cookedBeef, apple, goldenApple;
+
+        // ── 辅助方法 ──
+        public int totalPickaxes() { return woodPick + stonePick + ironPick + diamondPick; }
+        public boolean hasAnyPickaxe() { return totalPickaxes() > 0; }
+        public int totalSwords() { return woodSword + stoneSword + ironSword + diamondSword; }
+        public int totalIronSet() { return ironPick + ironSword + shield; }
+        public boolean hasFullIronSet() { return ironPick >= 1 && ironSword >= 1 && shield >= 1; }
+        public int totalFood() { return bread + cookedBeef + apple + goldenApple; }
+
+        /** 按 itemId 短名称查询数量（用于 ChallengeMilestone 检查） */
+        public int count(String itemId) {
+            return switch (itemId) {
+                case "wooden_pickaxe" -> woodPick;
+                case "stone_pickaxe" -> stonePick;
+                case "iron_pickaxe" -> ironPick;
+                case "diamond_pickaxe" -> diamondPick;
+                case "wooden_sword" -> woodSword;
+                case "stone_sword" -> stoneSword;
+                case "iron_sword" -> ironSword;
+                case "diamond_sword" -> diamondSword;
+                case "shield" -> shield;
+                case "bow" -> bow;
+                case "coal" -> coal;
+                case "copper_ingot" -> copperIngot;
+                case "raw_iron" -> ironRaw;
+                case "iron_ingot" -> ironIngot;
+                case "diamond" -> diamond;
+                case "emerald" -> emerald;
+                case "crafting_table" -> craftingTable;
+                case "bed" -> bed;
+                case "furnace" -> furnace;
+                case "chest" -> chest;
+                case "torch" -> torch;
+                case "campfire" -> campfire;
+                case "bread" -> bread;
+                case "cooked_beef" -> cookedBeef;
+                case "apple" -> apple;
+                case "golden_apple" -> goldenApple;
+                default -> 0;
+            };
+        }
     }
 
     // ════════════════════════════════════════════════════════════════════
@@ -209,17 +332,26 @@ public class SurvivalChallengeMonitor {
             InvSummary inv = summarizeInventory(entity);
             int deaths = deathCounters.getOrDefault(b.getBotId(), new AtomicInteger()).get();
             int llm = llmCounters.getOrDefault(b.getBotId(), new AtomicInteger()).get();
-            int score = inv.iron * 10 + inv.diamond * 50 - deaths * 100;
-            score = Math.max(0, score);
+            int resourceScore = inv.ironIngot * 2 + inv.diamond * 20 +
+                                inv.copperIngot * 1 + inv.coal * 1 + inv.emerald * 30;
+            int deathPenalty = deaths * 200;
+            int llmBonus = Math.max(0, 50 - llm);
+            int score = Math.max(0, resourceScore + llmBonus - deathPenalty);
 
             LOGGER.info("  {} (legacy={})", b.getBotName(), b.isLegacyScoring());
             LOGGER.info("    HP={}/{} 饿={}", (int) entity.getHealth(), (int) entity.getMaxHealth(),
                     entity.getHungerManager().getFoodLevel());
-            LOGGER.info("    工具: 木={} 石={} 铁={} 钻={}",
-                    inv.woodPick, inv.stonePick, inv.ironPick, inv.diamondPick);
-            LOGGER.info("    资源: 铁={} 钻={}", inv.iron, inv.diamond);
+            LOGGER.info("    工具: 木镐={} 石镐={} 铁镐={} 钻镐={} 盾={} 弓={}",
+                    inv.woodPick, inv.stonePick, inv.ironPick, inv.diamondPick, inv.shield, inv.bow);
+            LOGGER.info("    资源: 铁={} 钻={} 铜={} 煤={} 绿宝石={}",
+                    inv.ironIngot, inv.diamond, inv.copperIngot, inv.coal, inv.emerald);
+            LOGGER.info("    建筑: 工作台={} 熔炉={} 箱子={} 床={} 火把={}",
+                    inv.craftingTable, inv.furnace, inv.chest, inv.bed, inv.torch);
+            LOGGER.info("    食物储备: {} 总份", inv.totalFood());
             LOGGER.info("    死亡={} LLM调用={}", deaths, llm);
-            LOGGER.info("    §b评分: {} {}", score, score >= 100 ? "★" : "");
+            LOGGER.info("    §b评分: {} (资源{} + LLM效率{} - 死亡{}) {}",
+                    score, resourceScore, llmBonus, deathPenalty,
+                    score >= 500 ? "★" : score >= 200 ? "☆" : "");
         }
         LOGGER.info("═══════════════════════════════════════════════");
         LOGGER.info("");

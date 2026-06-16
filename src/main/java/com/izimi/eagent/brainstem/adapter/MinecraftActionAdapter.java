@@ -29,12 +29,15 @@ import net.minecraft.util.math.Vec3d;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class MinecraftActionAdapter implements BasicActionAdapter {
 
     private final DigExecutor digExecutor = new DigExecutor();
     private final MotionExecutor motionExecutor = new MotionExecutor();
+    private final Set<UUID> fleeingBots = ConcurrentHashMap.newKeySet();
 
     public DigExecutor getDigExecutor() { return digExecutor; }
     public MotionExecutor getMotionExecutor() { return motionExecutor; }
@@ -256,11 +259,36 @@ public class MinecraftActionAdapter implements BasicActionAdapter {
     @Override
     public ActionResult flee(ServerPlayerEntity bot, double speed) {
         if (bot == null) return ActionResult.unable("flee: bot为null");
+
         Vec3d away = fleeDirection(bot);
-        bot.setVelocity(away.multiply(speed));
-        bot.velocityModified = true;
-        bot.jump();
-        return ActionResult.success("flee");
+        if (away == null) {
+            return ActionResult.partial(0.3, "flee: 没有明显威胁方向");
+        }
+
+        UUID botId = bot.getUuid();
+        boolean alreadyFleeing = fleeingBots.contains(botId);
+
+        if (!alreadyFleeing) {
+            // 第一帧：velocity 紧急闪避
+            bot.setVelocity(away.multiply(speed));
+            bot.velocityModified = true;
+            bot.jump();
+            fleeingBots.add(botId);
+        }
+
+        // 持续帧：通过 NavigationController 寻路到安全方向
+        BlockPos fleeTarget = new BlockPos(
+                (int) (bot.getX() + away.x * 15),
+                (int) bot.getY(),
+                (int) (bot.getZ() + away.z * 15)
+        );
+        ActionResult navResult = motionExecutor.moveTo(bot, fleeTarget);
+
+        if (navResult.success()) {
+            // 已到达安全位置
+            fleeingBots.remove(botId);
+        }
+        return navResult;
     }
 
     @Override
@@ -286,10 +314,34 @@ public class MinecraftActionAdapter implements BasicActionAdapter {
     @Override
     public ActionResult retreat(ServerPlayerEntity bot, double speed) {
         if (bot == null) return ActionResult.unable("retreat: bot为null");
+
         Vec3d away = fleeDirection(bot);
-        bot.setVelocity(away.multiply(speed));
-        bot.velocityModified = true;
-        return ActionResult.success("retreat");
+        if (away == null) {
+            return ActionResult.partial(0.3, "retreat: 没有明显威胁方向");
+        }
+
+        UUID botId = bot.getUuid();
+        boolean alreadyFleeing = fleeingBots.contains(botId);
+
+        if (!alreadyFleeing) {
+            // 第一帧：velocity 紧急退避（不跳跃）
+            bot.setVelocity(away.multiply(speed));
+            bot.velocityModified = true;
+            fleeingBots.add(botId);
+        }
+
+        // 持续帧：寻路到安全方向
+        BlockPos retreatTarget = new BlockPos(
+                (int) (bot.getX() + away.x * 10),
+                (int) bot.getY(),
+                (int) (bot.getZ() + away.z * 10)
+        );
+        ActionResult navResult = motionExecutor.moveTo(bot, retreatTarget);
+
+        if (navResult.success()) {
+            fleeingBots.remove(botId);
+        }
+        return navResult;
     }
 
     @Override

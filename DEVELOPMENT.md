@@ -7,7 +7,7 @@
 ## 1. 当前状态
 
 ```
-项目阶段: ✅ Stage 1-3 domain executors + Stage 5 failure escalation + resource stress + dynamic temperature
+项目阶段: ✅ Stage 1-3 domain executors + Stage 5 failure escalation + resource stress + dynamic temperature + ContextBudget + failure_reasons + MemoryGraph 召回优化
 ```
 
 ### 完成情况
@@ -57,6 +57,9 @@
 | **Stage 5** | **TASK_REPLAN 失败升级链 + TaskExecutor MAX_UNABLE_RETRIES (200→5) + onUnableExhausted** | ✅ |
 | **Stage 5b** | **资源压力模型 resourceStress() + 动态温度 + 任务惯性 + ThreatInfo/getThreatsNearby** | ✅ |
 | **TemporalScaler** | **computeTimeScale(h,pressure) + update(h,bot,ticks,pressure) + @Deprecated 旧 overload** | ✅ |
+| **Phase AutoSci-A** | **ContextBudget 上下文预算编译 + compileReflexSummary (灵感: [AutoSci](https://github.com/skyllwt/AutoSci))** | ✅ |
+| **Phase AutoSci-B** | **structured failure_reasons 错误原因存储 (灵感: [AutoSci](https://github.com/skyllwt/AutoSci))** | ✅ |
+| **Phase MemoryGraph 召回** | **findContextCluster/applyEdgeDecay+pruneEdges/findCrossSessionMemories/retrieveExpanded** | ✅ |
 
 
 ---
@@ -75,7 +78,18 @@ Phase 7 (繁衍) ── 三规则继承 (平均+脚手架 trial-first + 突变) 
 
 Phase G-M (全部已完成): ReflexChain/TaskDAG/Loop/死路/可控性/双向推理/共享池/门控/绑定
 
-Phase LLM (四模板LLM调用重构):
+Phase Challenge (15天挑战系统 — 2026-06-17):
+  ├── A.1 — ChallengeMilestone + challenge_milestones.json (3-tier)
+  ├── A.2 — KnowledgeBase.game_rules + 5 个类型安全查询方法
+  ├── A.3 — GameConceptDetector (抽象概念→可测量检查)
+  ├── B.1 — InvSummary 扩展到 24 种物品
+  ├── B.2 — ChallengeMilestoneTracker (每日里程碑检查)
+  ├── B.3 — 新评分公式: resourceScore + llmBonus − deathPenalty
+  ├── C.1 — ChallengeMilestoneTest (10 个测试)
+  └── C.2 — Scenarios S10-S18 (9 个递进式决策场景)
+  **347 测试全部通过**
+
+Phase RF (重构 — 降低复杂度 & 错误处理):
   ├── P0 — MetaScheduler.executeCortexLLM() 接入 TemplateManager
   ├── P1 — CLARIFICATION 模板 + TemplateMatcher 路由
   ├── P2 — CHAT_RESPONSE 模板 + 独立预算
@@ -203,6 +217,34 @@ Resource Stress + 动态温度 + TemporalScaler 统一:
   └── RS.13 — 删除 W_FEAR 常量 (被资源压力模型替代)
 ```
 
+### 本轮新增 (2026-06-16 AutoSci — 上下文预算 & 错误原因 & 召回优化)
+
+```
+Phase AutoSci-A (ContextBudget → 降低 LLM 上下文成本):
+  ├── A.1 — ContextBudget.java (perspective→budget map, filterByPerspective, compileReflexSummary)
+  ├── A.2 — ReflexGraph.toCompactSummary + SubgraphBuilder.byNodeIds/byCategoryPrefix
+  ├── A.3 — MetaScheduler.buildTemplateContext 集成 perspective + budget
+  ├── A.4 — ContextBudgetTest (10 测试)
+  └── 灵感来源: AutoSci (https://github.com/skyllwt/AutoSci) compile_context 模式
+
+Phase AutoSci-B (Structured Failure Reasons):
+  ├── B.1 — ReflexConstants: KEY_FAILURE_REASONS + MAX_FAILURE_REASONS=10
+  ├── B.2 — ReflexIO.appendFailureReason/getFailureReasons — bounded list
+  ├── B.3 — ConditionedReflex.classifyAndApplyFailure 调用 appendFailureReason
+  ├── B.4 — TaskLogger.logSubTask 重载 failReason + TaskExecutor.handleFailure 传递
+  ├── B.5 — MetaScheduler.buildTemplateContext: failedReflexes in TASK_PLAN context
+  ├── B.6 — FailureReasonTest (6 测试)
+  └── 灵感来源: AutoSci structured failure propagation
+
+Phase MemoryGraph 召回优化:
+  ├── MG-R1 — findContextCluster (SIMILARITY BFS 传递闭包)
+  ├── MG-R2 — applyEdgeDecay + pruneEdges (指数衰减遗忘门控)
+  ├── MG-R3 — findCrossSessionMemories/findCrossSessionMemoriesByDay (跨会话关联)
+  ├── MG-R4 — MemoryManager.retrieveExpanded (三段召回增强: 标准检索→簇扩展→跨会话)
+  ├── MG-R5 — MemoryGraphTest (8 新测试, 410 total)
+  └── 402→410 tests ✓
+```
+
 ### 本轮新增 (2026-06-14)
 
 ```
@@ -228,11 +270,22 @@ Phase Cleanup (死代码清理):
   ├── CL.1 — 移除 ~30 个未使用 import/field/method/local
   ├── CL.2 — 移除 3 个不必要的 @SuppressWarnings("unchecked")
    └── CL.3 — 移除 MemoryQuery 字段/引用/EAgent/LinkedHashSet/EXPLORE_THRESHOLD 等
-```
+Phase 7 (繁衍) ── 三规则继承 (平均+脚手架 trial-first + 突变) + 基因组存档
 
-### 本轮新增 (2026-06-16)
+Phase G-M (全部已完成): ReflexChain/TaskDAG/Loop/死路/可控性/双向推理/共享池/门控/绑定
 
-**Phase RF (重构 — 降低复杂度 & 错误处理)**
+Phase Challenge (15天挑战系统 — 2026-06-17):
+  ├── A.1 — ChallengeMilestone + challenge_milestones.json (3-tier)
+  ├── A.2 — KnowledgeBase.game_rules + 5 个类型安全查询方法
+  ├── A.3 — GameConceptDetector (抽象概念→可测量检查)
+  ├── B.1 — InvSummary 扩展到 24 种物品
+  ├── B.2 — ChallengeMilestoneTracker (每日里程碑检查)
+  ├── B.3 — 新评分公式: resourceScore + llmBonus − deathPenalty
+  ├── C.1 — ChallengeMilestoneTest (10 个测试)
+  └── C.2 — Scenarios S10-S18 (9 个递进式决策场景)
+  **347 测试全部通过**
+
+Phase RF (重构 — 降低复杂度 & 错误处理):
 
 ```
 Phase RF (重构 — 降低复杂度 & 错误处理):
@@ -468,7 +521,8 @@ minecraft/eagent/
 | `MemoryGraphTest.java` | 38 | 节点/边 CRUD、显著性门控、边推断、图遍历 BFS、因果链、持久化、贝叶斯重排、Hebbian 强化、扩散激活、骨骼导出/导入 |
 | `ChatSessionManagerTest.java` | 7 | 窗口限制/方向回退/null安全/防御拷贝 |
 | `TemplateMatcherTest.java` | 14 | 路由: CLARIFICATION/TASK_PLAN/REFLEX_CREATE/CHAT_RESPONSE/拦截 |
-| **合计 (含新增)** | **337** | **全部通过** |
+| `ChallengeMilestoneTest.java` | 10 | InvSummary 计数/里程碑数据模型 |
+| **合计 (含新增)** | **347** | **全部通过** |
 
 **新增测试计划：**
 

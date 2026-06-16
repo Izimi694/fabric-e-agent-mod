@@ -9,7 +9,10 @@ public final class Scenarios {
     public static List<Scenario> all() {
         return List.of(s1_survivalEarly(), s2_taskMidGame(), s3_nightLowHealth(), s4_nightFullGear(),
                 s5_timeDivergence(), s6a_riskAversion(), s6b_neDrivenRisk(), s7a_resourceTool(), s7b_hungerFood(),
-                s8_riskDiamond(), s9_legacyProduct());
+                s8_riskDiamond(), s9_legacyProduct(),
+                s10_day1PunchTree(), s11_day1CraftTable(), s12_day2MineCoal(), s13_day2UsePickaxe(),
+                s14_day3CraftShield(), s15_day5BuildHouse(), s16_day7PlantWheat(),
+                s17_placeTorch(), s18_seekShelter());
     }
 
     /**
@@ -251,6 +254,184 @@ public final class Scenarios {
                 new ReflexCandidate("low_product",  "低乘积值", 3, 0.30, 0.40, 0.50, 1.0, true, 1.0, 1.0)
             ),
             "high_product", List.of("high_product")
+        );
+    }
+
+    // ════════════════════════════════════════════════════════════════════
+    //  S10-S18: 15天挑战递进式决策场景
+    // ════════════════════════════════════════════════════════════════════
+
+    /**
+     * S10: Day1 撸树效率 — 徒手 vs 木剑（无斧时）。
+     * 徒手撸树(5s) vs 木剑撸树(也是约5s，打草)。
+     * punch_tree 胜 — 徒手直接取木头最高效，木剑用于战斗不用于砍树。
+     */
+    static Scenario s10_day1PunchTree() {
+        return new Scenario(
+            "S10", "Day1-徒手撸树",
+            Perspective.TASK,
+            new HormonalPreset(0.2, 0.3, 0.4, 0.2, 0.5, 0.3, 0.4),
+            0.6,
+            List.of(
+                new ReflexCandidate("punch_tree",     "徒手撸树",  5, 0.60, 0.70, 0.80, 1.0, true, 1.0, 0.9),
+                new ReflexCandidate("hit_with_sword",  "用剑打",    5, 0.30, 0.40, 0.40, 1.0, true, 1.0, 0.5)
+            ),
+            "punch_tree", List.of("punch_tree")
+        );
+    }
+
+    /**
+     * S11: Day1 优先顺序 — 先做工作台 vs 先做床。
+     * 工作台是床的前置（需要木板，木板要先把手上的木头加工）。
+     * 但先做床更耗时（需要羊毛），工作台更快且是其他一切的前置。
+     * 验证：早期应先做工作台（低耗时高回报）。
+     */
+    static Scenario s11_day1CraftTable() {
+        return new Scenario(
+            "S11", "Day1-工作台优先",
+            Perspective.TASK,
+            new HormonalPreset(0.2, 0.3, 0.3, 0.2, 0.5, 0.3, 0.5),
+            0.7,
+            List.of(
+                new ReflexCandidate("craft_crafting_table", "做工作台", 3, 0.80, 0.90, 0.90, 1.0, true, 1.0, 0.9),
+                new ReflexCandidate("craft_bed",            "做床",    8, 0.40, 0.30, 0.40, 1.0, true, 0.8, 0.3)
+            ),
+            "craft_crafting_table", List.of("craft_crafting_table")
+        );
+    }
+
+    /**
+     * S12: Day2 光源优先 — 挖煤做火把 vs 直接下矿。
+     * mine_coal 胜 — 火把是下矿的安全前置，无光下矿风险高。
+     * SURVIVAL 领域权重有 wRisk=0.4，riskScore 差距决定。
+     */
+    static Scenario s12_day2MineCoal() {
+        return new Scenario(
+            "S12", "Day2-挖煤优先",
+            Perspective.SURVIVAL,
+            new HormonalPreset(0.4, 0.3, 0.4, 0.5, 0.4, 0.3, 0.5),
+            0.7,
+            List.of(
+                new ReflexCandidate("mine_coal",     "挖煤做火把", 5, 0.70, 0.80, 0.80, 1.0, true, 0.85, 0.7),
+                new ReflexCandidate("go_mining",     "直接下矿",   8, 0.60, 0.70, 0.70, 1.0, true, 0.30, 0.6)
+            ),
+            "mine_coal", List.of("mine_coal")
+        );
+    }
+
+    /**
+     * S13: Day2 效率选择 — 石镐挖矿 vs 赤手空拳挖土。
+     * use_pickaxe 胜 — 工具效率远高于徒手。
+     * TASK 领域 wSuccess 高，放大 posterior + proficiency 优势。
+     */
+    static Scenario s13_day2UsePickaxe() {
+        return new Scenario(
+            "S13", "Day2-用镐挖矿",
+            Perspective.TASK,
+            new HormonalPreset(0.2, 0.4, 0.3, 0.3, 0.6, 0.2, 0.6),
+            0.7,
+            List.of(
+                new ReflexCandidate("mine_with_pickaxe", "用石镐挖矿",  4, 0.80, 0.85, 0.90, 1.0, true, 0.9, 0.8),
+                new ReflexCandidate("dig_with_hands",     "徒手挖土",    8, 0.30, 0.20, 0.30, 1.0, true, 0.8, 0.9)
+            ),
+            "mine_with_pickaxe", List.of("mine_with_pickaxe")
+        );
+    }
+
+    /**
+     * S14: Day3 防御优先 — 做盾牌 vs 做更多工具。
+     * craft_shield 胜 — 盾牌提供格挡，防御优先于效率。
+     * 验证"安全优先于任务"原则。
+     */
+    static Scenario s14_day3CraftShield() {
+        return new Scenario(
+            "S14", "Day3-防御优先",
+            Perspective.SURVIVAL,
+            new HormonalPreset(0.5, 0.3, 0.2, 0.6, 0.3, 0.4, 0.4),
+            0.7,
+            List.of(
+                new ReflexCandidate("craft_shield",   "做盾牌",    3, 0.65, 0.75, 0.80, 1.0, true, 0.95, 0.6),
+                new ReflexCandidate("craft_iron_axe", "做铁斧",    5, 0.70, 0.80, 0.80, 1.0, true, 0.55, 0.7)
+            ),
+            "craft_shield", List.of("craft_shield")
+        );
+    }
+
+    /**
+     * S15: Day5 安全优先 — 建房子 vs 挖钻石。
+     * build_house 胜 — 庇护所是长期生存基础。
+     * 即使钻石回报高，安全优先规则在 SURVIVAL 视角下压制高回报。
+     */
+    static Scenario s15_day5BuildHouse() {
+        return new Scenario(
+            "S15", "Day5-建房优先",
+            Perspective.SURVIVAL,
+            new HormonalPreset(0.4, 0.2, 0.3, 0.5, 0.3, 0.3, 0.4),
+            0.65,
+            List.of(
+                new ReflexCandidate("build_house",     "建房子",    15, 0.50, 0.60, 0.60, 1.0, true, 0.90, 0.5),
+                new ReflexCandidate("mine_diamond",    "挖钻石",    10, 0.70, 0.80, 0.80, 1.0, true, 0.30, 0.8)
+            ),
+            "build_house", List.of("build_house")
+        );
+    }
+
+    /**
+     * S16: Day7 可持续 — 种小麦 vs 打猎。
+     * plant_wheat 胜 — 农业提供可持续食物来源，打猎依赖刷怪随机性。
+     * TASK 视角下长时段的稳定性优势。
+     */
+    static Scenario s16_day7PlantWheat() {
+        return new Scenario(
+            "S16", "Day7-种田优先",
+            Perspective.TASK,
+            new HormonalPreset(0.1, 0.3, 0.3, 0.2, 0.5, 0.3, 0.5),
+            0.75,
+            List.of(
+                new ReflexCandidate("plant_wheat",   "种小麦",    8, 0.60, 0.70, 0.80, 1.0, true, 1.0, 0.6),
+                new ReflexCandidate("hunt_animals",  "打猎",      5, 0.50, 0.60, 0.60, 1.0, true, 0.6, 0.7)
+            ),
+            "plant_wheat", List.of("plant_wheat")
+        );
+    }
+
+    /**
+     * S17: 抽象概念决策 — 暗处插火把 vs 盲目前进。
+     * place_torch 胜 — 光级不足时先解决光源再前进。
+     * 模拟 GameConceptDetector 返回 is_well_lit=false 时系统应选的行动。
+     * riskScore 差距（dark area explore 的 high risk）驱动。
+     */
+    static Scenario s17_placeTorch() {
+        return new Scenario(
+            "S17", "暗处插火把",
+            Perspective.SURVIVAL,
+            new HormonalPreset(0.5, 0.2, 0.3, 0.6, 0.3, 0.4, 0.5),
+            0.7,
+            List.of(
+                new ReflexCandidate("place_torch",    "插火把",    2, 0.70, 0.80, 0.85, 1.0, true, 0.95, 0.7),
+                new ReflexCandidate("explore_dark",   "盲目前进",  5, 0.60, 0.70, 0.70, 1.0, true, 0.20, 0.5)
+            ),
+            "place_torch", List.of("place_torch")
+        );
+    }
+
+    /**
+     * S18: 抽象概念决策 — 天黑了回庇护所 vs 继续挖矿。
+     * seek_shelter 胜 — 夜间户外风险高，有庇护所应回去。
+     * 模拟 has_shelter=true 时系统应选择回归安全的决策。
+     * SURVIVAL 视角下 riskScore 是决定性因子。
+     */
+    static Scenario s18_seekShelter() {
+        return new Scenario(
+            "S18", "天黑回庇护所",
+            Perspective.SURVIVAL,
+            new HormonalPreset(0.6, 0.1, 0.2, 0.7, 0.2, 0.5, 0.3),
+            0.65,
+            List.of(
+                new ReflexCandidate("seek_shelter",   "回庇护所",  3, 0.80, 0.85, 0.85, 1.0, true, 0.90, 0.7),
+                new ReflexCandidate("continue_mine",  "继续挖矿",  5, 0.70, 0.80, 0.80, 1.0, true, 0.25, 0.6)
+            ),
+            "seek_shelter", List.of("seek_shelter")
         );
     }
 }
