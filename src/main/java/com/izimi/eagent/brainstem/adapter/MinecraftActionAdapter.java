@@ -1,7 +1,7 @@
 package com.izimi.eagent.brainstem.adapter;
 
-import com.izimi.eagent.brainstem.bot.BotPlayer;
-import com.izimi.eagent.brainstem.navigation.NavigationController;
+import com.izimi.eagent.brainstem.domain.DigExecutor;
+import com.izimi.eagent.brainstem.domain.MotionExecutor;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.minecraft.component.DataComponentTypes;
@@ -28,13 +28,15 @@ import net.minecraft.util.math.Vec3d;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 
 public class MinecraftActionAdapter implements BasicActionAdapter {
 
-    private final Map<UUID, NavigationController> navigationControllers = new ConcurrentHashMap<>();
+    private final DigExecutor digExecutor = new DigExecutor();
+    private final MotionExecutor motionExecutor = new MotionExecutor();
+
+    public DigExecutor getDigExecutor() { return digExecutor; }
+    public MotionExecutor getMotionExecutor() { return motionExecutor; }
 
     // Container slot layout constants (handler slot indices)
     // CraftingScreenHandler: 46 slots total
@@ -53,145 +55,39 @@ public class MinecraftActionAdapter implements BasicActionAdapter {
     private static final int INV_INV_START = 5;       // player main 27 slots
     private static final int INV_HOTBAR_START = 32;   // hotbar 9 slots
 
-    private BlockPos currentDigTarget = null;
-    private int digBreakingTicks = 0;
-    private int digBreakTimeTicks = 40;
-    private int digSwingTicks = 0;
-    private static final int MIN_BREAK_TICKS = 15;
-    private static final int SWING_INTERVAL = 7;
     private static final int SCAN_RANGE = 8;
 
     @Override
     public ActionResult moveTo(ServerPlayerEntity bot, BlockPos target) {
-        if (bot == null || target == null) return ActionResult.unable("moveTo: bot或target为null");
-
-        NavigationController nav = navigationControllers.computeIfAbsent(
-                bot.getUuid(), k -> new NavigationController());
-
-        Vec3d botPos = bot.getPos();
-        double dist = botPos.squaredDistanceTo(target.toCenterPos());
-
-        if (dist < 4.0) {
-            nav.stopNavigation(bot);
-            return ActionResult.success("已到达");
-        }
-
-        boolean navigating = nav.navigateTo(bot, target);
-        return navigating
-                ? ActionResult.success("已到达")
-                : ActionResult.partial(Math.max(0, 1.0 - dist / 100.0), "移动中");
+        return motionExecutor.moveTo(bot, target);
     }
 
     public void stopNavigation(UUID botId) {
-        navigationControllers.remove(botId);
+        motionExecutor.stopNavigation(botId);
     }
 
     @Override
     public ActionResult lookAt(ServerPlayerEntity bot, double x, double y, double z) {
-        if (bot == null) return ActionResult.unable("lookAt: bot为null");
-
-        Vec3d botPos = bot.getPos();
-        double dx = x - botPos.x;
-        double dy = y - (botPos.y + bot.getStandingEyeHeight());
-        double dz = z - botPos.z;
-        double hDist = Math.sqrt(dx * dx + dz * dz);
-
-        float yaw = (float) Math.toDegrees(Math.atan2(-dx, dz));
-        float pitch = (float) Math.toDegrees(-Math.atan2(dy, hDist));
-
-        bot.setYaw(yaw);
-        bot.setHeadYaw(yaw);
-        bot.setPitch(pitch);
-
-        return ActionResult.success("lookAt: (" + x + "," + y + "," + z + ")");
+        return motionExecutor.lookAt(bot, x, y, z);
     }
 
     @Override
     public ActionResult dig(ServerPlayerEntity bot, BlockPos target) {
-        if (bot == null) return ActionResult.unable("dig: bot为null");
-
-        ServerWorld world = bot.getServerWorld();
-
-        // 首次调用：设置目标
-        if (target != null) {
-            currentDigTarget = target;
-        }
-
-        // 无目标 → 自动寻找
-        if (currentDigTarget == null) {
-            currentDigTarget = findNearbyBlock(world, bot);
-            if (currentDigTarget == null) {
-                return ActionResult.unable("附近没有可挖掘的方块");
-            }
-        }
-
-        BlockState currentState = world.getBlockState(currentDigTarget);
-
-        // cancel guard：方块已变 air 或 bedrock → 重置
-        if (currentState.isAir() || currentState.isOf(Blocks.BEDROCK)) {
-            resetDigState();
-            return ActionResult.unable("目标方块已不存在");
-        }
-
-        // cancel guard：距离太远 → 取消挖掘
-        double distance = bot.getPos().squaredDistanceTo(
-                currentDigTarget.getX() + 0.5, currentDigTarget.getY(), currentDigTarget.getZ() + 0.5);
-        if (distance > 25.0) {
-            resetDigState();
-            return ActionResult.unable("距离太远，取消挖掘");
-        }
-
-        // 首次破坏此方块时计算实际破坏时间
-        if (digBreakingTicks == 0) {
-            equipBestTool(bot, currentState);
-            digBreakTimeTicks = calculateBreakTime(currentState, bot);
-        }
-
-        digBreakingTicks++;
-
-        // swing 动画（每 7 tick ≈ mineflayer 的 350ms）
-        digSwingTicks++;
-        if (digSwingTicks >= SWING_INTERVAL) {
-            digSwingTicks = 0;
-            bot.swingHand(Hand.MAIN_HAND);
-        }
-
-        // 破坏进度（每 tick 更新）
-        world.setBlockBreakingInfo(bot.getId(), currentDigTarget,
-                Math.min(10, (int) (digBreakingTicks * 10.0 / digBreakTimeTicks)));
-
-        if (digBreakingTicks >= digBreakTimeTicks) {
-            BlockPos completed = currentDigTarget;
-            resetDigState();
-            world.breakBlock(completed, true, bot);
-            return ActionResult.success("挖掘完成");
-        }
-
-        return ActionResult.partial(0.6, "挖掘中");
+        return digExecutor.dig(bot, target);
     }
 
-    private void resetDigState() {
-        currentDigTarget = null;
-        digBreakingTicks = 0;
-        digBreakTimeTicks = 40;
-        digSwingTicks = 0;
-    }
-
-    private int calculateBreakTime(BlockState state, ServerPlayerEntity bot) {
-        float hardness = state.getHardness(bot.getServerWorld(), bot.getBlockPos());
-        if (hardness < 0) return 72000; // 不可破坏，永不完成
-        if (hardness >= 50) return MIN_BREAK_TICKS * 10; // 基岩级慢
-
-        // 获取工具速度
-        float toolSpeed = 1.0f;
-        ItemStack held = bot.getMainHandStack();
-        if (!held.isEmpty()) {
-            toolSpeed = Math.max(1.0f, held.getMiningSpeedMultiplier(state));
-        }
-
-        // hardness * 30 / toolSpeed，强制最小值
-        int ticks = Math.max(MIN_BREAK_TICKS, Math.round(hardness * 30.0f / toolSpeed));
-        return ticks;
+    private void lookAtEntity(ServerPlayerEntity bot, LivingEntity target) {
+        double px = target.getX();
+        double py = target.getEyeY();
+        double pz = target.getZ();
+        double dx = px - bot.getX();
+        double dy = py - (bot.getY() + bot.getStandingEyeHeight());
+        double dz = pz - bot.getZ();
+        float yaw = (float) Math.toDegrees(Math.atan2(-dx, dz));
+        float pitch = (float) Math.toDegrees(-Math.atan2(dy, Math.sqrt(dx * dx + dz * dz)));
+        bot.setYaw(yaw);
+        bot.setHeadYaw(yaw);
+        bot.setPitch(pitch);
     }
 
     @Override
@@ -328,28 +224,17 @@ public class MinecraftActionAdapter implements BasicActionAdapter {
 
     @Override
     public ActionResult jump(ServerPlayerEntity bot) {
-        if (bot == null) return ActionResult.unable("jump: bot为null");
-        BotPlayer bp = BotPlayer.getByUUID(bot.getUuid());
-        if (bp != null) {
-            bp.setMoveInput(bp.getForward(), bp.getStrafe(), true);
-        } else {
-            bot.jump();
-        }
-        return ActionResult.success("跳跃");
+        return motionExecutor.jump(bot);
     }
 
     @Override
     public ActionResult sneak(ServerPlayerEntity bot, boolean sneaking) {
-        if (bot == null) return ActionResult.unable("sneak: bot为null");
-        bot.setSneaking(sneaking);
-        return ActionResult.success("sneak: " + sneaking);
+        return motionExecutor.sneak(bot, sneaking);
     }
 
     @Override
     public ActionResult sprint(ServerPlayerEntity bot, boolean sprinting) {
-        if (bot == null) return ActionResult.unable("sprint: bot为null");
-        bot.setSprinting(sprinting);
-        return ActionResult.success("sprint: " + sprinting);
+        return motionExecutor.sprint(bot, sprinting);
     }
 
     @Override
@@ -594,20 +479,6 @@ public class MinecraftActionAdapter implements BasicActionAdapter {
         }
     }
 
-    private void lookAtEntity(ServerPlayerEntity bot, LivingEntity target) {
-        double px = target.getX();
-        double py = target.getEyeY();
-        double pz = target.getZ();
-        double dx = px - bot.getX();
-        double dy = py - (bot.getY() + bot.getStandingEyeHeight());
-        double dz = pz - bot.getZ();
-        float yaw = (float) Math.toDegrees(Math.atan2(-dx, dz));
-        float pitch = (float) Math.toDegrees(-Math.atan2(dy, Math.sqrt(dx * dx + dz * dz)));
-        bot.setYaw(yaw);
-        bot.setHeadYaw(yaw);
-        bot.setPitch(pitch);
-    }
-
     private BlockPos findBlockPosByName(net.minecraft.server.world.ServerWorld world,
                                          ServerPlayerEntity bot, String name) {
         if (world == null || bot == null || name == null) return null;
@@ -620,21 +491,6 @@ public class MinecraftActionAdapter implements BasicActionAdapter {
                     if (state.isAir()) continue;
                     String blockId = Registries.BLOCK.getId(state.getBlock()).toString();
                     if (blockId.toLowerCase().contains(name.toLowerCase())) {
-                        return pos;
-                    }
-                }
-            }
-        }
-        return null;
-    }
-
-    private BlockPos findNearbyBlock(ServerWorld world, ServerPlayerEntity bot) {
-        BlockPos botPos = bot.getBlockPos();
-        for (int dy = 4; dy >= -1; dy--) {
-            for (int dx = -4; dx <= 4; dx++) {
-                for (int dz = -4; dz <= 4; dz++) {
-                    BlockPos pos = botPos.add(dx, dy, dz);
-                    if (!world.getBlockState(pos).isAir()) {
                         return pos;
                     }
                 }
@@ -665,30 +521,6 @@ public class MinecraftActionAdapter implements BasicActionAdapter {
 
         entities.sort((a, b) -> Double.compare(a.squaredDistanceTo(bot), b.squaredDistanceTo(bot)));
         return entities.get(0);
-    }
-
-    private void equipBestTool(ServerPlayerEntity bot, BlockState state) {
-        ItemStack bestTool = ItemStack.EMPTY;
-        float bestSpeed = 0;
-
-        for (int i = 0; i < 36; i++) {
-            ItemStack stack = bot.getInventory().getStack(i);
-            if (stack.isEmpty()) continue;
-            float speed = stack.getMiningSpeedMultiplier(state);
-            if (speed > bestSpeed) {
-                bestSpeed = speed;
-                bestTool = stack;
-            }
-        }
-
-        if (!bestTool.isEmpty()) {
-            for (int i = 0; i < 9; i++) {
-                if (bot.getInventory().getStack(i) == bestTool) {
-                    bot.getInventory().selectedSlot = i;
-                    break;
-                }
-            }
-        }
     }
 
     private static Direction parseFace(String face) {

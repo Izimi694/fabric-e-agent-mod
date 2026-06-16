@@ -58,6 +58,7 @@ public class Task {
         public String skillId;
         public String status;
         public int attemptCount;
+        public int unableCount;
 
         public SubTask() {}
 
@@ -66,6 +67,7 @@ public class Task {
             this.skillId = skillId;
             this.status = "pending";
             this.attemptCount = 0;
+            this.unableCount = 0;
         }
     }
 

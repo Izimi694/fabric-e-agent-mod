@@ -63,12 +63,14 @@ CAUTIOUS:  params.beta > 0.02
 
 ### 2.2 升降级条件
 
-| 降级触发 | 升级触发 |
+| 降级 → AUTOPILOT | 升级 → OVERRIDE |
 |---------|---------|
-| 熟练度 ≥ 0.8 且环境无异常 | 连续失败 2 次 |
-| 同一动作成功 > 10 次 | 检测到从未见过的实体 |
-| 玩家 5 分钟无指令 | 环境突变（3+ 新实体） |
-| | 玩家说"小心/停" |
+| 熟练度 ≥ 0.8 且环境无异常 | 连续失败 ≥ 2 次 |
+| 同一动作成功 > 10 次 | 检测到新实体 (novelEntity) |
+| 玩家 5 分钟无指令 | 环境突变 (suddenEnvironmentChange) |
+| | 玩家说"小心/停" (urgentPlayerMessage) |
+| | 当前状态卡住 > 600 ticks (FLOW_STUCK_THRESHOLD) |
+| | 卡住 > 2000 ticks 且紧迫度 > 0.5 (TIME_ESCALATION_TICKS) |
 
 ### 2.3 时间片分配（e 切割）
 
@@ -88,6 +90,43 @@ if (newTask.priority > currentTask.priority * (1 + (1.0 / Math.E))) {
     preempt();
 }
 ```
+
+### 2.4 决策场统一驱力 (MotivationEngine refinements)
+
+**资源压力模型**（替代散落的 W_FEAR + health/hunger 因子）：
+
+所有生存资源采用同一公式：
+```
+resourceStress(fillRatio, depletionRate, replenishDifficulty)
+  = effectiveDeficit × (0.5 + 0.5 × replenishDifficulty)
+
+effectiveDeficit = (1 − fillRatio) + depletionRate × DEPLETION_SENSITIVITY(2.0)
+```
+
+- **health**：fillRatio = current/max, depletionRate 受威胁类型加权（creeper=1.0, skeleton=0.7, zombie=0.5, spider=0.5, default=0.3）
+- **hunger**：fillRatio = saturation/20, depletionRate 由消耗活动频率估算
+- **oxygen**（水下）：fillRatio = air/300, depletionRate 固定 0.02，缺水时难度=1.0
+
+补给难度由 `countFoodItems()` 扫描背包 (i=0..35) 中 `ComponentTypes.FOOD` 的物品数量决定。
+
+**动态温度**：
+
+```
+T = baseTemp × (1 − pressure × 0.85)
+     clamped [0.05, 0.8]
+```
+
+`DriveState.pressure()` = survivalUrgency (单一合成信号)。压力高 → 温度低 → 抉择更确定性（生存优先）。压力低 → 温度高 → 容许探索随机性。
+
+**任务惯性 (computeTaskDrive)**：
+
+连续失败降低任务驱动力，成功放大驱动力。防止单次失败导致任务放弃。
+
+**谨慎驱力 (computeCautiousDrive)**：
+
+威胁距离因子 `W_THREAT_CAUTIOUS=0.6`，敌方越近谨慎驱力越高。
+
+**激素调制 select()**：4 维向量 (NE/DA/5-HT/ACh) 通过余弦匹配 + 5-HT 情境分支调制候选权重，GABA/Glu 分别注入攻/逃行为（详见 §4.2 CognitiveControl）。
 
 ---
 
@@ -179,7 +218,30 @@ public boolean shouldExplore() {
 **骨架** 在 §4 表格的基础上扩展为：
 - `brainstem/scheduler/` 包含 MetaScheduler（系统唯一决策调度器）——它不执行动作，只做"是否做、做什么"的选择。这是整套系统中**唯一**进行决策的模块，其余执行模块不参与决策。
 - `brainstem/scheduler/` 还包含反射链、参数绑定、紧急分类、驱力计算（MotivationEngine），全部为决策调度服务。
-- `brainstem/scheduler/` 还包含 `ReflexSatisfaction`（五维满意度评分：timeScore + riskScore + resourceScore + 贝叶斯后验 + 熟练度）和 `TemporalScaler`（激素驱动连续时间缩放 `[0.5, 2.0]`）和 `SurvivalChallengeMonitor`（挑战监控），组成三件套：时空缩放(TemporalScaler) + 领域自适应权重(Perspective → DomainWeights) + 满意度评分(ReflexSatisfaction — timeScore + riskScore + resourceScore)。
+- `brainstem/scheduler/` 还包含 `ReflexSatisfaction`（四维满意度评分：timeScore + riskScore + resourceScore + 贝叶斯后验×熟练度）和 `SurvivalChallengeMonitor`（挑战监控），组成三件套：时空缩放(TemporalScaler in `brainstem/adapter/`) + 领域自适应权重(Perspective → DomainWeights) + 满意度评分(ReflexSatisfaction — timeScore + riskScore + resourceScore)。
+
+### 4.1a 领域执行器 (brainstem/domain/)
+
+Stage 1-3 引入的领域执行架构，将原子动作按领域分组封装：
+
+| 文件 | 职责 |
+|------|------|
+| `DomainCommand.java` | sealed 接口，按领域细分 (Break/Motion/Place/Combat/Craft/Inventory) |
+| `DomainExecutor.java` | 基类接口：`canHandle()`, `execute()`, `getDomainType()` |
+| `DomainRouter.java` | 路由 + tickAll + 失败收集；dispacher 使用 raw-type cast (类型安全 by canHandle) |
+| `FailureContext.java` | 结构化失败报告 (reason, exception, recoveryHint) |
+| `DigExecutor.java` | Break 领域：挖矿 (MIN_BREAK_TICKS=15, SWING_INTERVAL=7, SCAN_RANGE=8) |
+| `MotionExecutor.java` | Motion 领域：moveTo/lookAt/jump/sprint/sneak |
+| `PlaceCommand.java` | 占位 stub |
+| `CraftCommand.java` | 占位 stub |
+| `CombatCommand.java` | 占位 stub |
+| `InventoryCommand.java` | 占位 stub |
+| `BreakCommand.java` | BreakCommand 记录 |
+| `MotionCommand.java` | MotionCommand 记录 |
+
+Adapter 委派：`MinecraftActionAdapter.dig()` → `DomainRouter.dispatch(BreakCommand(...))` → `DigExecutor.execute()`。同域动作走同一 executor，失败统计按 router 聚合。
+
+**注**：PlaceCommand/CraftCommand/CombatCommand/InventoryCommand 为 Stage 4 占位，当前仅抛出 UnsupportedOperationException。
 
 ### 4.2 抑制控制 (InhibitoryControl + CognitiveControl)
 
@@ -245,29 +307,35 @@ MetaScheduler.executeLoop():
 | 熔岩距离 | 2 blocks | NE↑ 时 ↑ | 危险感知时更远 |
 | 村民攻击 | 禁止 | 永不调制 | 硬安全不妥协 |
 
-#### CognitiveControl 类设计 (已实现，见 `CognitiveControl.java`)
+#### CognitiveControl 类设计 (已实现，见 `cortex/prefrontal/CognitiveControl.java`)
 
 ```
 class CognitiveControl {
-  // 4 维向量余弦匹配
-  computeInhibition(NeuroState state, ReflexCandidate candidate) → float
+  // 4 维向量余弦匹配 + 情境分支
+  computeInhibition(NeuroState state, String candidateType, String reflexId) → double
 
-  // 候选集批量调制
-  modulateCandidates(Candidate[] candidates, NeuroState state) → Candidate[]
-    ├─ ① 合取条件检查 (meetsRequirements)
+  // 候选集批量调制 (List<CandidateWeight>)
+  modulateCandidates(List<CandidateWeight> candidates, NeuroState state,
+                     int failureCount, double confidence, double novelty) → List<CandidateWeight>
+    ├─ ① 合取条件检查 (recipe.meetsRequirements)
     ├─ ② 5-HT 情境分支
     │    if (state.ne() < THREAT_THRESHOLD):
     │        ↓ state.serotonin() × INHIBIT_STRENGTH  // 全局抑制
     │    else:
     │        ↓ state.serotonin() → flee↑, attack↓
-    ├─ ③ 余弦匹配 + 权重调整
-    └─ ④ GABA/Glu 分别注入 (见 §4.3 NeuroDynamics)
+    ├─ ③ 余弦匹配 (state.cosineSimilarity)
+    └─ ④ GABA/Glu 分别注入 (NeuroDynamics)
+            attackInhibition = NeuroDynamics.computeAttackInhibition(state, failureCount, confidence)
+            flightExcitation = NeuroDynamics.computeFlightExcitation(state, novelty)
 
-  // 合取条件检查 (require: DA min, 5-HT max 等)
-  meetsRequirements(NeuroState state, ReflexRecipe recipe) → boolean
+  // 单反射否决检查 (返回 null 表示通过)
+  checkReflex(String reflexId, NeuroState state) → String
 
-  // 阈值调制参数（仅向安全方向）
-  getModulation(String thresholdId, NeuroState state) → float
+  // 阈值调制参数
+  getModulation(String thresholdId, NeuroState state) → double
+
+  // 有效阈值 = base + |getModulation|
+  getEffectiveThreshold(double baseThreshold, String thresholdId, NeuroState state) → double
 }
 
 // ── 常量 ──
@@ -426,7 +494,7 @@ CognitiveControl 中应用：`candidate.type == FLEE ? candidate.weight += fligh
 | **资源评分 resourceScore** | `clamp(0.3 + hungerRatio × 0.3 + posterior × 0.4)` | `scanAndTrigger()` 预计算，hungerRatio 映射饥饿度 |
 | **时间缩放 timeScale** | NE/DA/5-HT → `[0.5, 2.0]` 连续缩放 | `TemporalScaler.computeTimeScale()` |
 
-最终评分 = `wTime × timeScore + wRisk × (1 - riskScore) + wSuccess × (posterior × proficiency) + wResource × (1 - resourceScore)`。
+最终评分 = `wTime × timeScore + wRisk × riskScore + wSuccess × (reflexWeight × posterior × proficiency × decayFactor) + wResource × resourceScore`。
 
 **领域自适应权重**：各 `Perspective`（SURVIVAL/TASK/SOCIAL/CURIOUS/CAUTIOUS）有独立的 `[wTime, wRisk, wSuccess, wResource]` 权重配置，通过 `computeForDomainWithScale()` 完成评分。
 
@@ -493,6 +561,7 @@ LLM 的唯⼀工作：**看到 JSON 模板，填空**。
 |------|------|-------------|-----------|:--------:|
 | CLARIFICATION | 用户输入模糊时生成澄清问题 | `{ambiguity_detected, possible_interpretations, missing_info, suggested_question}` | 直接返回用户 | 否 |
 | TASK_PLAN | 生成带依赖关系的任务DAG | `{task_id, subtasks[{id, name, action, target, depends_on[{id, type, weight, bindings}]}], bottleneck_nodes}` | TaskDAG → ReflexChain | 是 |
+| TASK_REPLAN | 任务执行卡死时重新规划 | 同 TASK_PLAN 格式 | 替换旧 plan, 重置 failureEscalation | 否 |
 | REFLEX_CREATE | 生成新的条件反射 | `{reflex_id, display_name, steps[{action, target}]}` | ConditionedReflex | 是 |
 | CHAT_RESPONSE | 生成对玩家的回复文本 | `{reply_text, suggested_emote, tone}` | 直接返回用户 | 否 |
 | EVALUATION_BATCH | 批量评价反射效果 | `[{reflexId, delta}]` | EvaluationCycle | 否 (内部) |
@@ -506,7 +575,7 @@ public class TemplateManager {
     void registerPostFillHook(TemplateType type, Consumer<JsonObject> hook);
     void setActivePersona(String persona);
     String injectPersona(String basePrompt, String persona);
-    enum TemplateType { CLARIFICATION, TASK_PLAN, REFLEX_CREATE, CHAT_RESPONSE, EVALUATION_BATCH, FAILURE_CLASSIFY }
+    enum TemplateType { CLARIFICATION, TASK_PLAN, TASK_REPLAN, REFLEX_CREATE, CHAT_RESPONSE, EVALUATION_BATCH, FAILURE_CLASSIFY }
 }
 ```
 
@@ -615,6 +684,7 @@ public boolean isConverged(Posterior posterior) {
 | **────** | | **────** | **────** |
 | 澄清问题 (CLARIFICATION) | LLM | 1 | 模糊输入 (同一轮次只一次) |
 | 任务分解 (TASK_PLAN) | LLM | 1 | 每个新任务 |
+| 重规划 (TASK_REPLAN) | LLM | 1 | 任务失败 esculation (上限 3 次/任务) |
 | 反射创建 (REFLEX_CREATE) | LLM | 1 | 每个新行为 |
 | 闲聊回复 (CHAT_RESPONSE) | LLM | 1 | 按需 (独立预算 50次) |
 | 批量评价 (EVALUATION_BATCH) | LLM | 1 | 每 30min (内部) |
@@ -924,36 +994,65 @@ class ReflexNode {
 
 ---
 
-## 17. Loop 事件驱动刷新循环
+## 17. MetaScheduler 主循环 (tick 驱动)
+
+实际的决策循环由 `MetaScheduler.tick()` 每个 server tick 驱动，并非事件驱动刷新：
 
 ```
-
-记忆(当前进度)
-  → 激素粗筛 (candidate_set ≤ 5)                    [D — 发散]
-    → 贝叶斯精筛 (sorted by posterior)              [C — 收敛]
-      → 取 top candidate
-        → DAG 依赖检查 (depends_on 全满足?)
-          不满足 → 五阶段回退 (§21)
-          满足 →
-            → 参数绑定 (bindings → input_slots)      [填空]
-              绑定失败 → 依赖回退
-              绑定成功 →
-                → 前置条件检查 (preconditions 全通过?)
-                  贝叶斯预判: posterior < 0.05 → 提前返回 (不更新贝叶斯)
-                  不通过 → fail_strategy: skip/wait/defer
-                  通过 → 反射执行(params)
-                    → 成功 → 推进进度, 存储输出, 更新贝叶斯
-                    → 失败 → 贝叶斯更新, 死路检测
-                             死路 → 五阶段回退/LLM 兜底
-                             非死路 → 下一轮
-      → 无候选 → LLM 兜底                                    [L6]
+MetaScheduler.tick():
+  ┌─ LLM 冷却/预算检查 (shouldInvokeLLM / isChatBudgetExhausted)
+  │    冷却期 → 跳过 LLM 调用，仅执行 L0-L4 反射
+  ├─ tickNovelEntities()
+  ├─ 消费 pendingTaskFailure (来自 TaskExecutor 的 unable exhausted 回调)
+  ├─ computeDrives(botCtx, worldCtx, bot)          [MotivationEngine]
+  │   ├─ resourceStress(fillRatio, depletionRate, replenishDifficulty)
+  │   ├─ computeSurvivalDrive() → survivalUrgency
+  │   ├─ computeTaskDrive() → taskInertia (成功放大/失败衰减)
+  │   ├─ computeCautiousDrive() → threat distance factor
+  │   ├─ computeSocialDrive()
+  │   └─ computeCuriosityDrive()
+  ├─ perspective = select(botCtx, drives)           [MotivationEngine]
+  │     T = baseTemp × (1 − pressure × 0.85)
+  │     Boltzmann 抉择 → Perspective (SURVIVAL/TASK/SOCIAL/CURIOUS/CAUTIOUS)
+  ├─ ProblemLabel label = labelProblem(botCtx, worldCtx, bot, perspective)
+  ├─ FlowLevel flow = getFlowAdjustment(botCtx, bot, state)
+  │   ├─ AUTOPILOT (降级): proficient & stable / success>10 / inactive>5min
+  │   ├─ OVERRIDE (升级): consecutiveFail≥2 / novelEntity / suddenChange /
+  │   │   urgentMsg / stuck>600 ticks / stuck>2000+urgency>0.5
+  │   └─ NORMAL
+  ├─ temporalScaler.update(hormones, bot, ticks, pressure)
+  ├─ executeHabitLayerWithGating(..., state, flow)  [L0-L4 反射]
+  │   ├─ CognitiveControl 否决检查
+  │   └─ GatingArbiter 环境可控性仲裁
+  └─ processTemplateResult(...)                     [L5-L6 LLM 模板]
+      ├─ TASK_PLAN → TaskDAG.fromLLMJson → ReflexChain.buildFromDAG
+      ├─ TASK_REPLAN → 新计划替换旧 plan (失败升级链)
+      ├─ 其他模板 → 按类型分配
+      └─ failure escalation → onUnableExhausted → requestTaskFailureEscalation
+           → MetaState.setFailureEscalation(true) → executeReplan()
 ```
 
-### 17.1 事件驱动机制
+### 17.1 失败升级链
 
-- 每次反射完成触发一轮刷新，非独立 tick
-- 最大 4 轮 reflection loops
-- 当前反射执行中不触发新决策
+TaskExecutor 内部无法完成时触发回调：
+
+```
+TaskExecutor.retryOnce() 连续失败 ≥ MAX_UNABLE_RETRIES(5)
+  → onUnableExhausted.run() [EAgent 注册]
+    → metaScheduler.requestTaskFailureEscalation(state)
+      → state.setFailureEscalation(true); state.incrementReplanCount()
+        → MetaScheduler.tick() 检测 hasFailureEscalation()
+          → 尝试 TASK_REPLAN (LLM 生成新 plan)
+            → 成功 → 重置 failureEscalation, 执行新 plan
+            → 失败或 replanCount ≥ 3 → 跳过 (防止 LLM 死循环)
+```
+
+### 17.2 约束
+
+- LLM 冷却期 `LLM_COOLDOWN_TICKS=400`，不触发模板填空
+- 冷却期也跳过 TASK_REPLAN（不影响纯反射执行）
+- replan 上限 3 次，防止无限重复规划
+- MetaScheduler 是**唯一决策节点**，所有执行模块不参与决策
 
 ---
 

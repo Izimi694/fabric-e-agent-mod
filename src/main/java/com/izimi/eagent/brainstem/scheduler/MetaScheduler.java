@@ -11,6 +11,8 @@ import com.izimi.eagent.amygdala.OneShotAlarmSystem;
 import com.izimi.eagent.amygdala.learning.CorrelationDetector;
 import com.izimi.eagent.bayesian.BayesianModule;
 import com.izimi.eagent.brainstem.adapter.TemporalScaler;
+import com.izimi.eagent.brainstem.domain.DomainRouter;
+import com.izimi.eagent.brainstem.domain.FailureContext;
 import com.izimi.eagent.brainstem.innate.InnateReflex;
 import com.izimi.eagent.brainstem.innate.InnateReflexRegistry;
 import com.izimi.eagent.cortex.api.TemplateManager;
@@ -78,11 +80,17 @@ public class MetaScheduler {
     private LandmarkCalibrator landmarkCalibrator;
     private final InputDigester inputDigester = new InputDigester();
 
+    private boolean pendingTaskFailure = false;
+
     public MetaScheduler(MotivationEngine motivationEngine) {
         this.motivationEngine = motivationEngine;
         this.urgencyClassifier = new UrgencyClassifier();
         this.temporalScaler = new TemporalScaler(this.urgencyClassifier);
         this.templateMatcher = new TemplateMatcher();
+    }
+
+    public void requestTaskFailureEscalation() {
+        this.pendingTaskFailure = true;
     }
 
     public void setCorrelationDetector(CorrelationDetector cd) {
@@ -174,6 +182,30 @@ public class MetaScheduler {
         state.incrementTickSinceLastLLM();
         state.tickNovelEntities();
 
+        // 消费跨 tick 的任务失败升级
+        if (pendingTaskFailure) {
+            pendingTaskFailure = false;
+            Map<String, FailureContext> failures = Map.of();
+            if (worldCtx != null && worldCtx.brainstem() != null) {
+                var router = worldCtx.brainstem().domainRouter();
+                if (router != null) {
+                    failures = router.getAllFailureContexts();
+                }
+            }
+            state.setFailureEscalation(failures, "task: unable exhausted");
+        }
+
+        // 检查失败升级 → 强制路由到 LLM (TASK_REPLAN)
+        if (state.hasFailureEscalation()) {
+            LOGGER.warn("[MetaScheduler] 失败升级: {}", state.getFailureEscalationReason());
+            String msg = state.consumePendingChat();
+            if (msg == null) msg = state.getLastPlayerMessage();
+            if (msg != null) {
+                executeReplan(botCtx, worldCtx, state, bot, msg);
+            }
+            return;
+        }
+
         // 检查模板结果 (异步 LLM)
         if (state.hasPendingTemplateResult()) {
             TemplateManager.TemplateType pendingType = state.getPendingTemplateType();
@@ -194,7 +226,7 @@ public class MetaScheduler {
 
         FlowLevel flow = getFlowAdjustment(botCtx, bot, state);
 
-        temporalScaler.update(botCtx.hormonalSystem(), bot, state.getTicksInCurrentLabel());
+        temporalScaler.update(botCtx.hormonalSystem(), bot, state.getTicksInCurrentLabel(), drives.pressure());
 
         DispatchReflex.DispatchAction action = null;
         if (botCtx.dispatchReflex() != null) {
@@ -202,7 +234,7 @@ public class MetaScheduler {
         }
 
         if (action == null) {
-            action = fallbackDispatch(label, flow);
+            action = fallbackDispatch(label, flow, state);
         }
 
         if (isLLMAction(action) && !shouldInvokeLLM(worldCtx, state, label, flow)) {
@@ -224,7 +256,7 @@ public class MetaScheduler {
 
     // ── HABIT layer execution with full gating ──
 
-    private boolean executeHabitLayerWithGating(BotContext botCtx, MetaState state, ServerPlayerEntity bot, Perspective perspective) {
+    private boolean executeHabitLayerWithGating(BotContext botCtx, WorldContext worldCtx, MetaState state, ServerPlayerEntity bot, Perspective perspective) {
         var conditioned = botCtx.conditionedReflex();
         var taskManager = botCtx.taskManager();
         if (conditioned == null || taskManager == null) return false;
@@ -234,7 +266,7 @@ public class MetaScheduler {
             var reflexSkill = conditioned.match(activeTask);
             if (reflexSkill != null) {
                 LOGGER.info("[MetaScheduler] HABIT execute reflex: {}", reflexSkill.getSkillId());
-                if (tryExecuteReflex(botCtx, bot, reflexSkill.getSkillId(), reflexSkill)) return true;
+                if (tryExecuteReflex(botCtx, worldCtx, bot, state, reflexSkill.getSkillId(), reflexSkill)) return true;
             }
             var taskExecutor = botCtx.taskExecutor();
             if (taskExecutor != null) {
@@ -248,7 +280,7 @@ public class MetaScheduler {
             var autoReflex = conditioned.scanAndTrigger(bot, perspective);
             if (autoReflex != null) {
                 LOGGER.info("[MetaScheduler] HABIT scanAndTrigger: {} (auto)", autoReflex.getSkillId());
-                if (tryExecuteReflex(botCtx, bot, autoReflex.getSkillId(), autoReflex)) return true;
+                if (tryExecuteReflex(botCtx, worldCtx, bot, state, autoReflex.getSkillId(), autoReflex)) return true;
             }
         }
 
@@ -258,7 +290,7 @@ public class MetaScheduler {
         return false;
     }
 
-    private boolean tryExecuteReflex(BotContext botCtx, ServerPlayerEntity bot,
+    private boolean tryExecuteReflex(BotContext botCtx, WorldContext worldCtx, ServerPlayerEntity bot, MetaState state,
                                       String reflexId, com.izimi.eagent.brainstem.skill.Skill skill) {
         var conditioned = botCtx.conditionedReflex();
         var bayesian = botCtx.bayesianModule();
@@ -301,8 +333,20 @@ public class MetaScheduler {
                     return true;
                 }
             }
-            RollbackStage rb = rollback(botCtx, null, bot, reflexId, 0, 0);
+            RollbackStage rb = rollback(botCtx, worldCtx, bot, reflexId, 0, 0);
             LOGGER.info("[MetaScheduler] Rollback: stage={} action={}", rb.stage(), rb.action());
+            if (rb.stage() >= 5) {
+                // 阶段 5+ → 失败升级，通知 LLM
+                Map<String, FailureContext> failures = Map.of();
+                if (worldCtx != null && worldCtx.brainstem() != null) {
+                    var router = worldCtx.brainstem().domainRouter();
+                    if (router != null) {
+                        failures = router.getAllFailureContexts();
+                    }
+                }
+                state.setFailureEscalation(failures,
+                        "reflex: " + reflexId + " -> " + deadEnd.reason() + " (rollback stage " + rb.stage() + ")");
+            }
         }
 
         return true;
@@ -325,8 +369,11 @@ public class MetaScheduler {
         return true;
     }
 
-    private DispatchReflex.DispatchAction fallbackDispatch(ProblemLabel label, FlowLevel flow) {
+    private DispatchReflex.DispatchAction fallbackDispatch(ProblemLabel label, FlowLevel flow, MetaState state) {
         if (flow == FlowLevel.OVERRIDE) {
+            if (state != null && state.hasPendingChat()) {
+                return new DispatchReflex.DispatchAction("CORTEX_LLM", "override_llm");
+            }
             return new DispatchReflex.DispatchAction("CORTEX_LOCAL", "override");
         }
         return switch (label) {
@@ -345,10 +392,13 @@ public class MetaScheduler {
 
         return switch (action.layer()) {
             case "INSTINCT" -> LowLevelDispatcher.executeInstinctLayer(botCtx, worldCtx, bot, temporalScaler);
-            case "HABIT" -> executeHabitLayerWithGating(botCtx, state, bot, perspective);
+            case "HABIT" -> executeHabitLayerWithGating(botCtx, worldCtx, state, bot, perspective);
             case "CORTEX_LOCAL" -> LowLevelDispatcher.executeCortexLocal(botCtx, worldCtx, state, bot);
             case "CORTEX_LLM" -> executeCortexLLM(botCtx, worldCtx, state, bot);
-            case "IDLE" -> LowLevelDispatcher.executeIdle(botCtx, bot, temporalScaler);
+            case "IDLE" -> {
+                LowLevelDispatcher.executeIdle(botCtx, bot, temporalScaler);
+                yield correlationDetector != null && correlationDetector.tryExplore(bot);
+            }
             default -> false;
         };
     }
@@ -413,6 +463,60 @@ public class MetaScheduler {
             state.setRecentLLMFailure(true);
             return false;
         }
+    }
+
+    private boolean executeReplan(BotContext botCtx, WorldContext worldCtx, MetaState state, ServerPlayerEntity bot, String msg) {
+        var templateManager = worldCtx.cortex().templateManager();
+        if (templateManager == null) return false;
+
+        state.setLastPlayerMessage(msg);
+
+        // 限速 & 预算检查
+        if (state.isChatBudgetExhausted()) {
+            LOGGER.warn("[MetaScheduler] 重规划预算耗尽");
+            return false;
+        }
+        if (state.getReplanCount() >= 3) {
+            LOGGER.warn("[MetaScheduler] 重规划次数已达上限（3次），跳过");
+            return false;
+        }
+
+        Map<String, Object> context = new java.util.HashMap<>();
+        context.put("goal", msg);
+        context.put("failureReason", state.getFailureEscalationReason());
+        context.put("previousAttempt", state.getLastPlayerMessage());
+        context.put("failureContexts", formatFailureContexts(worldCtx));
+        context.put("availableActions", "moveTo, dig, attack, placeBlock, useItem, equipItem, craft, chat, jump, lookAt, openBlock, closeWindow, clickSlot");
+
+        state.resetTickSinceLastLLM();
+        state.incrementReplanCount();
+        try {
+            LOGGER.info("[LLM] TASK_REPLAN: reason={}", state.getFailureEscalationReason());
+            SurvivalChallengeMonitor.recordLLMCall(botCtx.botId());
+            CompletableFuture<JsonObject> future = templateManager.fill(TemplateManager.TemplateType.TASK_REPLAN, context);
+            if (future == null) {
+                LOGGER.warn("[MetaScheduler] 重规划被限速");
+                return false;
+            }
+            state.setPendingTemplateResult(future, TemplateManager.TemplateType.TASK_REPLAN, msg);
+            return true;
+        } catch (Exception e) {
+            LOGGER.warn("[MetaScheduler] 重规划LLM调用失败: {}", e.getMessage());
+            return false;
+        }
+    }
+
+    private static String formatFailureContexts(WorldContext worldCtx) {
+        if (worldCtx == null || worldCtx.brainstem() == null) return "";
+        var router = worldCtx.brainstem().domainRouter();
+        if (router == null) return "";
+        var failures = router.getAllFailureContexts();
+        if (failures.isEmpty()) return "无领域失败上下文";
+        StringBuilder sb = new StringBuilder();
+        for (var entry : failures.entrySet()) {
+            sb.append(entry.getKey()).append(": ").append(entry.getValue().reason()).append("; ");
+        }
+        return sb.toString();
     }
 
     private Map<String, Object> buildTemplateContext(TemplateManager.TemplateType type, String msg,
@@ -515,6 +619,15 @@ public class MetaScheduler {
                 LOGGER.info("[MetaScheduler] 收到新反射: {}", reflexId);
                 // 反射固化通过 ConditionedReflex.solidifySequence() 完成,
                 // 这里先记录日志, 具体固化由填坑 hook 处理
+            }
+            case TASK_REPLAN -> {
+                String taskId = result.has("task_id") ? result.get("task_id").getAsString() : "replan_" + System.currentTimeMillis();
+                LOGGER.info("[MetaScheduler] 收到重规划: {} (reason={})", taskId, state.getFailureEscalationReason());
+                var taskManager = botCtx.taskManager();
+                if (taskManager != null) {
+                    taskManager.createTask(result.has("analysis") ? result.get("analysis").getAsString() : originalMsg);
+                }
+                state.consumeFailureEscalation();
             }
         }
     }

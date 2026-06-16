@@ -25,7 +25,8 @@ public class TemplateManager {
         CHAT_RESPONSE,
         // 后台内部模板
         EVALUATION_BATCH,
-        FAILURE_CLASSIFY
+        FAILURE_CLASSIFY,
+        TASK_REPLAN
     }
 
     private static final Gson GSON = new Gson();
@@ -101,6 +102,7 @@ public class TemplateManager {
             case CHAT_RESPONSE -> "你是一个Minecraft AI助手。请填空以下JSON模板，生成对玩家的回复。保持语气友好、简洁。";
             case EVALUATION_BATCH -> "你是一个行为评价系统。请填空以下JSON模板，输出评价结果。";
             case FAILURE_CLASSIFY -> "你是一个错误分析系统。请填空以下JSON模板，分析失败原因。";
+            case TASK_REPLAN -> "你是一个Minecraft AI助手。连续执行失败，需要重新规划。请填空以下JSON模板，生成新的任务计划。";
         };
         return injectPersona(base, activePersona);
     }
@@ -211,6 +213,39 @@ public class TemplateManager {
                           "feature_value": true,
                           "outcome": "failure"
                         }""", failureInfo);
+            }
+            case TASK_REPLAN -> {
+                String goal = (String) context.getOrDefault("goal", "");
+                String failureReason = (String) context.getOrDefault("failureReason", "");
+                String previousAttempt = (String) context.getOrDefault("previousAttempt", "");
+                String failureContexts = (String) context.getOrDefault("failureContexts", "");
+                String availableActions = (String) context.getOrDefault("availableActions", "moveTo, dig, attack, placeBlock, useItem, equipItem, craft, chat, jump, lookAt, openBlock, closeWindow, clickSlot");
+                yield String.format("""
+                        任务: %s
+                        失败原因: %s
+                        上次尝试: %s
+                        领域失败上下文: %s
+                        可用原子动作: %s
+                        请重新规划任务。填空以下JSON:
+                        {
+                          "task_id": "%s",
+                          "analysis": "{失败分析}",
+                          "subtasks": [
+                            {
+                              "id": "a1",
+                              "name": "{子任务名称}",
+                              "action": "{原子动作}",
+                              "target": "{目标}",
+                              "count": 1,
+                              "depends_on": [
+                                {"id": "{上游id}", "type": "hard|soft", "weight": 0.95}
+                              ],
+                              "is_bottleneck": false
+                            }
+                          ],
+                          "bottleneck_nodes": ["{瓶颈节点id}"]
+                        }""", goal, failureReason, previousAttempt, failureContexts, availableActions,
+                        goal.replaceAll("\\s+", "_").toLowerCase());
             }
         };
     }

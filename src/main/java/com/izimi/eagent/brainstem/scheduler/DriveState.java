@@ -18,4 +18,9 @@ public record DriveState(
             case CAUTIOUS -> cautiousUrgency;
         };
     }
+
+    /** 决策场整体压力：用于动态温度计算，濒死→冷，安逸→温 */
+    public double pressure() {
+        return survivalUrgency;
+    }
 }

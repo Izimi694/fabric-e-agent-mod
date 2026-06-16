@@ -7,7 +7,7 @@
 ## 1. 当前状态
 
 ```
-项目阶段: ✅ Phase S4-S5 — risk/resource scoring + Phase 3 挑战系统
+项目阶段: ✅ Stage 1-3 domain executors + Stage 5 failure escalation + resource stress + dynamic temperature
 ```
 
 ### 完成情况
@@ -51,6 +51,12 @@
 | **死代码清理 II** | **移除 ~20 个未使用 method (ConditionedReflex/MotivationEngine/LowLevelDispatcher/MetaState/ReflexSatisfaction)** | ✅ |
 | **Phase S4-S5** | **riskScore/resourceScore 实现 + scanAndTrigger 集成** | ✅ |
 | **Phase 3 (Challenge)** | **SurvivalChallengeMonitor + /ai challenge 命令** | ✅ |
+| **Stage 1** | **domain/ 包接口: DomainCommand sealed + DomainExecutor + DomainRouter + FailureContext** | ✅ |
+| **Stage 2** | **BreakCommand + DigExecutor 提取 (MinecraftActionAdapter.dig 委派)** | ✅ |
+| **Stage 3** | **MotionCommand + MotionExecutor 提取 (moveTo/lookAt/jump/sprint/sneak)** | ✅ |
+| **Stage 5** | **TASK_REPLAN 失败升级链 + TaskExecutor MAX_UNABLE_RETRIES (200→5) + onUnableExhausted** | ✅ |
+| **Stage 5b** | **资源压力模型 resourceStress() + 动态温度 + 任务惯性 + ThreatInfo/getThreatsNearby** | ✅ |
+| **TemporalScaler** | **computeTimeScale(h,pressure) + update(h,bot,ticks,pressure) + @Deprecated 旧 overload** | ✅ |
 
 
 ---
@@ -158,6 +164,43 @@ Phase S4-S5 (riskScore/resourceScore + 挑战系统):
   ├── S5.5 — MetaScheduler.executeCortexLLM 调 recordLLMCall
   ├── S5.6 — AICommand: /ai challenge start/stop/status
   └── S5.7 — 337 测试全部通过 (新增 Scenarios S8/S9 + DecisionQualityTest risk/resource)
+```
+
+### 本轮新增 (2026-06-17)
+
+```
+Stage 1-3 (领域执行器架构):
+  ├── S1.1 — DomainCommand sealed interface + 3 子类型 (Break/Motion/Place)
+  ├── S1.2 — DomainExecutor 基类 + DomainRouter dispatch/tickAll/failure collection
+  ├── S1.3 — FailureContext record (reason/time/domain/recoveryHint)
+  ├── S2.1 — BreakCommand + DigExecutor 提取 (MinecraftActionAdapter.dig 委派)
+  ├── S2.2 — 删除 MinecraftActionAdapter 中的 dig/breakBlock 逻辑
+  ├── S3.1 — MotionCommand (moveTo/lookAt/jump/sprint/sneak) + MotionExecutor
+  └── S3.2 — MinecraftActionAdapter.moveTo/lookAt/jump/sprint/sneak 委派 MotionExecutor
+
+Stage 5 (失败升级 → LLM 重规划):
+  ├── S5.1 — MetaState failure escalation fields (failureEscalation/replanCount)
+  ├── S5.2 — MetaScheduler.tick() hasFailureEscalation → executeReplan() → TASK_REPLAN
+  ├── S5.3 — TemplateManager.TemplateType.TASK_REPLAN + executeReplan()
+  ├── S5.4 — TaskExecutor MAX_UNABLE_RETRIES 200→5 + onUnableExhausted callback
+  ├── S5.5 — EAgent 注册 onUnableExhausted → MetaScheduler.requestTaskFailureEscalation
+  ├── S5.6 — BrainstemAPI.domainRouter() + WorldContext.setDomainRouter()
+  └── S5.7 — replan limit=3, LLM冷却/预算 gate 共用
+
+Resource Stress + 动态温度 + TemporalScaler 统一:
+  ├── RS.1 — OneShotAlarmSystem.getThreatsNearby() → ThreatInfo[] (替换 boolean hasThreatMatchNearby)
+  ├── RS.2 — computeSurvivalDrive() 统一 resourceStress(fillRatio, depletionRate, replenishDifficulty)
+  ├── RS.3 — countFoodItems() 背包扫描 DataComponentTypes.FOOD
+  ├── RS.4 — estimateHealthDepletionRate() 威胁类型加权 (creeper=1.0/skeleton=0.7/zombie=0.5/spider=0.5)
+  ├── RS.5 — estimateHungerDepletionRate() + replenish difficulty estimators
+  ├── RS.6 — DriveState.pressure() = survivalUrgency (单一环境压力信号)
+  ├── RS.7 — motivationEngine.select() 动态温度 T = baseTemp × (1 − pressure × 0.85)
+  ├── RS.8 — computeTaskDrive() 任务惯性 (成功放大/失败衰减)
+  ├── RS.9 — computeCautiousDrive() + W_THREAT_CAUTIOUS=0.6 威胁距离因子
+  ├── RS.10 — TemporalScaler.computeTimeScale(h, pressure) 统一过载
+  ├── RS.11 — TemporalScaler.update(h, bot, ticks, pressure) 新过载
+  ├── RS.12 — MetaScheduler.tick() 传 drives.pressure() → temporalScaler.update
+  └── RS.13 — 删除 W_FEAR 常量 (被资源压力模型替代)
 ```
 
 ### 本轮新增 (2026-06-14)
@@ -313,10 +356,23 @@ src/main/java/com/izimi/eagent/
 │   ├── character/                    BehaviorEventHandler/BehaviorStats/EvaluationCycle
 │   └── learning/                     BehaviorEvent/ObservedSequence/CategoryMapper/CorrelationDetector
 ├── brainstem/                        脑干
-│   ├── adapter/                      12 原子动作 (MinecraftActionAdapter)
+│   ├── adapter/                      12 原子动作 (MinecraftActionAdapter) + TemporalScaler
 │   ├── bot/                          BotManager/BotInstance/BotSpawner/BotController
+│   ├── domain/                       Stage 1-3 领域执行器
+│   │   ├── DomainCommand.java        sealed 接口 (Break/Motion/Place/Combat/Craft/Inventory)
+│   │   ├── DomainExecutor.java       执行器基类
+│   │   ├── DomainRouter.java         路由 + tickAll + 失败收集
+│   │   ├── FailureContext.java       结构化失败报告
+│   │   ├── DigExecutor.java          Break 领域挖矿
+│   │   ├── MotionExecutor.java       Motion 领域移动/跳跃/潜行
+│   │   ├── BreakCommand.java
+│   │   ├── MotionCommand.java
+│   │   ├── PlaceCommand.java         (stub)
+│   │   ├── CraftCommand.java         (stub)
+│   │   ├── CombatCommand.java        (stub)
+│   │   └── InventoryCommand.java     (stub)
 │   ├── innate/                       InnateReflexRegistry/9 先天技能 (含 sneak)
-│   ├── scheduler/                    MetaScheduler/MotivationEngine/UrgencyClassifier/InhibitoryControl/SurvivalChallengeMonitor
+│   ├── scheduler/                    MetaScheduler/MotivationEngine/ReflexSatisfaction/DriveState/UrgencyClassifier/InhibitoryControl/SurvivalChallengeMonitor
 │   ├── skill/                        Skill + SkillManager
 │   ├── navigation/                   GreedyNavigator + NavigationController
 │   └── IdleBrain.java

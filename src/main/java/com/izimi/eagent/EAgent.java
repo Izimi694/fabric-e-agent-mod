@@ -10,6 +10,7 @@ import com.izimi.eagent.cortex.planner.LocalTaskDecomposer;
 import com.izimi.eagent.cortex.chat.LocalChatHandler;
 import com.izimi.eagent.brainstem.adapter.BasicActionAdapter;
 import com.izimi.eagent.brainstem.adapter.MinecraftActionAdapter;
+import com.izimi.eagent.brainstem.domain.DomainRouter;
 import com.izimi.eagent.brainstem.scheduler.*;
 
 import com.izimi.eagent.cortex.api.AIClient;
@@ -167,6 +168,11 @@ public class EAgent implements ModInitializer {
         });
         actionAdapter = new MinecraftActionAdapter();
         conditionedReflex = new ConditionedReflex(skillManager, config, actionAdapter);
+
+        // 初始化领域执行器
+        DomainRouter domainRouter = new DomainRouter();
+        domainRouter.register(actionAdapter.getDigExecutor());
+        domainRouter.register(actionAdapter.getMotionExecutor());
         taskExecutor = new TaskExecutor(taskManager, skillManager, executionLogger);
         behaviorStats = new BehaviorStats();
         behaviorEventHandler = new BehaviorEventHandler(behaviorStats);
@@ -190,6 +196,7 @@ public class EAgent implements ModInitializer {
         );
         botManager.setWorldContext(worldContext);
         worldContext.setBotManager(botManager);
+        worldContext.setDomainRouter(domainRouter);
         planManager.setWorldContext(worldContext);
         cognitiveBrain = new CognitiveBrain(worldContext, botManager);
 
@@ -211,6 +218,7 @@ public class EAgent implements ModInitializer {
         metaScheduler.setReflectionCycle(reflectionCycle);
         metaScheduler.setLandmarkCalibrator(landmarkCalibrator);
         taskExecutor.setOnAcceptDrift(drift -> conditionedReflex.getDeviationCounter().recordAcceptance());
+        taskExecutor.setOnUnableExhausted(bot -> metaScheduler.requestTaskFailureEscalation());
 
         LOGGER.info("[E-Agent] MetaScheduler 已初始化 (MotivationEngine + LLM Gate + ReflectionCycle)");
 

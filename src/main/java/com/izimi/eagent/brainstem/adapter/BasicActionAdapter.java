@@ -1,9 +1,14 @@
 package com.izimi.eagent.brainstem.adapter;
 
+import com.izimi.eagent.brainstem.domain.DigExecutor;
+import com.izimi.eagent.brainstem.domain.MotionExecutor;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.util.math.BlockPos;
 
 public interface BasicActionAdapter {
+
+    DigExecutor getDigExecutor();
+    MotionExecutor getMotionExecutor();
 
     ActionResult moveTo(ServerPlayerEntity bot, BlockPos target);
 

@@ -21,8 +21,10 @@ public class TaskExecutor {
     private int executionTick = 0;
     private static final int SKILL_TIMEOUT_TICKS = 6000;
     private static final double ACCEPTANCE_THRESHOLD = 0.6;
+    private static final int MAX_UNABLE_RETRIES = 5;
 
     private Consumer<Double> onAcceptDrift;
+    private Consumer<ServerPlayerEntity> onUnableExhausted;
 
     public TaskExecutor(TaskManager taskManager, SkillManager skillManager,
                          ExecutionLogger executionLogger) {
@@ -110,9 +112,15 @@ public class TaskExecutor {
                 }
             } else {
                 if (!result.executed()) {
-                    LOGGER.warn("[TaskExecutor] 确定无法执行，跳过: {} (goal={})",
-                            current.skillId, current.goal);
-                    current.status = "skipped";
+                    current.unableCount++;
+                    if (current.unableCount >= MAX_UNABLE_RETRIES) {
+                        LOGGER.warn("[TaskExecutor] 连续无法执行{}次，跳过: {} (goal={})",
+                                MAX_UNABLE_RETRIES, current.skillId, current.goal);
+                        current.status = "skipped";
+                        if (onUnableExhausted != null) {
+                            onUnableExhausted.accept(bot);
+                        }
+                    }
                     return;
                 }
 
@@ -148,6 +156,10 @@ public class TaskExecutor {
 
     public void setOnAcceptDrift(Consumer<Double> onAcceptDrift) {
         this.onAcceptDrift = onAcceptDrift;
+    }
+
+    public void setOnUnableExhausted(Consumer<ServerPlayerEntity> onUnableExhausted) {
+        this.onUnableExhausted = onUnableExhausted;
     }
 
     public void resetExecutionTick() {

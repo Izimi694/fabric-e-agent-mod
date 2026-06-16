@@ -2,6 +2,7 @@ package com.izimi.eagent.api;
 
 import com.izimi.eagent.amygdala.character.BehaviorStats;
 import com.izimi.eagent.brainstem.bot.BotManager;
+import com.izimi.eagent.brainstem.domain.DomainRouter;
 import com.izimi.eagent.brainstem.skill.SkillManager;
 import com.izimi.eagent.config.ModConfig;
 import com.izimi.eagent.log.ExecutionLogger;
@@ -16,4 +17,5 @@ public interface WorldContext {
     ExecutionLogger executionLogger();
     BotManager botManager();
     void setBotManager(BotManager botManager);
+    void setDomainRouter(DomainRouter router);
 }

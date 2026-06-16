@@ -9,6 +9,7 @@ import com.izimi.eagent.amygdala.SocialObserver;
 import com.izimi.eagent.amygdala.character.BehaviorStats;
 import com.izimi.eagent.brainstem.adapter.BasicActionAdapter;
 import com.izimi.eagent.brainstem.bot.BotManager;
+import com.izimi.eagent.brainstem.domain.DomainRouter;
 import com.izimi.eagent.brainstem.innate.InnateReflexRegistry;
 import com.izimi.eagent.brainstem.scheduler.ILocalPlanner;
 import com.izimi.eagent.brainstem.skill.SkillManager;
@@ -27,6 +28,7 @@ public class WorldContextImpl implements WorldContext {
     private final InnateReflexRegistry innateReflexes;
     private final BasicActionAdapter basicActions;
     private final InhibitoryControl inhibitor;
+    private DomainRouter domainRouter;
     private final SocialObserver socialObserver;
     private final FamiliarityTracker familiarityTracker;
     private final ILocalPlanner localPlanner;
@@ -84,6 +86,7 @@ public class WorldContextImpl implements WorldContext {
         this.brainstemAPI = new BrainstemAPI() {
             @Override public InnateReflexRegistry innateReflexes() { return WorldContextImpl.this.innateReflexes; }
             @Override public BasicActionAdapter basicActions() { return WorldContextImpl.this.basicActions; }
+            @Override public DomainRouter domainRouter() { return WorldContextImpl.this.domainRouter; }
             @Override public InhibitoryControl inhibitor() { return WorldContextImpl.this.inhibitor; }
         };
 
@@ -113,4 +116,6 @@ public class WorldContextImpl implements WorldContext {
     @Override public BotManager botManager() { return botManager; }
 
     public void setBotManager(BotManager botManager) { this.botManager = botManager; }
+
+    public void setDomainRouter(DomainRouter router) { this.domainRouter = router; }
 }

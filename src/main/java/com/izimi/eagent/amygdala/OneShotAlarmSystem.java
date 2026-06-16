@@ -87,6 +87,40 @@ public class OneShotAlarmSystem {
         return new ArrayList<>(alarms);
     }
 
+    // ── 统一威胁查询 (替代布尔 hasThreatMatchNearby) ──
+
+    public record ThreatInfo(String type, double distance) {}
+
+    /**
+     * 返回附近所有威胁的类型和距离 (方块).
+     * 无威胁返回空列表.
+     */
+    public List<ThreatInfo> getThreatsNearby(ServerPlayerEntity bot) {
+        if (bot == null || alarms.isEmpty()) return List.of();
+        ServerWorld world = bot.getServerWorld();
+        if (world == null) return List.of();
+
+        List<ThreatInfo> threats = new ArrayList<>();
+        for (AlarmEntry alarm : alarms) {
+            if (!alarm.onceLabeled() || alarm.type() != AlarmType.THREAT) continue;
+
+            var entities = world.getEntitiesByClass(LivingEntity.class,
+                    bot.getBoundingBox().expand(12.0),
+                    e -> e.isAlive() && e != bot);
+
+            for (var entity : entities) {
+                String entityId = Registries.ENTITY_TYPE.getId(entity.getType()).toString();
+                if (matches(entityId, alarm.matcher())) {
+                    double dist = Math.sqrt(bot.squaredDistanceTo(entity));
+                    if (dist < 10.0) {
+                        threats.add(new ThreatInfo(entityId, dist));
+                    }
+                }
+            }
+        }
+        return threats;
+    }
+
     private boolean matches(String entityId, String matcher) {
         if (matcher.startsWith("*") && matcher.endsWith("*")) {
             return entityId.contains(matcher.substring(1, matcher.length() - 1));

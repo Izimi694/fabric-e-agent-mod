@@ -1,6 +1,7 @@
 package com.izimi.eagent.api;
 
 import com.google.gson.JsonObject;
+import com.izimi.eagent.brainstem.domain.FailureContext;
 import com.izimi.eagent.brainstem.scheduler.ProblemLabel;
 import com.izimi.eagent.cortex.api.TemplateManager;
 
@@ -35,6 +36,11 @@ public class MetaState {
     private ProblemLabel currentProblemLabel = ProblemLabel.TRIVIAL;
     private int ticksInCurrentLabel = 0;
 
+    // ── 失败升级 (unable → LLM 求助) ──
+    private Map<String, FailureContext> failureEscalation = null;
+    private String failureEscalationReason = null;
+    private int replanCount = 0;
+
     private final Map<String, Integer> novelEntityTicks = new HashMap<>();
     private String lastBlockFingerprint = "";
 
@@ -68,6 +74,28 @@ public class MetaState {
 
     public int getP3Cooldown() { return p3Cooldown; }
 
+    // ── 失败升级 ──
+
+    public void setFailureEscalation(Map<String, FailureContext> domainFailures, String reason) {
+        this.failureEscalation = domainFailures;
+        this.failureEscalationReason = reason;
+    }
+
+    public boolean hasFailureEscalation() { return failureEscalation != null; }
+
+    public Map<String, FailureContext> consumeFailureEscalation() {
+        Map<String, FailureContext> f = failureEscalation;
+        failureEscalation = null;
+        failureEscalationReason = null;
+        return f;
+    }
+
+    public String getFailureEscalationReason() { return failureEscalationReason; }
+
+    public int getReplanCount() { return replanCount; }
+    public void incrementReplanCount() { replanCount++; }
+    public void resetReplanCount() { replanCount = 0; }
+
     public int getTickSinceLastLLM() { return tickSinceLastLLM; }
     public void incrementTickSinceLastLLM() { tickSinceLastLLM++; }
     public void resetTickSinceLastLLM() { tickSinceLastLLM = 0; }
@@ -76,6 +104,7 @@ public class MetaState {
     public void setRecentLLMFailure(boolean v) { this.recentLLMFailure = v; }
 
     public void setPendingChat(String msg) { this.pendingChatMessage = msg; }
+    public boolean hasPendingChat() { return pendingChatMessage != null && !pendingChatMessage.isEmpty(); }
     public String consumePendingChat() {
         String msg = pendingChatMessage;
         pendingChatMessage = null;
