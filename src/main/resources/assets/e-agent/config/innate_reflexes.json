@@ -7,5 +7,8 @@
   {"id": "seek_shelter", "priority": 1, "critical": false, "triggers": [{"type": "TIME_OF_DAY", "value": 0.0, "range": 5}], "action": {"type": "seekShelter", "params": {"speed": 0.1}}, "enabled": true},
   {"id": "collect_item", "priority": 1, "critical": false, "triggers": [{"type": "ITEM_NEARBY", "value": 0.0, "range": 5}], "action": {"type": "collectItem", "params": {"speed": 0.15}}, "enabled": true},
   {"id": "sneak", "priority": 1, "critical": false, "triggers": [{"type": "MONSTER_NEARBY", "value": 0.0, "range": 12}], "action": {"type": "sneak", "params": {}}, "enabled": true},
-  {"id": "vocal_response", "priority": 5, "critical": false, "triggers": [{"type": "CHAT_PRESENCE", "value": 30.0, "range": 0}], "action": {"type": "invokeLLM", "params": {}}, "enabled": true}
+  {"id": "vocal_response", "priority": 5, "critical": false, "triggers": [{"type": "CHAT_PRESENCE", "value": 30.0, "range": 0}], "action": {"type": "invokeLLM", "params": {}}, "enabled": true},
+  {"id": "equip_armor", "priority": 1, "critical": false, "triggers": [{"type": "ARMOR_SLOT_EMPTY", "value": 0.0, "range": 3}], "action": {"type": "equipArmor", "params": {}}, "enabled": true},
+  {"id": "equip_totem", "priority": 1, "critical": false, "triggers": [{"type": "OFFHAND_EMPTY", "value": 0.0, "range": 0}, {"type": "HAS_TOTEM", "value": 0.0, "range": 0}], "action": {"type": "equipTotem", "params": {}}, "enabled": true},
+  {"id": "ranged_attack", "priority": 1, "critical": false, "triggers": [{"type": "BOW_IN_HOTBAR", "value": 0.0, "range": 0}, {"type": "ARROW_IN_INVENTORY", "value": 0.0, "range": 0}, {"type": "MONSTER_NEARBY", "value": 0.0, "range": 15}], "action": {"type": "rangedAttack", "params": {}}, "enabled": true}
 ]

@@ -18,12 +18,15 @@ public class InventoryExecutor implements DomainExecutor<InventoryCommand, Actio
     private static final Logger LOGGER = LoggerFactory.getLogger("e-agent");
     private static final Set<String> HANDLED_TYPES = Set.of(
             "equipItem", "useItem", "dropItem", "openBlock", "closeWindow", "clickSlot");
+    private static final Set<String> ARMOR_ITEMS = Set.of(
+            "helmet", "chestplate", "leggings", "boots",
+            "elytra", "turtle_helmet");
 
     private FailureContext failureContext;
 
     @Override
     public boolean canHandle(String commandType) {
-        return HANDLED_TYPES.contains(commandType);
+        return commandType != null && HANDLED_TYPES.contains(commandType);
     }
 
     @Override
@@ -51,21 +54,78 @@ public class InventoryExecutor implements DomainExecutor<InventoryCommand, Actio
     private ActionResult equipItem(ServerPlayerEntity bot, String itemName) {
         if (bot == null || itemName == null) return ActionResult.unable("equipItem: 参数无效");
 
+        boolean isArmor = ARMOR_ITEMS.stream().anyMatch(itemName.toLowerCase()::contains);
+
         for (int i = 0; i < 36; i++) {
             ItemStack stack = bot.getInventory().getStack(i);
             if (!stack.isEmpty()) {
                 String id = Registries.ITEM.getId(stack.getItem()).toString();
-                if (id.toLowerCase().contains(itemName.toLowerCase())) {
-                    if (i < 9) {
-                        bot.getInventory().selectedSlot = i;
-                    } else {
-                        bot.getInventory().selectedSlot = 0;
-                    }
+                if (!id.toLowerCase().contains(itemName.toLowerCase())) continue;
+
+                if (isArmor) {
+                    return equipArmor(bot, i, stack, id);
+                }
+
+                if (i < 9) {
+                    bot.getInventory().selectedSlot = i;
+                    return ActionResult.success("选择: " + id + " (已在快捷栏)");
+                }
+
+                int emptyHotbar = findEmptyHotbarSlot(bot);
+                if (emptyHotbar >= 0) {
+                    swapSlots(bot, i, emptyHotbar);
+                    bot.getInventory().selectedSlot = emptyHotbar;
                     return ActionResult.success("装备: " + id);
                 }
+
+                int replaceSlot = bot.getInventory().selectedSlot;
+                swapSlots(bot, i, replaceSlot);
+                return ActionResult.success("装备: " + id + " (替换)");
             }
         }
         return ActionResult.unable("背包中没有: " + itemName);
+    }
+
+    private ActionResult equipArmor(ServerPlayerEntity bot, int invSlot, ItemStack stack, String id) {
+        String itemId = id.toLowerCase();
+        int armorInvSlot;
+        if (itemId.contains("helmet") || itemId.contains("turtle_helmet")) {
+            armorInvSlot = 39;
+        } else if (itemId.contains("chestplate") || itemId.contains("elytra")) {
+            armorInvSlot = 38;
+        } else if (itemId.contains("leggings")) {
+            armorInvSlot = 37;
+        } else if (itemId.contains("boots")) {
+            armorInvSlot = 36;
+        } else {
+            return ActionResult.unable("未知护甲类型: " + id);
+        }
+
+        ScreenHandler handler = bot.currentScreenHandler;
+        if (handler == null) handler = bot.playerScreenHandler;
+        int armorScreenSlot = 44 - armorInvSlot;
+        handler.onSlotClick(invSlot, 0, SlotActionType.PICKUP, bot);
+        handler.onSlotClick(armorScreenSlot, 0, SlotActionType.PICKUP, bot);
+        if (!handler.getCursorStack().isEmpty()) {
+            handler.onSlotClick(invSlot, 0, SlotActionType.PICKUP, bot);
+        }
+        return ActionResult.success("装备护甲: " + id);
+    }
+
+    private int findEmptyHotbarSlot(ServerPlayerEntity bot) {
+        for (int i = 0; i < 9; i++) {
+            if (bot.getInventory().getStack(i).isEmpty()) return i;
+        }
+        return -1;
+    }
+
+    private void swapSlots(ServerPlayerEntity bot, int from, int to) {
+        if (from == to) return;
+        var inv = bot.getInventory();
+        ItemStack temp = inv.getStack(from);
+        inv.setStack(from, inv.getStack(to));
+        inv.setStack(to, temp);
+        inv.markDirty();
     }
 
     private ActionResult useItem(ServerPlayerEntity bot) {

@@ -15,6 +15,7 @@ import net.minecraft.util.math.Vec3d;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.izimi.eagent.brainstem.equipment.SurvivalEquipmentManager;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -74,6 +75,8 @@ public final class LowLevelDispatcher {
             case "seekShelter" -> adapter.seekShelter(bot, reflex.action().getDouble("speed", 0.1) * speedMul);
             case "collectItem" -> adapter.collectItem(bot, reflex.action().getDouble("speed", 0.15) * speedMul);
             case "sneak" -> adapter.sneak(bot, true);
+            case "equipArmor" -> SurvivalEquipmentManager.equipBestArmor(bot);
+            case "equipTotem" -> SurvivalEquipmentManager.equipTotem(bot);
         }
     }
 

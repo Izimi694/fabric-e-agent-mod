@@ -7,7 +7,7 @@
 
 ## 一、总体可行性判断：✅ 高可行
 
-项目采用"反射固化 + LLM 仅填空"的核心策略，在 **运行时间 ∞ vs 预算有限** 这一核心矛盾下给出了自洽且工程上可行的解决方案。337 个单元测试全部通过，~100 个 Java 源文件覆盖了从 6 层拦截器到繁衍系统的完整架构，代码质量和文档成熟度远超一般 Minecraft 模组。
+项目采用"反射固化 + LLM 仅填空"的核心策略，在 **运行时间 ∞ vs 预算有限** 这一核心矛盾下给出了自洽且工程上可行的解决方案。407 个单元测试全部通过，~100 个 Java 源文件覆盖了从 6 层拦截器到繁衍系统的完整架构，代码质量和文档成熟度远超一般 Minecraft 模组。
 
 **可行性的三个支柱：**
 
@@ -93,6 +93,8 @@
 - `neuroDynamics.computeAttackInhibition()` / `computeFlightExcitation()` 依赖 `serotonin`、`failureCount`、`confidence` 等参数——但这些参数对新创建的 trial 反射都处于初始值，导致 CognitiveControl 对新生反射的调制效果很弱
 
 **修复方向：** REFLEX_CREATE 钩子弹化时，应自动为新建反射生成默认配方向量（基于其 action 类型推断）。
+
+> **注：2026-06-17 更新 — 上述 P5 已部分缓解。CategoryMapper 不再硬编码，改为从 `config/category_display.json` 加载并委托 `util/TagResolver`。但 P5 的核心问题（反射配方自动生成）仍待解决。**
 
 ---
 

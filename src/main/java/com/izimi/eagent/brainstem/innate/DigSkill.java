@@ -1,6 +1,7 @@
 package com.izimi.eagent.brainstem.innate;
 
 import com.izimi.eagent.brainstem.skill.Skill;
+import com.izimi.eagent.util.TagResolver;
 import net.minecraft.block.BlockState;
 import net.minecraft.item.ItemStack;
 import net.minecraft.registry.Registries;
@@ -15,23 +16,6 @@ public class DigSkill extends Skill {
     private BlockPos currentTarget = null;
     private int breakingTicks = 0;
     private static final int BREAK_TIME_TICKS = 40;
-
-    private static final Map<String, String> TARGET_MAP = new HashMap<>();
-    static {
-        TARGET_MAP.put("木", "log");
-        TARGET_MAP.put("木头", "log");
-        TARGET_MAP.put("原木", "log");
-        TARGET_MAP.put("石", "stone");
-        TARGET_MAP.put("石头", "stone");
-        TARGET_MAP.put("圆石", "cobblestone");
-        TARGET_MAP.put("铁", "iron_ore");
-        TARGET_MAP.put("煤", "coal_ore");
-        TARGET_MAP.put("钻石", "diamond_ore");
-        TARGET_MAP.put("金", "gold_ore");
-        TARGET_MAP.put("红石", "redstone_ore");
-        TARGET_MAP.put("土", "dirt");
-        TARGET_MAP.put("沙", "sand");
-    }
 
     public DigSkill() {
         super("dig", "挖掘", "innate");
@@ -79,12 +63,10 @@ public class DigSkill extends Skill {
         if (context == null) return null;
         String goal = (String) context.get("goal");
         if (goal == null) return null;
-        for (var entry : TARGET_MAP.entrySet()) {
-            if (goal.contains(entry.getKey())) {
-                return entry.getValue();
-            }
-        }
-        // Check block ID match: if goal contains an English word, use it directly
+
+        String resolved = TagResolver.findTargetByAlias(goal);
+        if (resolved != null && !resolved.equals(goal.toLowerCase())) return resolved;
+
         String lower = goal.toLowerCase();
         for (String part : lower.split("[ _]")) {
             if (part.length() > 2 && !part.equals("dig") && !part.equals("alex")) {

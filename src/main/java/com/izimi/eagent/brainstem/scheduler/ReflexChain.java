@@ -3,6 +3,8 @@ package com.izimi.eagent.brainstem.scheduler;
 import com.izimi.eagent.cortex.planner.TaskDAG;
 import com.izimi.eagent.cortex.planner.TaskDAG.SubtaskNode;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import java.util.*;
 
 public class ReflexChain {
@@ -137,6 +139,61 @@ public class ReflexChain {
         }
         return n.consecutiveFailures == 0;
     }
+
+    public String selectAlternative(String failedNodeId) {
+        if (reflexGraph == null) return null;
+        ReflexNode failed = nodeMap.get(failedNodeId);
+        if (failed == null) return null;
+
+        Set<String> successors = reflexGraph.getSuccessors(failed.reflexId);
+        for (String alt : successors) {
+            var edge = reflexGraph.findAnyEdge(failed.reflexId, alt);
+            if (edge != null && edge.type() == ReflexGraph.EdgeType.ALTERNATIVE) {
+                if (nodeMap.containsKey(alt)) continue;
+                double altWeight = reflexGraph.getDynamicWeight(failed.reflexId, alt, null);
+                if (altWeight >= 0.5) {
+                    ReflexNode altNode = addNode(failed.id() + "_alt", alt, altWeight, false);
+                    for (String prevId : failed.prev()) {
+                        link(prevId, altNode.id());
+                    }
+                    for (String nextId : failed.next()) {
+                        link(altNode.id(), nextId);
+                    }
+                    LOGGER.info("[ReflexChain] alternative: {} → {} (weight={:.2f})",
+                            failedNodeId, alt, altWeight);
+                    return altNode.id();
+                }
+            }
+        }
+        return null;
+    }
+
+    public Set<String> getSkippableNodes(String completedNodeId) {
+        Set<String> skippable = new HashSet<>();
+        if (reflexGraph == null) return skippable;
+        ReflexNode completed = nodeMap.get(completedNodeId);
+        if (completed == null) return skippable;
+
+        for (String nextId : completed.next()) {
+            ReflexNode next = nodeMap.get(nextId);
+            if (next == null) continue;
+            Set<String> successors = reflexGraph.getSuccessors(next.reflexId);
+            boolean hasAlternative = false;
+            for (String succ : successors) {
+                var edge = reflexGraph.findAnyEdge(next.reflexId, succ);
+                if (edge != null && edge.type() == ReflexGraph.EdgeType.ALTERNATIVE) {
+                    hasAlternative = true;
+                    break;
+                }
+            }
+            if (hasAlternative) {
+                skippable.add(nextId);
+            }
+        }
+        return skippable;
+    }
+
+    private static final Logger LOGGER = LoggerFactory.getLogger("e-agent");
 
     public static ReflexChain buildFromDAG(TaskDAG dag) {
         return buildFromDAG(dag, null);

@@ -3,10 +3,16 @@ package com.izimi.eagent.brainstem;
 import com.izimi.eagent.brainstem.skill.SkillManager;
 import com.izimi.eagent.brainstem.skill.Skill;
 import com.izimi.eagent.cortex.task.TaskManager;
+import com.izimi.eagent.util.FileUtil;
+import com.izimi.eagent.util.JsonUtil;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.*;
 
 public class IdleBrain {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger("e-agent");
 
     public enum State { IDLE, WAITING, COOLDOWN }
 
@@ -37,15 +43,73 @@ public class IdleBrain {
     private static final long COOLDOWN_MS = 120_000;
     private static final int HISTORY_SIZE = 10;
 
-    private static final List<String> AFFIRMATIVE_WORDS = List.of(
+    private static List<String> affirmativeWords = null;
+    private static List<String> negativeWords = null;
+    private static List<String> defaultSuggestions = null;
+    private static boolean loaded = false;
+
+    private static void ensureLoaded() {
+        if (loaded) return;
+        loaded = true;
+
+        Map<String, Object> data = null;
+        try {
+            data = JsonUtil.readMapFromFileSafe(
+                    FileUtil.getConfigDir().resolve("idle_words.json"));
+        } catch (Exception e) {
+        }
+        if (data != null) {
+            if (data.get("affirmative") instanceof List) {
+                @SuppressWarnings("unchecked")
+                List<String> list = (List<String>) data.get("affirmative");
+                affirmativeWords = new ArrayList<>(list);
+            }
+            if (data.get("negative") instanceof List) {
+                @SuppressWarnings("unchecked")
+                List<String> list = (List<String>) data.get("negative");
+                negativeWords = new ArrayList<>(list);
+            }
+            if (data.get("suggestions") instanceof List) {
+                @SuppressWarnings("unchecked")
+                List<String> list = (List<String>) data.get("suggestions");
+                defaultSuggestions = new ArrayList<>(list);
+            }
+        }
+
+        if (affirmativeWords == null || affirmativeWords.isEmpty()) {
+            affirmativeWords = initDefaultAffirmative();
+        }
+        if (negativeWords == null || negativeWords.isEmpty()) {
+            negativeWords = initDefaultNegative();
+        }
+        if (defaultSuggestions == null || defaultSuggestions.isEmpty()) {
+            defaultSuggestions = initDefaultSuggestions();
+        }
+
+        LOGGER.debug("[IdleBrain] affirmative={}, negative={}, suggestions={}",
+                affirmativeWords.size(), negativeWords.size(), defaultSuggestions.size());
+    }
+
+    private static List<String> initDefaultAffirmative() {
+        return new ArrayList<>(List.of(
             "好", "行", "嗯", "可以", "去吧", "需要", "随便", "烦死了",
             "要", "来", "帮我", "帮忙", "帮一下", "搞", "做", "干", "开始", "yes", "ok", "sure", "行吧"
-    );
+        ));
+    }
 
-    private static final List<String> NEGATIVE_WORDS = List.of(
+    private static List<String> initDefaultNegative() {
+        return new ArrayList<>(List.of(
             "不用", "不需要", "不要", "别", "算了", "滚蛋", "滚",
             "没你的事", "闭嘴", "安静", "走开", "no", "没事", "没有了"
-    );
+        ));
+    }
+
+    private static List<String> initDefaultSuggestions() {
+        return new ArrayList<>(List.of(
+            "去挖点矿", "去看看附近的资源", "砍几棵树",
+            "收集一些食物", "探索一下周围", "检查附近地形"
+        ));
+    }
 
     private State state = State.IDLE;
     private long idleStartTime = 0;
@@ -66,6 +130,7 @@ public class IdleBrain {
     }
 
     public SuggestionTemplate onTick() {
+        ensureLoaded();
         long now = System.currentTimeMillis();
         boolean hasActiveTask = taskManager.getActiveTask() != null;
 
@@ -109,6 +174,7 @@ public class IdleBrain {
     }
 
     public IdleResponse handlePlayerChat(String message) {
+        ensureLoaded();
         if (state != State.WAITING) {
             return IdleResponse.irrelevant();
         }
@@ -131,6 +197,7 @@ public class IdleBrain {
     }
 
     public SuggestionTemplate forceSuggest() {
+        ensureLoaded();
         state = State.IDLE;
         idleStartTime = 0;
         cooldownEndTime = 0;
@@ -200,7 +267,7 @@ public class IdleBrain {
     }
 
     private boolean isAffirmative(String msg) {
-        for (String word : AFFIRMATIVE_WORDS) {
+        for (String word : affirmativeWords) {
             if (msg.contains(word)) {
                 return true;
             }
@@ -209,7 +276,7 @@ public class IdleBrain {
     }
 
     private boolean isNegative(String msg) {
-        for (String word : NEGATIVE_WORDS) {
+        for (String word : negativeWords) {
             if (msg.contains(word)) {
                 return true;
             }
@@ -218,13 +285,9 @@ public class IdleBrain {
     }
 
     private List<SuggestionTemplate> initDefaultTemplates() {
-        return new ArrayList<>(List.of(
-                new SuggestionTemplate("有什么需要我帮忙的吗？", "帮忙"),
-                new SuggestionTemplate("需要我帮忙挖矿吗？", "挖矿"),
-                new SuggestionTemplate("需要我帮忙采集资源吗？", "采集资源"),
-                new SuggestionTemplate("需要我帮忙打怪吗？", "打怪"),
-                new SuggestionTemplate("需要我去探索一下周围吗？", "自由探索"),
-                new SuggestionTemplate("有什么任务要交给我吗？", "帮忙")
-        ));
+        ensureLoaded();
+        return defaultSuggestions.stream()
+            .map(text -> new SuggestionTemplate("需要我" + text + "吗？", text))
+            .toList();
     }
 }

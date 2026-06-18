@@ -1,13 +1,14 @@
 package com.izimi.eagent.brainstem.domain;
 
 import com.izimi.eagent.brainstem.adapter.ActionResult;
-import net.minecraft.block.Blocks;
 import net.minecraft.item.ItemStack;
+import net.minecraft.item.ItemUsageContext;
 import net.minecraft.server.network.ServerPlayerEntity;
-import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.Hand;
+import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
+import net.minecraft.util.math.Vec3d;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -31,27 +32,40 @@ public class PlaceExecutor implements DomainExecutor<PlaceCommand, ActionResult>
         String faceStr = command.face();
 
         if (bot == null || pos == null) {
-            return CompletableFuture.completedFuture(ActionResult.unable("placeBlock: 参数无效"));
+            failureContext = FailureContext.of("placeBlock", "参数无效");
+            return CompletableFuture.completedFuture(com.izimi.eagent.brainstem.adapter.ActionResult.unable("placeBlock: 参数无效"));
         }
 
-        ServerWorld world = bot.getServerWorld();
-        BlockPos placePos = pos.offset(parseFace(faceStr));
+        Direction face = parseFace(faceStr);
+        BlockPos placePos = pos.offset(face);
 
         if (placePos.getSquaredDistance(bot.getBlockPos()) > 25.0) {
-            return CompletableFuture.completedFuture(ActionResult.partial(0.3, "距离太远"));
+            return CompletableFuture.completedFuture(com.izimi.eagent.brainstem.adapter.ActionResult.partial(0.3, "距离太远"));
+        }
+
+        if (!bot.getServerWorld().getBlockState(placePos).isReplaceable()) {
+            failureContext = FailureContext.of("placeBlock", "目标位置不可替换");
+            return CompletableFuture.completedFuture(com.izimi.eagent.brainstem.adapter.ActionResult.unable("目标位置不可替换"));
         }
 
         ItemStack mainHand = bot.getMainHandStack();
         if (mainHand.isEmpty()) {
             failureContext = FailureContext.of("placeBlock", "主手没有物品");
-            return CompletableFuture.completedFuture(ActionResult.unable("主手没有物品"));
+            return CompletableFuture.completedFuture(com.izimi.eagent.brainstem.adapter.ActionResult.unable("主手没有物品"));
         }
 
-        world.setBlockState(placePos, Blocks.STONE.getDefaultState());
-        bot.swingHand(Hand.MAIN_HAND);
+        Vec3d hitVec = new Vec3d(pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5);
+        BlockHitResult hit = new BlockHitResult(hitVec, face.getOpposite(), pos, false);
+        ItemUsageContext ctx = new ItemUsageContext(bot, Hand.MAIN_HAND, hit);
+        net.minecraft.util.ActionResult placeResult = mainHand.useOnBlock(ctx);
 
-        failureContext = null;
-        return CompletableFuture.completedFuture(ActionResult.success("放置完成"));
+        if (placeResult.isAccepted()) {
+            failureContext = null;
+            return CompletableFuture.completedFuture(com.izimi.eagent.brainstem.adapter.ActionResult.success("放置完成"));
+        }
+
+        failureContext = FailureContext.of("placeBlock", "放置失败");
+        return CompletableFuture.completedFuture(com.izimi.eagent.brainstem.adapter.ActionResult.fail("放置失败"));
     }
 
     private static Direction parseFace(String face) {

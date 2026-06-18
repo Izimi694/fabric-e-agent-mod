@@ -11,6 +11,10 @@ public class NavigationController {
     private static final Logger LOGGER = LoggerFactory.getLogger("e-agent");
     private static final double ARRIVAL_THRESHOLD = 1.5;
     private static final float FORWARD_SPEED = 0.5f;
+    private static final int COMMIT_DURATION = 10;
+
+    private BlockPos committedWaypoint;
+    private int commitCounter = 0;
 
     public boolean navigateTo(ServerPlayerEntity bot, BlockPos target) {
         if (bot == null || target == null) return false;
@@ -19,11 +23,23 @@ public class NavigationController {
         if (distance < ARRIVAL_THRESHOLD) {
             BotPlayer bp = BotPlayer.getByUUID(bot.getUuid());
             if (bp != null) bp.clearMoveInput();
+            commitCounter = 0;
+            committedWaypoint = null;
             return true;
         }
 
-        GreedyNavigator navigator = new GreedyNavigator(bot.getWorld());
-        BlockPos bestStep = navigator.getBestStep(bot.getBlockPos(), target);
+        BlockPos bestStep;
+        if (commitCounter > 0 && committedWaypoint != null) {
+            commitCounter--;
+            bestStep = committedWaypoint;
+        } else {
+            GreedyNavigator navigator = new GreedyNavigator(bot.getWorld());
+            bestStep = navigator.getBestStep(bot.getBlockPos(), target);
+            if (bestStep != null) {
+                committedWaypoint = bestStep;
+                commitCounter = COMMIT_DURATION;
+            }
+        }
 
         if (bestStep != null) {
             moveToward(bot, bestStep);
@@ -60,6 +76,13 @@ public class NavigationController {
             BotPlayer bp = BotPlayer.getByUUID(bot.getUuid());
             if (bp != null) bp.clearMoveInput();
         }
+        commitCounter = 0;
+        committedWaypoint = null;
+    }
+
+    public void clearCommitment() {
+        commitCounter = 0;
+        committedWaypoint = null;
     }
 
 }

@@ -1,0 +1,59 @@
+{
+  "deadlineDay": 15,
+  "phases": [
+    {
+      "fromDay": 1,
+      "toDay": 1,
+      "name": "石器时代",
+      "mainTasks": [
+        {"id": "gather_wood",   "goal": "挖5个原木",      "dependsOn": [],           "itemChecks": {"logs": 5, "planks": 0}},
+        {"id": "craft_planks",  "goal": "合成木板",        "dependsOn": ["gather_wood"], "itemChecks": {"planks": 4}},
+        {"id": "craft_table",   "goal": "合成工作台",      "dependsOn": ["craft_planks"], "itemChecks": {"crafting_table": 1}},
+        {"id": "kill_sheep",    "goal": "杀3只羊",         "dependsOn": [],           "itemChecks": {"wool": 3}},
+        {"id": "craft_bed",     "goal": "合成床",          "dependsOn": ["craft_planks", "kill_sheep"], "itemChecks": {"bed": 1}},
+        {"id": "craft_chest",   "goal": "合成箱子",        "dependsOn": ["craft_planks"], "itemChecks": {"chest": 1}}
+      ],
+      "bonusTasks": [
+        {"id": "mine_coal",     "goal": "挖10个煤矿",      "dependsOn": [],           "itemChecks": {"coal": 10}},
+        {"id": "mine_copper",   "goal": "挖5个铜矿",       "dependsOn": [],           "itemChecks": {"raw_copper": 5}},
+        {"id": "craft_copper",  "goal": "合成铜镐和铜剑",  "dependsOn": ["mine_copper"], "itemChecks": {"copper_pickaxe": 1}}
+      ]
+    },
+    {
+      "fromDay": 2,
+      "toDay": 3,
+      "name": "铁器时代",
+      "mainTasks": [
+        {"id": "mine_cobble",   "goal": "挖20个圆石",      "dependsOn": [],           "itemChecks": {"cobblestone": 20}},
+        {"id": "craft_furnace", "goal": "合成熔炉",        "dependsOn": ["mine_cobble"], "itemChecks": {"furnace": 1}},
+        {"id": "mine_coal2",    "goal": "挖10个煤矿",      "dependsOn": [],           "itemChecks": {"coal": 10}},
+        {"id": "craft_torches", "goal": "合成16个火把",    "dependsOn": ["mine_coal2"], "itemChecks": {"torch": 16}},
+        {"id": "mine_iron",     "goal": "挖10个铁矿",      "dependsOn": [],           "itemChecks": {"raw_iron": 10}},
+        {"id": "smelt_iron",    "goal": "烧铁锭",          "dependsOn": ["mine_iron", "craft_furnace"], "itemChecks": {"iron_ingot": 3}},
+        {"id": "craft_iron_pick","goal": "合成铁镐",       "dependsOn": ["smelt_iron"], "itemChecks": {"iron_pickaxe": 1}},
+        {"id": "craft_iron_sword","goal": "合成铁剑",      "dependsOn": ["smelt_iron"], "itemChecks": {"iron_sword": 1}},
+        {"id": "craft_shield",  "goal": "合成盾牌",        "dependsOn": ["smelt_iron"], "itemChecks": {"shield": 1}}
+      ],
+      "bonusTasks": [
+        {"id": "farm_land",     "goal": "耕地",            "dependsOn": [],           "itemChecks": {"farmland": 5}},
+        {"id": "plant_wheat",   "goal": "种植小麦",        "dependsOn": ["farm_land"], "itemChecks": {"wheat_seeds": 3}}
+      ],
+      "requiredItemsForNextPhase": {"iron_pickaxe": 1, "shield": 1}
+    },
+    {
+      "fromDay": 4,
+      "toDay": 15,
+      "name": "建造与繁荣",
+      "mainTasks": [
+        {"id": "clear_area",    "goal": "清理20x20区域",   "dependsOn": [],           "itemChecks": {}},
+        {"id": "build_house",   "goal": "建造木屋",        "dependsOn": ["clear_area"], "itemChecks": {}},
+        {"id": "light_up",      "goal": "放置16个火把",    "dependsOn": ["build_house"], "itemChecks": {"torch_placed": 16}}
+      ],
+      "bonusTasks": [
+        {"id": "mine_diamond",  "goal": "挖钻石",          "dependsOn": [],           "itemChecks": {"diamond": 3}},
+        {"id": "craft_diamond_pick","goal": "合成钻石镐",  "dependsOn": ["mine_diamond"], "itemChecks": {"diamond_pickaxe": 1}},
+        {"id": "find_village",  "goal": "找到村庄并交易",  "dependsOn": [],           "itemChecks": {"emerald": 1}}
+      ]
+    }
+  ]
+}

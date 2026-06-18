@@ -12,6 +12,7 @@ import com.izimi.eagent.util.JsonUtil;
 import com.izimi.eagent.brainstem.scheduler.SurvivalChallengeMonitor;
 import com.izimi.eagent.brainstem.scheduler.ChallengeMilestone;
 import com.izimi.eagent.brainstem.scheduler.ChallengeMilestoneTracker;
+import com.izimi.eagent.brainstem.scheduler.ChallengeTaskOrchestrator;
 import com.izimi.eagent.brainstem.domain.GameConceptDetector;
 import com.izimi.eagent.cortex.planner.KnowledgeBase;
 
@@ -332,6 +333,10 @@ public class AICommand {
             }
             ChallengeMilestoneTracker tracker = new ChallengeMilestoneTracker(milestones, detector);
             SurvivalChallengeMonitor.setMilestoneTracker(tracker);
+
+            // Initialize task pipeline orchestrator
+            ChallengeTaskOrchestrator orchestrator = ChallengeTaskOrchestrator.loadDefault();
+            SurvivalChallengeMonitor.setTaskOrchestrator(orchestrator);
 
             // Reset and start challenge monitor
             SurvivalChallengeMonitor.startChallenge(days);

@@ -449,6 +449,15 @@ public class MetaScheduler {
         if (msg == null) return false;
         state.setLastPlayerMessage(msg);
 
+        // ── Challenge mode: block player commands ──
+        if (SurvivalChallengeMonitor.isActive() && SurvivalChallengeMonitor.getTaskOrchestrator() != null) {
+            LOGGER.debug("[MetaScheduler] 挑战模式中，忽略玩家指令: {}", msg);
+            if (bot != null) {
+                bot.sendMessage(Text.literal("§e[挑战] 挑战模式中无法处理玩家指令"));
+            }
+            return true;
+        }
+
         // TemplateMatcher 路由
         TemplateManager.TemplateType templateType = templateMatcher.match(msg, botCtx, worldCtx);
         if (templateType == null) {

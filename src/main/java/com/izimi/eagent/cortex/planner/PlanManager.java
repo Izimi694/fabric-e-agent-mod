@@ -48,6 +48,10 @@ public class PlanManager {
         String action = Task.extractAction(goal);
         String target = Task.extractTarget(goal);
 
+        if (needsMovement(action) && !target.isEmpty()) {
+            activePlan.subSteps.add(new Plan.PlanStep("move", "moveTo", target));
+        }
+
         for (int i = 0; i < count; i++) {
             activePlan.subSteps.add(new Plan.PlanStep(action, action, target));
         }
@@ -63,6 +67,14 @@ public class PlanManager {
         }
 
         return activePlan;
+    }
+
+    private static boolean needsMovement(String action) {
+        return "dig".equals(action)
+                || "attack".equals(action)
+                || "collect".equals(action)
+                || "collectItem".equals(action)
+                || "placeBlock".equals(action);
     }
 
     private void tryEnrichFromAPI(String taskId, String goal) {

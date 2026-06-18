@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "display_names": {
+    "safety": "安全",
+    "combat": "战斗",
+    "food": "食物",
+    "tools": "工具",
+    "armor": "盔甲",
+    "weapons": "武器",
+    "building": "建造",
+    "crafting": "合成",
+    "mining": "采矿",
+    "farming": "种植",
+    "exploration": "探索",
+    "loot": "战利品",
+    "resources": "资源",
+    "magic": "魔法",
+    "storage": "存储",
+    "transport": "运输",
+    "decoration": "装饰",
+    "redstone": "红石",
+    "unknown": "未知"
+  }
+}

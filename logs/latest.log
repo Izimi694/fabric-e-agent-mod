@@ -1,5 +1,6 @@
-[23:21:08] [Test worker/WARN]: [DeepSeekClient] 响应无choices
-[23:21:08] [Test worker/WARN]: [DeepSeekClient] 响应无choices
-[23:21:08] [Test worker/ERROR]: [DeepSeekClient] 解析响应失败: Expected a com.google.gson.JsonObject but was com.google.gson.JsonPrimitive; at path $ -- body: not json
-[23:21:08] [Test worker/WARN]: [TemplateManager] 填空解析失败: EVALUATION_BATCH - Expected a com.google.gson.JsonObject but was com.google.gson.JsonArray; at path $
-[23:21:08] [Test worker/WARN]: [TemplateManager] 填空解析失败: REFLEX_CREATE - com.google.gson.stream.MalformedJsonException: Expected ':' at line 1 column 7 path $.not
+[00:17:43] [Test worker/ERROR]: [DomainRouter] No executor registered for command type: craft
+[00:17:43] [Test worker/WARN]: [DeepSeekClient] 响应无choices
+[00:17:43] [Test worker/WARN]: [DeepSeekClient] 响应无choices
+[00:17:43] [Test worker/ERROR]: [DeepSeekClient] 解析响应失败: Expected a com.google.gson.JsonObject but was com.google.gson.JsonPrimitive; at path $ -- body: not json
+[00:17:43] [Test worker/WARN]: [TemplateManager] 填空解析失败: EVALUATION_BATCH - Expected a com.google.gson.JsonObject but was com.google.gson.JsonArray; at path $
+[00:17:43] [Test worker/WARN]: [TemplateManager] 填空解析失败: REFLEX_CREATE - com.google.gson.stream.MalformedJsonException: Expected ':' at line 1 column 7 path $.not

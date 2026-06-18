@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "aliases": {
+    "木头": "log", "树": "log", "原木": "log", "柴火": "log", "木": "log",
+    "矿": "ore", "矿石": "ore",
+    "石头": "stone", "石": "stone", "圆石": "cobblestone",
+    "铁": "iron_ore", "铁矿": "iron_ore",
+    "煤": "coal_ore", "煤矿": "coal_ore",
+    "钻石": "diamond", "金": "gold_ore", "金矿": "gold_ore",
+    "红石": "redstone_ore", "红石矿": "redstone_ore",
+    "青金石": "lapis_ore",
+    "绿宝石": "emerald", "翡翠": "emerald",
+    "铜": "copper_ore", "铜矿": "copper_ore",
+    "土": "dirt", "泥土": "dirt",
+    "沙": "sand", "沙子": "sand",
+    "沙砾": "gravel", "砾石": "gravel",
+    "草": "grass", "花": "flower", "树木": "log",
+    "羊毛": "wool",
+    "食物": "food", "肉": "meat", "面包": "bread",
+    "箱子": "chest", "工作台": "crafting_table",
+    "熔炉": "furnace", "炉子": "furnace",
+    "床": "bed", "火把": "torch"
+  }
+}

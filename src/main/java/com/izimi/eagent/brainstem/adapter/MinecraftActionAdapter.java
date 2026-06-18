@@ -1,6 +1,8 @@
 package com.izimi.eagent.brainstem.adapter;
 
+import com.izimi.eagent.brainstem.domain.CombatCommand;
 import com.izimi.eagent.brainstem.domain.DigExecutor;
+import com.izimi.eagent.brainstem.domain.DomainRouter;
 import com.izimi.eagent.brainstem.domain.MotionExecutor;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
@@ -9,6 +11,7 @@ import net.minecraft.entity.ItemEntity;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.item.ItemStack;
+import net.minecraft.item.ItemUsageContext;
 import net.minecraft.recipe.CraftingRecipe;
 import net.minecraft.recipe.Ingredient;
 import net.minecraft.recipe.RecipeType;
@@ -23,7 +26,9 @@ import net.minecraft.server.world.ServerWorld;
 import net.minecraft.text.Text;
 import net.minecraft.util.Hand;
 import net.minecraft.util.Identifier;
+import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 
@@ -31,16 +36,20 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class MinecraftActionAdapter implements BasicActionAdapter {
 
     private final DigExecutor digExecutor = new DigExecutor();
     private final MotionExecutor motionExecutor = new MotionExecutor();
+    private DomainRouter domainRouter;
     private final Set<UUID> fleeingBots = ConcurrentHashMap.newKeySet();
 
     public DigExecutor getDigExecutor() { return digExecutor; }
     public MotionExecutor getMotionExecutor() { return motionExecutor; }
+
+    public void setDomainRouter(DomainRouter router) { this.domainRouter = router; }
 
     // Container slot layout constants (handler slot indices)
     // CraftingScreenHandler: 46 slots total
@@ -80,44 +89,18 @@ public class MinecraftActionAdapter implements BasicActionAdapter {
         return digExecutor.dig(bot, target);
     }
 
-    private void lookAtEntity(ServerPlayerEntity bot, LivingEntity target) {
-        double px = target.getX();
-        double py = target.getEyeY();
-        double pz = target.getZ();
-        double dx = px - bot.getX();
-        double dy = py - (bot.getY() + bot.getStandingEyeHeight());
-        double dz = pz - bot.getZ();
-        float yaw = (float) Math.toDegrees(Math.atan2(-dx, dz));
-        float pitch = (float) Math.toDegrees(-Math.atan2(dy, Math.sqrt(dx * dx + dz * dz)));
-        bot.setYaw(yaw);
-        bot.setHeadYaw(yaw);
-        bot.setPitch(pitch);
-    }
-
     @Override
     public ActionResult attack(ServerPlayerEntity bot, String entityName) {
         if (bot == null) return ActionResult.unable("attack: bot为null");
+        if (domainRouter == null) return ActionResult.unable("attack: domainRouter未初始化");
 
-        ServerWorld world = bot.getServerWorld();
-        LivingEntity target = findNearbyEntity(world, bot, entityName);
-
-        if (target == null) {
-            return ActionResult.unable("附近没有" + (entityName != null ? entityName : "攻击目标"));
+        CompletableFuture<ActionResult> future = domainRouter.dispatch(
+                new CombatCommand(bot, entityName, "attack"));
+        try {
+            return future.get();
+        } catch (Exception e) {
+            return ActionResult.fail("attack失败: " + e.getMessage());
         }
-
-        lookAtEntity(bot, target);
-
-        double dist = bot.squaredDistanceTo(target);
-        if (dist > 25.0) {
-            Vec3d dir = target.getPos().subtract(bot.getPos()).normalize().multiply(0.15);
-            bot.setVelocity(new Vec3d(dir.x, 0.08, dir.z));
-            bot.velocityModified = true;
-            return ActionResult.partial(0.4, "追击中");
-        }
-
-        bot.swingHand(Hand.MAIN_HAND);
-        bot.attack(target);
-        return ActionResult.partial(0.7, "攻击");
     }
 
     @Override
@@ -125,10 +108,15 @@ public class MinecraftActionAdapter implements BasicActionAdapter {
         if (bot == null || pos == null) return ActionResult.unable("placeBlock: 参数无效");
 
         ServerWorld world = bot.getServerWorld();
-        BlockPos placePos = pos.offset(parseFace(faceStr));
+        Direction face = parseFace(faceStr);
+        BlockPos placePos = pos.offset(face);
 
         if (placePos.getSquaredDistance(bot.getBlockPos()) > 25.0) {
             return ActionResult.partial(0.3, "距离太远");
+        }
+
+        if (!world.getBlockState(placePos).isReplaceable()) {
+            return ActionResult.unable("目标位置不可替换");
         }
 
         ItemStack mainHand = bot.getMainHandStack();
@@ -136,10 +124,15 @@ public class MinecraftActionAdapter implements BasicActionAdapter {
             return ActionResult.unable("主手没有物品");
         }
 
-        world.setBlockState(placePos, Blocks.STONE.getDefaultState());
-        bot.swingHand(Hand.MAIN_HAND);
+        Vec3d hitVec = new Vec3d(pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5);
+        BlockHitResult hit = new BlockHitResult(hitVec, face.getOpposite(), pos, false);
+        ItemUsageContext ctx = new ItemUsageContext(bot, Hand.MAIN_HAND, hit);
+        net.minecraft.util.ActionResult placeResult = mainHand.useOnBlock(ctx);
 
-        return ActionResult.success("放置完成");
+        if (placeResult.isAccepted()) {
+            return ActionResult.success("放置完成");
+        }
+        return ActionResult.fail("放置失败");
     }
 
     @Override
@@ -556,30 +549,6 @@ public class MinecraftActionAdapter implements BasicActionAdapter {
             }
         }
         return null;
-    }
-
-    private LivingEntity findNearbyEntity(ServerWorld world, ServerPlayerEntity bot, String entityName) {
-        List<? extends LivingEntity> allEntities = world.getEntitiesByClass(
-                LivingEntity.class,
-                bot.getBoundingBox().expand(SCAN_RANGE),
-                e -> e.isAlive() && e != bot);
-
-        List<LivingEntity> entities = new ArrayList<>();
-        if (entityName != null && !entityName.isEmpty()) {
-            for (var e : allEntities) {
-                String id = Registries.ENTITY_TYPE.getId(e.getType()).toString();
-                if (id.toLowerCase().contains(entityName.toLowerCase())) {
-                    entities.add(e);
-                }
-            }
-        } else {
-            entities.addAll(allEntities);
-        }
-
-        if (entities.isEmpty()) return null;
-
-        entities.sort((a, b) -> Double.compare(a.squaredDistanceTo(bot), b.squaredDistanceTo(bot)));
-        return entities.get(0);
     }
 
     private static Direction parseFace(String face) {

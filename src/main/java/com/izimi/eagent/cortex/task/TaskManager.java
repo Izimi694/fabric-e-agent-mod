@@ -27,9 +27,15 @@ public class TaskManager {
 
     public TaskManager(UUID botId) {
         this.botId = botId;
-        this.taskLogger = new TaskLogger(botId);
+        if (botId != null) this.taskLogger = new TaskLogger(botId);
         activeTask = loadActiveTask();
         lastTask = loadLastTask();
+    }
+
+    public void setBotId(UUID botId) {
+        if (botId != null && this.taskLogger == null) {
+            this.taskLogger = new TaskLogger(botId);
+        }
     }
 
     public void setTaskLogger(TaskLogger logger) { this.taskLogger = logger; }
@@ -102,6 +108,11 @@ public class TaskManager {
             return;
         }
 
+        if (needsMovement(action) && !target.isEmpty()) {
+            task.subTasks.add(new Task.SubTask("move_" + target, "move"));
+            task.progress.targetCount++;
+        }
+
         for (int i = 0; i < count; i++) {
             String subGoal = target.isEmpty() ? action : action + "_" + target;
             task.subTasks.add(new Task.SubTask(subGoal, action));
@@ -110,6 +121,14 @@ public class TaskManager {
         LOGGER.info("[TaskManager] 任务拆解: {} → {}×{} ({})",
                 task.goal, count, task.subTasks.get(0).goal,
                 task.subTasks.get(0).skillId);
+    }
+
+    private static boolean needsMovement(String action) {
+        return "dig".equals(action)
+                || "attack".equals(action)
+                || "collect".equals(action)
+                || "collectItem".equals(action)
+                || "placeBlock".equals(action);
     }
 
     public String createExploreTask() {

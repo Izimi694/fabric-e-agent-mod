@@ -7,7 +7,7 @@
 ## 1. 当前状态
 
 ```
-项目阶段: ✅ Stage 1-3 domain executors + Stage 5 failure escalation + resource stress + dynamic temperature + ContextBudget + failure_reasons + MemoryGraph 召回优化
+项目阶段: ✅ Stage 1-3 domain executors + Stage 5 failure escalation + resource stress + dynamic temperature + ContextBudget + failure_reasons + MemoryGraph 召回优化 + Phase DX 数据外部化 + Phase A (生存装备/战斗) + Phase B (四层模糊回退) + Phase C (降级执行/反思/链优化/情绪耦合)
 ```
 
 ### 完成情况
@@ -60,6 +60,10 @@
 | **Phase AutoSci-A** | **ContextBudget 上下文预算编译 + compileReflexSummary (灵感: [AutoSci](https://github.com/skyllwt/AutoSci))** | ✅ |
 | **Phase AutoSci-B** | **structured failure_reasons 错误原因存储 (灵感: [AutoSci](https://github.com/skyllwt/AutoSci))** | ✅ |
 | **Phase MemoryGraph 召回** | **findContextCluster/applyEdgeDecay+pruneEdges/findCrossSessionMemories/retrieveExpanded** | ✅ |
+| **Phase DX** | **数据外部化: TagResolver + 10 config JSON + CategoryMapper 去硬编码 + builtin_packs.json** | ✅ |
+| **Phase A** | **生存装备管理 + 战斗执行器 + L0 反射 (equip_armor/equip_totem/ranged_attack) + DomainRouter 接入** | ✅ |
+| **Phase B** | **四层模糊回退: TagResolver 类别匹配 → ReflexSimilarityScorer → ScanContext 预检 → Graph 扩散激活** | ✅ |
+| **Phase C** | **降级执行层(DegradedExecutor) + 执行后反思(ReflectionEngine) + ReflexChain 分支/替代 + Hormonal 情绪耦合** | ✅ |
 
 
 ---
@@ -88,6 +92,16 @@ Phase Challenge (15天挑战系统 — 2026-06-17):
   ├── C.1 — ChallengeMilestoneTest (10 个测试)
   └── C.2 — Scenarios S10-S18 (9 个递进式决策场景)
   **347 测试全部通过**
+
+Phase DX (数据外部化 — 0 硬编码配置项):
+  ├── DX.1 — TagResolver (util): entity_aliases.json (别名→ID 映射) + CATEGORY_PATTERNS + Minecraft Tag 系统
+  ├── DX.2 — 10 个 config JSON 从 /defaults/ 首次运行自动复制到 config/
+  ├── DX.3 — CategoryMapper 从硬编码改为 category_display.json + 委托 TagResolver
+  ├── DX.4 — TemplateMatcher 路由模式从 template_patterns.json 加载
+  ├── DX.5 — InputDigester 意图正则从 intent_map.json 加载
+  ├── DX.6 — builtin_packs.json 替代硬编码 String[] 玩法包清单
+  ├── DX.7 — KnowledgeBase 扩展到 14 个类型安全查询方法
+  └── DX.8 — 所有 ~459 处硬编码条目已迁移到 config JSON; 407 测试全部通过
 
 Phase RF (重构 — 降低复杂度 & 错误处理):
   ├── P0 — MetaScheduler.executeCortexLLM() 接入 TemplateManager
@@ -135,6 +149,28 @@ Phase Playstyle Pack (Layer 1 玩法包 — 行为预设初始化):
   ├── PP.6 — AICommand /ai playstyle load/list/export/current
   ├── PP.7 — 5 预设包 JSON: aggressive/explorer/social/cautious/builder
   └── PP.8 — 326 测试全部通过
+```
+
+### 本轮新增 (2026-06-18)
+
+```
+Phase A — 生存装备 + 战斗 + L0 反射 (0 API 本地执行):
+  ├── A.1 — SurvivalEquipmentManager (equipBestWeapon/equipBestArmor/equipTotem)
+  ├── A.2 — CombatExecutor 重写 (per-bot 状态/武器选择/弓物理/撤退)
+  ├── A.3 — 3 新 L0 反射 + 5 新 TriggerType (ARMOR_SLOT_EMPTY/OFFHAND_EMPTY/HAS_TOTEM/BOW_IN_HOTBAR/ARROW_IN_INVENTORY)
+  └── A.4 — DomainRouter.tickAll() 接入 server tick + 清理重复 attack 逻辑
+
+Phase B — 四层模糊回退 (堵不如疏):
+  ├── B.1 — TagResolver.sharesCategory() + ConditionedReflex 精确→类别回退
+  ├── B.2 — ReflexSimilarityScorer (13 维特征向量 cosine similarity)
+  ├── B.3 — ScanContext 预扫描 + 移除三重循环 O(N×M×R³) → O(R³ + N×M)
+  └── B.4 — MemoryGraph.inferReflexFromMemory + ReflexGraph.allNodes 扩散激活
+
+Phase C — 降级 + 反思 + 链优化 + 情绪耦合:
+  ├── C.1 — DegradedExecutor (flee/eat/seekShelter/shelter/digWood 硬编码兜底)
+  ├── C.2 — ReflectionEngine (per-reflex 失败记录 + PatternSummary + adjustWeights + 持久化)
+  ├── C.3 — ReflexChain.selectAlternative() + getSkippableNodes (ALTEERNATIVE 边自动替代)
+  └── C.4 — computeHormonalModulator(): NE/DA/5-HT/ACh 四维 → riskScore 调制系数
 ```
 
 ### 本轮新增 (2026-06-15)
@@ -284,6 +320,16 @@ Phase Challenge (15天挑战系统 — 2026-06-17):
   ├── C.1 — ChallengeMilestoneTest (10 个测试)
   └── C.2 — Scenarios S10-S18 (9 个递进式决策场景)
   **347 测试全部通过**
+
+Phase DX (数据外部化 — 0 硬编码配置项):
+  ├── DX.1 — TagResolver (util): entity_aliases.json (别名→ID 映射) + CATEGORY_PATTERNS + Minecraft Tag 系统
+  ├── DX.2 — 10 个 config JSON 从 /defaults/ 首次运行自动复制到 config/
+  ├── DX.3 — CategoryMapper 从硬编码改为 category_display.json + 委托 TagResolver
+  ├── DX.4 — TemplateMatcher 路由模式从 template_patterns.json 加载
+  ├── DX.5 — InputDigester 意图正则从 intent_map.json 加载
+  ├── DX.6 — builtin_packs.json 替代硬编码 String[] 玩法包清单
+  ├── DX.7 — KnowledgeBase 扩展到 14 个类型安全查询方法
+  └── DX.8 — 所有 ~459 处硬编码条目已迁移到 config JSON; 407 测试全部通过
 
 Phase RF (重构 — 降低复杂度 & 错误处理):
 
@@ -471,7 +517,7 @@ src/main/java/com/izimi/eagent/
 │   └── IdleBrain.java
 ├── command/                          AICommand
 ├── config/                           ModConfig
-├── util/                             FileUtil/JsonUtil
+├── util/                             FileUtil/JsonUtil/TagResolver
 ├── log/                              ExecutionLogger
 └── state/                            PlayerState/StateManager
 ```
@@ -482,7 +528,17 @@ src/main/java/com/izimi/eagent/
 
 ```
 minecraft/eagent/
-├── config/                全局配置/先天反射 JSON
+├── config/                全局配置 JSON (10 个文件，用户可编辑)
+│   ├── knowledge_base.json      扩展知识/游戏规则
+│   ├── entity_aliases.json      TagResolver 别名→ID 映射
+│   ├── intent_map.json          InputDigester 意图正则
+│   ├── template_patterns.json   TemplateMatcher 路由模式
+│   ├── category_display.json    CategoryMapper 分类显示名
+│   ├── stop_words.json          聊天停用词
+│   ├── chat_templates.json      聊天响应模板
+│   ├── idle_words.json          Idle 闲话模板
+│   ├── memory_triggers.json     记忆触发词
+│   └── challenge_items.json     挑战系统物品分类
 ├── thresholds/            自适应阈值
 ├── bayesian/              全局共享先验 (shared_prior.json)
 ├── reflex_packs/          导入/导出的反射包 (*.json)
@@ -522,7 +578,7 @@ minecraft/eagent/
 | `ChatSessionManagerTest.java` | 7 | 窗口限制/方向回退/null安全/防御拷贝 |
 | `TemplateMatcherTest.java` | 14 | 路由: CLARIFICATION/TASK_PLAN/REFLEX_CREATE/CHAT_RESPONSE/拦截 |
 | `ChallengeMilestoneTest.java` | 10 | InvSummary 计数/里程碑数据模型 |
-| **合计 (含新增)** | **347** | **全部通过** |
+| **合计 (含新增)** | **407** | **全部通过 (Phase A-C 409/409)** |
 
 **新增测试计划：**
 
@@ -541,4 +597,4 @@ minecraft/eagent/
 | 2 | `NeuroDynamicsTest.java` | 7 | GABA/Glu 推导/抑制兴奋比/NeuroState重载 |
 | 3 | `CognitiveControlTest.java` | 10 | 余弦匹配/候选调制/5-HT情境分支/require合取/阈值参数化 |
 | 3 | `MetaSchedulerCognitiveControlTest.java` | 7 | setCognitiveControl 安全性/checkReflex 全路径 (无配方/通过/否决/余弦过低/精确匹配) |
-| | **合计** | **337** | **全部通过** |
+| | **合计** | **407** | **全部通过** |

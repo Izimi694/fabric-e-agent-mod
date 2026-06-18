@@ -6,6 +6,7 @@ import com.izimi.eagent.brainstem.adapter.ActionResult;
 import com.izimi.eagent.brainstem.adapter.BasicActionAdapter;
 import com.izimi.eagent.brainstem.adapter.TemporalScaler;
 import com.izimi.eagent.brainstem.domain.GameConceptDetector;
+import com.izimi.eagent.brainstem.reflex.ReflexSimilarityScorer;
 import com.izimi.eagent.brainstem.scheduler.DeviationCounter;
 import com.izimi.eagent.brainstem.scheduler.Perspective;
 import com.izimi.eagent.brainstem.scheduler.ReflexSatisfaction;
@@ -21,6 +22,7 @@ import static com.izimi.eagent.amygdala.ReflexConstants.*;
 import com.izimi.eagent.cortex.task.Task;
 import com.izimi.eagent.util.FileUtil;
 import com.izimi.eagent.util.JsonUtil;
+import com.izimi.eagent.util.TagResolver;
 import com.izimi.eagent.amygdala.ReflexIO;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -66,6 +68,7 @@ public class ConditionedReflex {
     private final DeviationCounter deviationCounter = new DeviationCounter();
 
     private com.izimi.eagent.brainstem.scheduler.ReflexGraph reflexGraph;
+    private ReflectionEngine reflectionEngine;
 
     public void setReflexGraph(com.izimi.eagent.brainstem.scheduler.ReflexGraph graph) {
         this.reflexGraph = graph;
@@ -258,6 +261,13 @@ public class ConditionedReflex {
         this.botParams = botId != null ? BotParams.generate() : BotParams.load();
     }
 
+    private ReflectionEngine getOrCreateReflectionEngine() {
+        if (reflectionEngine == null && botId != null) {
+            reflectionEngine = new ReflectionEngine(botId, ReflexIO.conditionedDir(botId).getParent());
+        }
+        return reflectionEngine;
+    }
+
     private Path conditionedDir() {
         return ReflexIO.conditionedDir(botId);
     }
@@ -285,6 +295,54 @@ public class ConditionedReflex {
         return null;
     }
 
+    record Candidate(Skill skill, double score, int atomIndex) {}
+
+    record ScanContext(Set<String> blockIds, Set<String> entityIds) {
+        static ScanContext create(ServerPlayerEntity bot) {
+            ServerWorld world = bot.getServerWorld();
+            BlockPos botPos = bot.getBlockPos();
+            Set<String> blocks = new HashSet<>();
+            Set<String> entities = new HashSet<>();
+
+            for (int dx = -8; dx <= 8; dx++) {
+                for (int dy = -8; dy <= 8; dy++) {
+                    for (int dz = -8; dz <= 8; dz++) {
+                        BlockPos pos = botPos.add(dx, dy, dz);
+                        BlockState state = world.getBlockState(pos);
+                        if (state.isAir() || state.isOf(Blocks.BEDROCK)) continue;
+                        blocks.add(Registries.BLOCK.getId(state.getBlock()).toString());
+                    }
+                }
+            }
+
+            var living = world.getEntitiesByClass(LivingEntity.class,
+                    bot.getBoundingBox().expand(8), e -> e.isAlive() && e != bot);
+            for (var e : living) {
+                entities.add(Registries.ENTITY_TYPE.getId(e.getType()).toString());
+            }
+
+            return new ScanContext(Collections.unmodifiableSet(blocks), Collections.unmodifiableSet(entities));
+        }
+
+        boolean hasBlock(String target) {
+            String lower = target.toLowerCase();
+            for (String id : blockIds) {
+                if (id.contains(lower)) return true;
+                if (TagResolver.sharesCategory(id, target)) return true;
+            }
+            return false;
+        }
+
+        boolean hasEntity(String target) {
+            String lower = target.toLowerCase();
+            for (String id : entityIds) {
+                if (id.contains(lower)) return true;
+                if (TagResolver.sharesCategory(id, target)) return true;
+            }
+            return false;
+        }
+    }
+
     public Skill scanAndTrigger(ServerPlayerEntity bot) {
         return scanAndTrigger(bot, null);
     }
@@ -292,9 +350,9 @@ public class ConditionedReflex {
     public Skill scanAndTrigger(ServerPlayerEntity bot, Perspective domain) {
         if (bot == null) return null;
 
-        record Candidate(Skill skill, double score, int atomIndex) {}
         List<Candidate> candidates = new ArrayList<>();
         List<BayesianFeature> contextFeatures = extractContextFeatures(bot);
+        ScanContext scanCtx = ScanContext.create(bot);
         double timeScale = computeTimeScale();
         double hungerRatio = bot.getHungerManager().getFoodLevel() / 20.0;
         double dangerLevel = computeDangerLevel(bot);
@@ -328,7 +386,7 @@ public class ConditionedReflex {
                     String atomTarget = (String) atom.get("atomTarget");
                     if (atomTarget == null) continue;
                     double atomProficiency = ((Number) atom.getOrDefault(KEY_PROFICIENCY, 0.0)).doubleValue();
-                    if (isAtomTargetNearby(bot, (String) atom.get("action"), atomTarget)) {
+                    if (isAtomTargetNearby(bot, scanCtx, (String) atom.get("action"), atomTarget)) {
                         double memoryBoost = computeMemoryBoost(skill.getSkillId());
                         double score = scoreReflex(reflexWeight, atomProficiency, bayesianMultiplier, memoryBoost,
                                 decayFactor, timeScale, dangerLevel, hungerRatio, legacy, domain, atoms.size());
@@ -337,7 +395,7 @@ public class ConditionedReflex {
                 }
             } else {
                 String category = (String) data.get("category");
-                if (category != null && isTargetNearby(bot, category, data)) {
+                if (category != null && isTargetNearby(bot, scanCtx, category, data)) {
                     double compoundProficiency = ((Number) data.getOrDefault(KEY_PROFICIENCY, 0.0)).doubleValue();
                     double memoryBoost = computeMemoryBoost(skill.getSkillId());
                     double score = scoreReflex(reflexWeight, compoundProficiency, bayesianMultiplier, memoryBoost,
@@ -347,6 +405,12 @@ public class ConditionedReflex {
             }
         }
 
+        if (candidates.isEmpty()) {
+            candidates.addAll(findSimilarCandidates(bot, skillManager, contextFeatures));
+        }
+        if (candidates.isEmpty()) {
+            candidates.addAll(findGraphCandidates(bot, scanCtx));
+        }
         if (candidates.isEmpty()) return null;
         candidates.sort((a, b) -> Double.compare(b.score(), a.score()));
         Candidate best = candidates.get(0);
@@ -363,6 +427,117 @@ public class ConditionedReflex {
             }
         }
         return best.skill();
+    }
+
+    private List<Candidate> findGraphCandidates(ServerPlayerEntity bot, ScanContext scanCtx) {
+        List<Candidate> results = new ArrayList<>();
+        if (botInstance == null) return results;
+        var ctx = botInstance.getBotContext();
+        if (ctx == null) return results;
+
+        MemoryManager mem = ctx.memoryManager();
+        MemoryGraph mg = mem != null ? mem.getMemoryGraph() : null;
+
+        if (mg != null && reflexGraph != null) {
+            String lastReflexId = null;
+            long newest = 0;
+            for (var node : reflexGraph.allNodes()) {
+                if (node.lastUsed() > newest) {
+                    newest = node.lastUsed();
+                    lastReflexId = node.reflexId();
+                }
+            }
+            if (lastReflexId != null) {
+                Set<String> related = mg.inferReflexFromMemory(mem, lastReflexId);
+                for (String relatedId : related) {
+                    if (relatedId.equals(lastReflexId)) continue;
+                    Skill skill = skillManager.getSkill(relatedId);
+                    if (skill == null || !"conditioned".equals(skill.getType())) continue;
+                    Path reflexPath = conditionedDir().resolve(relatedId + ".json");
+                    Map<String, Object> data = JsonUtil.readMapFromFileSafe(reflexPath);
+                    if (data == null) continue;
+                    String status = (String) data.getOrDefault(KEY_STATUS, STATUS_HEALTHY);
+                    if (STATUS_DEPRECATED.equals(status) || STATUS_DORMANT.equals(status)) continue;
+                    String category = (String) data.get("category");
+                    if (category != null && isTargetNearby(bot, scanCtx, category, data)) {
+                        double score = 0.6 * effectiveWeight(data);
+                        results.add(new Candidate(skill, score, -1));
+                    }
+                }
+            }
+        }
+
+        if (reflexGraph != null) {
+            for (var graphNode : reflexGraph.allNodes()) {
+                String nodeId = graphNode.reflexId();
+                Skill skill = skillManager.getSkill(nodeId);
+                if (skill == null || !"conditioned".equals(skill.getType())) continue;
+                Path reflexPath = conditionedDir().resolve(nodeId + ".json");
+                Map<String, Object> data = JsonUtil.readMapFromFileSafe(reflexPath);
+                if (data == null) continue;
+                String status = (String) data.getOrDefault(KEY_STATUS, STATUS_HEALTHY);
+                if (STATUS_DEPRECATED.equals(status) || STATUS_DORMANT.equals(status)) continue;
+                Set<String> successors = reflexGraph.getSuccessors(nodeId);
+                boolean hasNearbySuccessor = false;
+                for (String succ : successors) {
+                    Skill succSkill = skillManager.getSkill(succ);
+                    if (succSkill == null) continue;
+                    Path succPath = conditionedDir().resolve(succ + ".json");
+                    Map<String, Object> succData = JsonUtil.readMapFromFileSafe(succPath);
+                    if (succData == null) continue;
+                    String succCategory = (String) succData.get("category");
+                    if (succCategory != null && isTargetNearby(bot, scanCtx, succCategory, succData)) {
+                        hasNearbySuccessor = true;
+                        break;
+                    }
+                }
+                if (hasNearbySuccessor) {
+                    double score = 0.5 * effectiveWeight(data);
+                    results.add(new Candidate(skill, score, -1));
+                }
+            }
+            results.sort((a, b) -> Double.compare(b.score(), a.score()));
+            if (results.size() > 2) results = results.subList(0, 2);
+        }
+
+        if (!results.isEmpty()) {
+            LOGGER.info("[ConditionedReflex] graph fallback: {} candidates", results.size());
+        }
+        return results;
+    }
+
+    private List<Candidate> findSimilarCandidates(ServerPlayerEntity bot, SkillManager skillManager,
+                                                    List<BayesianFeature> contextFeatures) {
+        List<Candidate> results = new ArrayList<>();
+        double threshold = 0.5;
+        if (botInstance != null && botInstance.getBotContext() != null) {
+            var h = botInstance.getBotContext().hormonalSystem();
+            if (h != null) {
+                double curiosity = h.getCuriosity();
+                threshold = Math.max(0.3, threshold - curiosity * 0.3);
+            }
+        }
+        for (Map.Entry<String, Skill> entry : skillManager.getSkills().entrySet()) {
+            Skill skill = entry.getValue();
+            if (!"conditioned".equals(skill.getType())) continue;
+            Path reflexPath = conditionedDir().resolve(skill.getSkillId() + ".json");
+            Map<String, Object> data = JsonUtil.readMapFromFileSafe(reflexPath);
+            if (data == null) continue;
+            String status = (String) data.getOrDefault(KEY_STATUS, STATUS_HEALTHY);
+            if (STATUS_DEPRECATED.equals(status) || STATUS_DORMANT.equals(status)) continue;
+            double sim = ReflexSimilarityScorer.computeSimilarity(data, bot);
+            if (sim >= threshold) {
+                double score = sim * effectiveWeight(data);
+                results.add(new Candidate(skill, score, -1));
+            }
+        }
+        results.sort((a, b) -> Double.compare(b.score(), a.score()));
+        if (results.size() > 3) results = results.subList(0, 3);
+        if (!results.isEmpty()) {
+            LOGGER.info("[ConditionedReflex] similarity fallback: {} candidates, threshold={}",
+                    results.size(), String.format("%.2f", threshold));
+        }
+        return results;
     }
 
     private double computeTimeScale() {
@@ -395,14 +570,33 @@ public class ConditionedReflex {
         double estimatedSec = ReflexSatisfaction.estimateSeconds(atomCount);
         double riskScore = clampScore(1.0 - dangerLevel * (1.0 - bayesianMultiplier));
         double resourceScore = clampScore(0.3 + hungerRatio * 0.3 + bayesianMultiplier * 0.4);
+        double hormonalMod = computeHormonalModulator();
         double base = domain != null
                 ? ReflexSatisfaction.computeForDomainWithScale(estimatedSec, timeScale,
                         reflexWeight, proficiency, bayesianMultiplier, decayFactor,
-                        riskScore, resourceScore, domain)
+                        riskScore * hormonalMod, resourceScore, domain)
                 : ReflexSatisfaction.computeWithScale(estimatedSec, timeScale,
                         reflexWeight, proficiency, bayesianMultiplier, decayFactor,
-                        riskScore, resourceScore);
+                        riskScore * hormonalMod, resourceScore);
         return base * memoryBoost;
+    }
+
+    private double computeHormonalModulator() {
+        if (botInstance == null || botInstance.getBotContext() == null) return 1.0;
+        var h = botInstance.getBotContext().hormonalSystem();
+        if (h == null) return 1.0;
+
+        double ne = h.getNE();           // 0-1: urgency/risk tolerance ↑
+        double da = h.getDA();           // 0-1: reward sensitivity ↑
+        double s = h.getSerotonin();     // 0-1: caution/impulse control ↑
+        double ach = h.getACh();         // 0-1: novelty seeking ↑
+
+        double urgencyScale = 0.8 + ne * 0.4;
+        double cautionScale = 0.8 + (1.0 - s) * 0.4;
+        double noveltyScale = 0.9 + ach * 0.2;
+        double rewardScale = 0.9 + da * 0.2;
+
+        return clampScore(urgencyScale * cautionScale * noveltyScale * rewardScale);
     }
 
     private double computeMemoryBoost(String reflexId) {
@@ -419,17 +613,17 @@ public class ConditionedReflex {
         return 1.0 + Math.min(0.3, nodeIds.size() * 0.03);
     }
 
-    private boolean isTargetNearby(ServerPlayerEntity bot, String category, Map<String, Object> reflexData) {
+    private boolean isTargetNearby(ServerPlayerEntity bot, ScanContext scanCtx, String category, Map<String, Object> reflexData) {
         if (category.startsWith("dig_")) {
-            return isDigTargetNearby(bot, reflexData);
+            return isDigTargetNearby(bot, scanCtx, reflexData);
         }
         if (category.startsWith("attack_")) {
-            return isAttackTargetNearby(bot, reflexData);
+            return isAttackTargetNearby(bot, scanCtx, reflexData);
         }
         return false;
     }
 
-    private boolean isDigTargetNearby(ServerPlayerEntity bot, Map<String, Object> reflexData) {
+    private boolean isDigTargetNearby(ServerPlayerEntity bot, ScanContext scanCtx, Map<String, Object> reflexData) {
         BlockPos botPos = bot.getBlockPos();
         List<String> contributedTargets = (List<String>) reflexData.get("contributedTargets");
         List<String> searchTargets = contributedTargets != null ? contributedTargets : List.of();
@@ -440,56 +634,36 @@ public class ConditionedReflex {
         }
         if (searchTargets.isEmpty()) return false;
 
-        return scanBlocksForTargets(bot.getServerWorld(), botPos, 8, searchTargets);
+        for (String target : searchTargets) {
+            if (scanCtx.hasBlock(target)) return true;
+        }
+        return false;
     }
 
-    private boolean isAttackTargetNearby(ServerPlayerEntity bot, Map<String, Object> reflexData) {
-        var world = bot.getServerWorld();
+    private boolean isAttackTargetNearby(ServerPlayerEntity bot, ScanContext scanCtx, Map<String, Object> reflexData) {
         String target = (String) reflexData.get("target");
         if (target == null) return false;
-
-        var entities = world.getEntitiesByClass(LivingEntity.class,
-                bot.getBoundingBox().expand(8),
-                e -> e.isAlive() && e != bot);
-        for (var entity : entities) {
-            String entityId = Registries.ENTITY_TYPE.getId(entity.getType()).toString();
-            if (entityId.toLowerCase().contains(target.toLowerCase())) return true;
-        }
-        return false;
+        return scanCtx.hasEntity(target);
     }
 
-    private boolean scanBlocksForTargets(ServerWorld world, BlockPos botPos, int scanRange, List<String> targets) {
-        for (int dx = -scanRange; dx <= scanRange; dx++) {
-            for (int dy = -scanRange; dy <= scanRange; dy++) {
-                for (int dz = -scanRange; dz <= scanRange; dz++) {
-                    BlockPos pos = botPos.add(dx, dy, dz);
-                    BlockState state = world.getBlockState(pos);
-                    if (state.isAir() || state.isOf(Blocks.BEDROCK)) continue;
-                    String blockId = Registries.BLOCK.getId(state.getBlock()).toString();
-                    for (String target : targets) {
-                        if (blockId.toLowerCase().contains(target.toLowerCase())) return true;
-                    }
-                }
-            }
-        }
-        return false;
-    }
-
-    private boolean isAtomTargetNearby(ServerPlayerEntity bot, String action, String atomTarget) {
+    private boolean isAtomTargetNearby(ServerPlayerEntity bot, ScanContext scanCtx, String action, String atomTarget) {
         if ("equipItem".equals(action) || atomTarget.startsWith("equip_")) return true;
 
         String search = stripPrefix(atomTarget);
 
         if ("dig".equals(action) || atomTarget.startsWith("dig_")) {
-            return scanBlocksForAtomTarget(bot.getServerWorld(), bot.getBlockPos(), search, atomTarget);
+            if (matchCategoryTarget(search, search, atomTarget)) {
+                return scanCtx.hasBlock(search);
+            }
+            return scanCtx.hasBlock(search);
         }
 
         if ("attack".equals(action) || atomTarget.startsWith("attack_")) {
-            return scanEntitiesForTarget(bot, search);
+            return scanCtx.hasEntity(search);
         }
 
         if ("moveTo".equals(action) || atomTarget.startsWith("moveTo_")) {
-            return scanBlocksForAtomTarget(bot.getServerWorld(), bot.getBlockPos(), search, null);
+            return scanCtx.hasBlock(search);
         }
 
         return false;
@@ -502,41 +676,11 @@ public class ConditionedReflex {
         return atomTarget;
     }
 
-    private boolean scanBlocksForAtomTarget(ServerWorld world, BlockPos botPos, String search, String categoryCheck) {
-        for (int dx = -8; dx <= 8; dx++) {
-            for (int dy = -8; dy <= 8; dy++) {
-                for (int dz = -8; dz <= 8; dz++) {
-                    BlockPos pos = botPos.add(dx, dy, dz);
-                    BlockState state = world.getBlockState(pos);
-                    if (state.isAir() || state.isOf(Blocks.BEDROCK)) continue;
-                    String blockId = Registries.BLOCK.getId(state.getBlock()).toString();
-                    if (matchCategoryTarget(blockId, search, categoryCheck)) return true;
-                    if (blockId.toLowerCase().contains(search.toLowerCase())) return true;
-                }
-            }
-        }
-        return false;
-    }
-
-    private boolean scanEntitiesForTarget(ServerPlayerEntity bot, String search) {
-        var world = bot.getServerWorld();
-        var entities = world.getEntitiesByClass(LivingEntity.class,
-                bot.getBoundingBox().expand(8),
-                e -> e.isAlive() && e != bot);
-        for (var entity : entities) {
-            String entityId = Registries.ENTITY_TYPE.getId(entity.getType()).toString();
-            if (entityId.toLowerCase().contains(search.toLowerCase())) return true;
-        }
-        return false;
-    }
-
     private static boolean matchCategoryTarget(String blockId, String search, String categoryCheck) {
-        for (var rule : CategoryMapper.getCategoryRules().entrySet()) {
-            if (!rule.getKey().equals(search) && !rule.getKey().equals(categoryCheck)) continue;
-            for (String pattern : rule.getValue()) {
-                if (blockId.toLowerCase().contains(pattern.toLowerCase())) return true;
-            }
-        }
+        if (TagResolver.isInCategory(blockId, search)) return true;
+        if (TagResolver.isInCategory(blockId, categoryCheck)) return true;
+        if (TagResolver.sharesCategory(blockId, search)) return true;
+        if (categoryCheck != null && TagResolver.sharesCategory(blockId, categoryCheck)) return true;
         return false;
     }
 
@@ -680,6 +824,21 @@ public class ConditionedReflex {
             bayesianModule.update(skillId, extractContextFeatures(bot), result.success());
         }
         reinforceMemoryGraph(skillId, result.success());
+
+        ReflectionEngine re = getOrCreateReflectionEngine();
+        if (re != null) {
+            Map<String, Object> atom = atoms != null && atomIdx >= 0 && atomIdx < atoms.size()
+                    ? atoms.get(atomIdx) : null;
+            String cat = getReflexCategoryPublic(skillId);
+            String action = atom != null ? (String) atom.get("action") : null;
+            String target = atom != null ? (String) atom.get("target") : null;
+            double posterior = bayesianModule != null
+                    ? bayesianModule.predictSuccess(skillId, extractContextFeatures(bot)) : 0.5;
+            boolean converged = bayesianModule != null && bayesianModule.isConverged(skillId);
+            re.record(result.success(), skillId, cat, action, target,
+                    posterior, converged, null, result.effectiveness());
+        }
+
         if (result.success()) {
             LOGGER.info("[ConditionedReflex] 成功: {}", skillId);
             if (botInstance != null) {
@@ -842,6 +1001,18 @@ public class ConditionedReflex {
                             data.getOrDefault("displayName", skillId) + "好像不太对，我先放一放..."));
                 }
             }
+        }
+
+        ReflectionEngine re = getOrCreateReflectionEngine();
+        if (re != null) {
+            Map<String, Object> atom = atoms != null && atomIdx >= 0 && atomIdx < atoms.size()
+                    ? atoms.get(atomIdx) : null;
+            String action = atom != null ? (String) atom.get("action") : null;
+            String target = atom != null ? (String) atom.get("target") : null;
+            String cat = bot != null ? getReflexCategoryPublic(skillId) : null;
+            re.record(false, skillId, cat, action, target, posterior, converged, severity.name(), 0);
+            re.adjustWeights(data, skillId);
+            JsonUtil.writeToFileSafeAtomic(path, data);
         }
     }
 

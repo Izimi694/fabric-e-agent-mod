@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "item_fields": {
+    "minecraft:diamond": "score",
+    "minecraft:iron_ingot": "score",
+    "minecraft:gold_ingot": "score",
+    "minecraft:emerald": "score",
+    "minecraft:netherite_scrap": "score",
+    "minecraft:ancient_debris": "score",
+    "minecraft:diamond_sword": "score",
+    "minecraft:diamond_pickaxe": "score",
+    "minecraft:diamond_axe": "score",
+    "minecraft:diamond_helmet": "score",
+    "minecraft:diamond_chestplate": "score",
+    "minecraft:diamond_leggings": "score",
+    "minecraft:diamond_boots": "score",
+    "minecraft:elytra": "score",
+    "minecraft:totem_of_undying": "score",
+    "minecraft:beacon": "score",
+    "minecraft:enchanted_golden_apple": "score",
+    "minecraft:ender_pearl": "score",
+    "minecraft:shulker_box": "score",
+    "minecraft:experience_bottle": "score",
+    "minecraft:obsidian": "blocks",
+    "minecraft:crying_obsidian": "blocks",
+    "minecraft:netherite_block": "blocks"
+  }
+}

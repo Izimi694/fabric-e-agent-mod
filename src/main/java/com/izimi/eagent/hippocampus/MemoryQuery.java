@@ -1,43 +1,111 @@
 package com.izimi.eagent.hippocampus;
 
+import com.izimi.eagent.util.FileUtil;
+import com.izimi.eagent.util.JsonUtil;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.util.*;
 
 public class MemoryQuery {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger("e-agent");
+
     private final MemoryManager memoryManager;
 
-    private static final List<String> TRIGGER_PATTERNS = List.of(
+    private static List<String> triggerPatterns = null;
+    private static Set<String> timeKeywords = null;
+    private static Set<String> stopWords = null;
+    private static boolean loaded = false;
+
+    private static void ensureLoaded() {
+        if (loaded) return;
+        loaded = true;
+
+        Map<String, Object> data = null;
+        try {
+            data = JsonUtil.readMapFromFileSafe(
+                    FileUtil.getConfigDir().resolve("memory_triggers.json"));
+        } catch (Exception e) {
+        }
+        if (data != null) {
+            if (data.get("triggers") instanceof Map) {
+                @SuppressWarnings("unchecked")
+                Map<String, String> triggers = (Map<String, String>) data.get("triggers");
+                triggerPatterns = new ArrayList<>(triggers.values());
+            }
+            if (data.get("time_keywords") instanceof List) {
+                @SuppressWarnings("unchecked")
+                List<String> list = (List<String>) data.get("time_keywords");
+                timeKeywords = new HashSet<>(list);
+            }
+            if (data.get("stop_words") instanceof List) {
+                @SuppressWarnings("unchecked")
+                List<String> list = (List<String>) data.get("stop_words");
+                stopWords = new HashSet<>(list);
+            }
+        }
+
+        if (triggerPatterns == null || triggerPatterns.isEmpty()) {
+            triggerPatterns = initDefaultTriggers();
+        }
+        if (timeKeywords == null || timeKeywords.isEmpty()) {
+            timeKeywords = initDefaultTimeKeywords();
+        }
+        if (stopWords == null || stopWords.isEmpty()) {
+            stopWords = initDefaultStopWords();
+        }
+
+        LOGGER.debug("[MemoryQuery] triggers={}, timeKeywords={}, stopWords={}",
+                triggerPatterns.size(), timeKeywords.size(), stopWords.size());
+    }
+
+    private static List<String> initDefaultTriggers() {
+        return new ArrayList<>(List.of(
             "还记得", "你之前", "你几天前", "你刚才", "你昨天",
             "记得", "之前做了", "上次", "你做过", "你的记忆",
             "remember", "before", "last time", "you did", "your memory"
-    );
+        ));
+    }
 
-    private static final Set<String> TIME_KEYWORDS = Set.of(
+    private static Set<String> initDefaultTimeKeywords() {
+        return new HashSet<>(Set.of(
             "昨天", "今天", "前天", "之前", "几天前", "上周",
             "yesterday", "today", "ago", "before", "last week"
-    );
+        ));
+    }
+
+    private static Set<String> initDefaultStopWords() {
+        return new HashSet<>(Set.of(
+            "的", "了", "吗", "呢", "吧", "啊", "在", "是",
+            "the", "a", "an", "is", "are", "was", "were", "did", "do", "does"
+        ));
+    }
 
     public MemoryQuery(MemoryManager memoryManager) {
         this.memoryManager = memoryManager;
     }
 
     public boolean isMemoryQuery(String message) {
+        ensureLoaded();
         if (message == null) return false;
         String lower = message.toLowerCase();
-        for (String pattern : TRIGGER_PATTERNS) {
+        for (String pattern : triggerPatterns) {
             if (lower.contains(pattern)) return true;
         }
         return false;
     }
 
     public List<String> extractKeywords(String message) {
+        ensureLoaded();
         if (message == null) return Collections.emptyList();
         List<String> keywords = new ArrayList<>();
 
         String lower = message.toLowerCase();
-        for (String trigger : TRIGGER_PATTERNS) {
+        for (String trigger : triggerPatterns) {
             lower = lower.replace(trigger, " ");
         }
-        for (String time : TIME_KEYWORDS) {
+        for (String time : timeKeywords) {
             lower = lower.replace(time, " ");
         }
 
@@ -83,8 +151,6 @@ public class MemoryQuery {
     }
 
     private boolean isStopWord(String word) {
-        Set<String> stopWords = Set.of("的", "了", "吗", "呢", "吧", "啊", "在", "是",
-                "the", "a", "an", "is", "are", "was", "were", "did", "do", "does");
         return stopWords.contains(word) || word.length() < 2;
     }
 }

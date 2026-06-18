@@ -12,6 +12,7 @@ import com.izimi.eagent.brainstem.skill.Skill;
 import com.izimi.eagent.brainstem.adapter.BasicActionAdapter;
 import com.izimi.eagent.amygdala.FamiliarityTracker;
 import com.izimi.eagent.amygdala.SocialObserver;
+import com.izimi.eagent.brainstem.scheduler.DegradedExecutor;
 import com.izimi.eagent.brainstem.scheduler.InhibitoryControl;
 import com.izimi.eagent.state.StateManager;
 import com.izimi.eagent.cortex.task.TaskExecutor;
@@ -37,6 +38,7 @@ public class BotController {
     private final WorldContext worldContext;
 
     private MetaScheduler metaScheduler;
+    private DegradedExecutor degradedExecutor;
 
     private int tickCounter = 0;
     private int stateSaveInterval = 200;
@@ -60,6 +62,7 @@ public class BotController {
         this.socialClassifier = socialClassifier;
         this.memoryManager = memoryManager;
         this.worldContext = worldContext;
+        this.degradedExecutor = new DegradedExecutor();
     }
 
     private AIChatHandler aiChatHandler() { return worldContext.cortex().chatAI(); }
@@ -128,7 +131,11 @@ public class BotController {
             }
         }
 
-        // P4: AI自主 (IdleBrain 建议 + SocialMirror + 非安全反射), 0 API
+        // P4: AI自主 (降级执行 + IdleBrain + SocialMirror + 非安全反射), 0 API
+        if (degradedExecutor != null) {
+            degradedExecutor.execute(bot, worldContext.brainstem().basicActions(), null);
+        }
+
         if (idleBrain != null) {
             IdleBrain.SuggestionTemplate suggestion = idleBrain.onTick();
             if (suggestion != null) {

@@ -4,86 +4,125 @@ import com.izimi.eagent.api.BotContext;
 import com.izimi.eagent.api.WorldContext;
 import com.izimi.eagent.cortex.api.TemplateManager.TemplateType;
 import com.izimi.eagent.cortex.chat.LocalChatHandler;
+import com.izimi.eagent.util.FileUtil;
+import com.izimi.eagent.util.JsonUtil;
+import com.izimi.eagent.util.TagResolver;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-import java.util.List;
+import java.nio.file.Path;
+import java.util.*;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 public class TemplateMatcher {
 
-    private static final List<Pattern> CLARIFICATION_PATTERNS = List.of(
-        Pattern.compile("(.?怎么|如何|怎样|能不能|可以.?(吗|么)|说明|解释)(?!办)(?!样)(?!回事)"),
-        Pattern.compile("(我想|我要|帮我|给我|能不能)"),
-        Pattern.compile("^(你|你帮我).{0,3}(做|弄|搞|建|造|打|挖|种|喂)"),
-        Pattern.compile("[?？]$"),
-        Pattern.compile("^(调|改|变成|设置为|改成)")
-    );
+    private static final Logger LOGGER = LoggerFactory.getLogger("e-agent");
 
-    private static final List<Pattern> TASK_PATTERNS = List.of(
-        Pattern.compile("^(挖|打|建|造|种|收集|找|去|杀|做|生产|获取|采|制作|建造|盖|放置|合成|拿)(.{0,10}(个|的|些|点)?)"),
-        Pattern.compile("\\d+个")
-    );
+    private static List<Pattern> clarificationPatterns = null;
+    private static List<Pattern> taskPatterns = null;
+    private static List<Pattern> reflexPatterns = null;
+    private static List<Pattern> socialPatterns = null;
+    private static boolean loaded = false;
 
-    private static final List<Pattern> REFLEX_PATTERNS = List.of(
-        Pattern.compile("(学|教|记住|反射|习惯|自动)(.{0,5}(挖|打|建|种|做|合成))"),
-        Pattern.compile("(如果|当|遇到).*(就|则|可以|应该)"),
-        Pattern.compile("(行为|反应|响应|动作|任务).*(规则|模式|方式)")
-    );
+    private static void ensureLoaded() {
+        if (loaded) return;
+        loaded = true;
 
-    private static final List<Pattern> SOCIAL_PATTERNS = List.of(
-        Pattern.compile("(你好|嗨|hi|hello|yo|早)"),
-        Pattern.compile("(谢谢|多谢|thx|thanks)"),
-        Pattern.compile("(再见|拜拜|bye|拜)"),
-        Pattern.compile("(厉害|牛逼|真棒)"),
-        Pattern.compile("(傻|笨|蠢)"),
-        Pattern.compile("(喵|~)$"),
-        Pattern.compile("^(在吗|在不在)")
-    );
+        Map<String, Object> data = null;
+        try {
+            data = JsonUtil.readMapFromFileSafe(
+                    FileUtil.getConfigDir().resolve("template_patterns.json"));
+        } catch (Exception e) {
+        }
+        if (data != null && data.get("patterns") instanceof Map) {
+            @SuppressWarnings("unchecked")
+            Map<String, List<String>> patterns = (Map<String, List<String>>) data.get("patterns");
+            clarificationPatterns = compilePatterns(patterns.get("CLARIFICATION"));
+            taskPatterns = compilePatterns(patterns.get("TASK_PLAN"));
+            reflexPatterns = compilePatterns(patterns.get("REFLEX_CREATE"));
+            socialPatterns = compilePatterns(patterns.get("CHATTING"));
+        } else {
+            loadDefaults();
+            try {
+                JsonUtil.writeToFileSafe(
+                        FileUtil.getConfigDir().resolve("template_patterns.json"),
+                        Map.of("version", 1, "patterns", defaultPatternsMap()));
+            } catch (RuntimeException e) {
+            }
+        }
+        LOGGER.debug("[TemplateMatcher] patterns: clarification={}, task={}, reflex={}, social={}",
+                clarificationPatterns.size(), taskPatterns.size(), reflexPatterns.size(), socialPatterns.size());
+    }
+
+    private static List<Pattern> compilePatterns(List<String> regexes) {
+        if (regexes == null || regexes.isEmpty()) return List.of();
+        return regexes.stream().map(Pattern::compile).collect(Collectors.toList());
+    }
+
+    private static Map<String, List<String>> defaultPatternsMap() {
+        Map<String, List<String>> m = new LinkedHashMap<>();
+        m.put("TASK_PLAN", List.of(
+            "^(挖|打|建|造|种|收集|找|去|杀|做|生产|获取|采|制作|建造|盖|放置|合成|拿)(.{0,10}(个|的|些|点)?)",
+            "\\d+个"
+        ));
+        m.put("REFLEX_CREATE", List.of(
+            "(学|教|记住|反射|习惯|自动)(.{0,5}(挖|打|建|种|做|合成))",
+            "(如果|当|遇到).*(就|则|可以|应该)",
+            "(行为|反应|响应|动作|任务).*(规则|模式|方式)"
+        ));
+        m.put("CHATTING", List.of(
+            "^(你好|嗨|hi|hello|在吗|你在吗)",
+            "(谢谢|多谢|thx|thanks)",
+            "(再见|拜拜|bye|拜)",
+            "(厉害|牛逼|真棒)",
+            "(傻|笨|蠢)",
+            "(喵|~)$",
+            "^(在吗|在不在)"
+        ));
+        m.put("CLARIFICATION", List.of(
+            "(.?怎么|如何|怎样|能不能|可以.?(吗|么)|说明|解释)(?!办)(?!样)(?!回事)",
+            "(我想|我要|帮我|给我|能不能)",
+            "^(你|你帮我).{0,3}(做|弄|搞|建|造|打|挖|种|喂)",
+            "[?？]$",
+            "^(调|改|变成|设置为|改成)"
+        ));
+        return m;
+    }
+
+    private static void loadDefaults() {
+        clarificationPatterns = compilePatterns(defaultPatternsMap().get("CLARIFICATION"));
+        taskPatterns = compilePatterns(defaultPatternsMap().get("TASK_PLAN"));
+        reflexPatterns = compilePatterns(defaultPatternsMap().get("REFLEX_CREATE"));
+        socialPatterns = compilePatterns(defaultPatternsMap().get("CHATTING"));
+    }
 
     public TemplateType match(String message, BotContext botCtx, WorldContext worldCtx) {
+        ensureLoaded();
         if (message == null || message.isBlank()) return null;
 
-        // 1. 本地聊天处理 (0 成本)
         LocalChatHandler chatHandler = worldCtx.cortex().chatHandler();
         if (chatHandler != null && chatHandler.canHandle(message)) return null;
 
-        // 2. 条件反射扫描匹配 (0 成本) — 在 executeHabitLayer 中完成，这里不重复
-
-        // 3. 模板分类
         String lower = message.toLowerCase();
 
-        // 3a. 明确任务请求
-        for (Pattern p : TASK_PATTERNS) {
+        for (Pattern p : taskPatterns) {
             if (p.matcher(lower).find()) return TemplateType.TASK_PLAN;
         }
 
-        // 3b. 反射学习请求
-        for (Pattern p : REFLEX_PATTERNS) {
+        for (Pattern p : reflexPatterns) {
             if (p.matcher(lower).find()) return TemplateType.REFLEX_CREATE;
         }
 
-        // 3c. 纯社交/闲聊
-        for (Pattern p : SOCIAL_PATTERNS) {
+        for (Pattern p : socialPatterns) {
             if (p.matcher(lower).find()) return TemplateType.CHAT_RESPONSE;
         }
 
-        // 3d. 模糊输入 → CLARIFICATION
-        for (Pattern p : CLARIFICATION_PATTERNS) {
+        for (Pattern p : clarificationPatterns) {
             if (p.matcher(lower).find()) return TemplateType.CLARIFICATION;
         }
 
-        // 4. 默认: 如果有具体名词(矿石、怪物等) → TASK_PLAN, 否则 CHAT_RESPONSE
-        if (hasConcreteNoun(lower)) return TemplateType.TASK_PLAN;
+        if (TagResolver.hasConcreteNoun(lower)) return TemplateType.TASK_PLAN;
         return TemplateType.CHAT_RESPONSE;
-    }
-
-    private boolean hasConcreteNoun(String lower) {
-        String[] concreteNouns = {"矿", "石", "铁", "金", "钻", "木", "石", "剑", "镐", "斧",
-            "锹", "锄", "弓", "箭", "床", "箱", "炉", "门", "栅", "药", "食", "肉",
-            "草", "花", "树", "怪", "猪", "牛", "羊", "鸡", "鱼", "龙", "人", "家",
-            "火", "水", "地", "天", "空", "房", "桌", "灯", "梯", "墙"};
-        for (String noun : concreteNouns) {
-            if (lower.contains(noun)) return true;
-        }
-        return false;
     }
 }

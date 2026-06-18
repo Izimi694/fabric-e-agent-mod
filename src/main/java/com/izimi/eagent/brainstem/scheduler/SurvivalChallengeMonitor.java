@@ -1,6 +1,8 @@
 package com.izimi.eagent.brainstem.scheduler;
 
 import com.izimi.eagent.brainstem.bot.BotInstance;
+import com.izimi.eagent.util.FileUtil;
+import com.izimi.eagent.util.JsonUtil;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.server.network.ServerPlayerEntity;
@@ -8,6 +10,7 @@ import net.minecraft.util.math.BlockPos;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.nio.file.Path;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -39,11 +42,23 @@ public class SurvivalChallengeMonitor {
     // ── 里程碑追踪器 ──
     private static ChallengeMilestoneTracker milestoneTracker;
 
+    // ── 任务管线编排器 ──
+    private static ChallengeTaskOrchestrator taskOrchestrator;
+
     private SurvivalChallengeMonitor() {}
 
     /** 注入里程碑追踪器（由 AICommand 在挑战开始时调用） */
     public static void setMilestoneTracker(ChallengeMilestoneTracker tracker) {
         milestoneTracker = tracker;
+    }
+
+    /** 注入任务管线编排器（由 AICommand 在挑战开始时调用） */
+    public static void setTaskOrchestrator(ChallengeTaskOrchestrator orchestrator) {
+        taskOrchestrator = orchestrator;
+    }
+
+    public static ChallengeTaskOrchestrator getTaskOrchestrator() {
+        return taskOrchestrator;
     }
 
     // ════════════════════════════════════════════════════════════════════
@@ -65,6 +80,7 @@ public class SurvivalChallengeMonitor {
         lastDayPrinted = -1;
         challengeEndDay = -1;
         if (milestoneTracker != null) milestoneTracker.reset();
+        if (taskOrchestrator != null) taskOrchestrator.reset();
     }
 
     /** 启动挑战 (days <= 0 = 无限) */
@@ -104,6 +120,13 @@ public class SurvivalChallengeMonitor {
             endDay = challengeEndDay;
         }
         shouldEnd = endDay > 0 && day >= endDay;
+
+        // Tick orchestrator on day boundary for all bots
+        if (taskOrchestrator != null) {
+            for (BotInstance b : bots) {
+                if (b != null) taskOrchestrator.tick(b, day);
+            }
+        }
 
         // ── 紧凑对比行 (控制台可见) ──
         String compact = bots.stream()
@@ -263,16 +286,69 @@ public class SurvivalChallengeMonitor {
         // 食物 (4)
         public int bread, cookedBeef, apple, goldenApple;
 
-        // ── 辅助方法 ──
-        public int totalPickaxes() { return woodPick + stonePick + ironPick + diamondPick; }
-        public boolean hasAnyPickaxe() { return totalPickaxes() > 0; }
-        public int totalSwords() { return woodSword + stoneSword + ironSword + diamondSword; }
-        public int totalIronSet() { return ironPick + ironSword + shield; }
-        public boolean hasFullIronSet() { return ironPick >= 1 && ironSword >= 1 && shield >= 1; }
-        public int totalFood() { return bread + cookedBeef + apple + goldenApple; }
+        // ── 配置文件字段映射（延迟加载，避免测试时依赖 Fabric）──
+        private static Map<String, String> fieldMap = null;
+        private static boolean fieldMapLoaded = false;
 
-        /** 按 itemId 短名称查询数量（用于 ChallengeMilestone 检查） */
+        private static void ensureFieldMap() {
+            if (fieldMapLoaded) return;
+            fieldMapLoaded = true;
+            try {
+                Path p = FileUtil.getConfigDir().resolve("challenge_items.json");
+                Map<String, Object> data = JsonUtil.readMapFromFileSafe(p);
+                if (data != null && data.get("item_fields") instanceof Map) {
+                    @SuppressWarnings("unchecked")
+                    Map<String, String> map = (Map<String, String>) data.get("item_fields");
+                    fieldMap = new HashMap<>(map);
+                    return;
+                }
+            } catch (Exception e) {
+                // 测试环境可能无 Fabric，忽略
+            }
+            fieldMap = new HashMap<>();
+        }
+
+        /** 按 itemId 查询数量（来自外部 JSON 字段映射） */
         public int count(String itemId) {
+            ensureFieldMap();
+            if (fieldMap != null && fieldMap.containsKey(itemId)) {
+                return getFieldValue(fieldMap.get(itemId));
+            }
+            return countLegacy(itemId);
+        }
+
+        private int getFieldValue(String fieldName) {
+            return switch (fieldName) {
+                case "woodPick" -> woodPick;
+                case "stonePick" -> stonePick;
+                case "ironPick" -> ironPick;
+                case "diamondPick" -> diamondPick;
+                case "woodSword" -> woodSword;
+                case "stoneSword" -> stoneSword;
+                case "ironSword" -> ironSword;
+                case "diamondSword" -> diamondSword;
+                case "shield" -> shield;
+                case "bow" -> bow;
+                case "coal" -> coal;
+                case "copperIngot" -> copperIngot;
+                case "ironIngot" -> ironIngot;
+                case "diamond" -> diamond;
+                case "emerald" -> emerald;
+                case "craftingTable" -> craftingTable;
+                case "bed" -> bed;
+                case "furnace" -> furnace;
+                case "chest" -> chest;
+                case "torch" -> torch;
+                case "campfire" -> campfire;
+                case "bread" -> bread;
+                case "cookedBeef" -> cookedBeef;
+                case "apple" -> apple;
+                case "goldenApple" -> goldenApple;
+                default -> 0;
+            };
+        }
+
+        private int countLegacy(String itemId) {
             return switch (itemId) {
                 case "wooden_pickaxe" -> woodPick;
                 case "stone_pickaxe" -> stonePick;
@@ -303,6 +379,14 @@ public class SurvivalChallengeMonitor {
                 default -> 0;
             };
         }
+
+        // ── 辅助方法 ──
+        public int totalPickaxes() { return woodPick + stonePick + ironPick + diamondPick; }
+        public boolean hasAnyPickaxe() { return totalPickaxes() > 0; }
+        public int totalSwords() { return woodSword + stoneSword + ironSword + diamondSword; }
+        public int totalIronSet() { return ironPick + ironSword + shield; }
+        public boolean hasFullIronSet() { return ironPick >= 1 && ironSword >= 1 && shield >= 1; }
+        public int totalFood() { return bread + cookedBeef + apple + goldenApple; }
     }
 
     // ════════════════════════════════════════════════════════════════════

@@ -236,14 +236,16 @@ Stage 1-3 引入的领域执行架构，将原子动作按领域分组封装：
 | `MotionExecutor.java` | Motion 领域：moveTo/lookAt/jump/sprint/sneak |
 | `PlaceCommand.java` | 占位 stub |
 | `CraftCommand.java` | 占位 stub |
-| `CombatCommand.java` | 占位 stub |
+| `CombatCommand.java` | CombatCommand 记录 |
 | `InventoryCommand.java` | 占位 stub |
 | `BreakCommand.java` | BreakCommand 记录 |
 | `MotionCommand.java` | MotionCommand 记录 |
+| `CombatExecutor.java` | Combat 领域：攻击目标选择、武器切换（剑/弓）、撤退逻辑、per-bot 状态 |
+| `SurvivalEquipmentManager.java` | 装备领域：自动装备最优武器/护甲/图腾 (brainstem/equipment) |
 
 Adapter 委派：`MinecraftActionAdapter.dig()` → `DomainRouter.dispatch(BreakCommand(...))` → `DigExecutor.execute()`。同域动作走同一 executor，失败统计按 router 聚合。
 
-**注**：PlaceCommand/CraftCommand/CombatCommand/InventoryCommand 为 Stage 4 占位。
+**注**：PlaceCommand/CraftCommand/InventoryCommand 为 Stage 4 占位。CombatCommand 已在 Phase A 实现。
 - **当前行为**：通过 DomainRouter.dispatch() 抛 UnsupportedOperationException（明确失败，非静默 null）
 - **Stage 4 计划**：为每个 Command 实现对应的 Executor
 - **各类型状态**：
@@ -252,7 +254,7 @@ Adapter 委派：`MinecraftActionAdapter.dig()` → `DomainRouter.dispatch(Break
   |:-------:|:--------:|:----:|
   | BreakCommand | DigExecutor | ✅ Stage 2 完成 |
   | MotionCommand | MotionExecutor | ✅ Stage 3 完成 |
-  | CombatCommand | ❌ 无 | ⏳ Stage 4 待实现 |
+  | CombatCommand | CombatExecutor | ✅ Phase A 完成 (stateful, weapon selection, bow physics, retreat) |
   | CraftCommand | ❌ 无 | ⏳ Stage 4 待实现 |
   | PlaceCommand | ❌ 无 | ⏳ Stage 4 待实现 |
   | InventoryCommand | ❌ 无 | ⏳ Stage 4 待实现 |
@@ -517,6 +519,59 @@ CognitiveControl 中应用：`candidate.type == FLEE ? candidate.weight += fligh
 **运行中调优**：`updateWeights(Perspective, DomainWeights)` 支持运行时更新视角权重，无需重启。
 
 
+## 5a. 降级执行层 (DegradedExecutor)
+
+当 `ConditionedReflex.scanAndTrigger()` 经过四层回退（精确→类别→相似度→图）全部返回空时，`DegradedExecutor` 作为最终"永不卡死"兜底。
+
+### 评估函数
+
+```
+evaluate(bot) → UrgencyResult
+  1. healthUrgency > 0.6 → flee
+  2. hungerUrgency > 0.7 + hasFood → eat
+  3. nightUrgency > 0.5 + !hasShelter → seekShelter
+  4. healthUrgency > 0.4 → retreat
+  5. hungerUrgency > 0.5 → collectFood
+  6. needWood → digWood
+```
+
+冷却 100 tick 防刷。集成在 `BotController.onTick()` 的 P4 层，scanAndTrigger 无候选时自动执行。
+
+## 5b. 执行后反思 (ReflectionEngine)
+
+每次行动成败自动记录结构化 `ReflectionRecord`，永久存入 `reflections/<reflexId>.json`。
+
+| 字段 | 含义 |
+|------|------|
+| `timestamp` | Unix 毫秒 |
+| `success` | 是否成功 |
+| `category` | 反射类别 (tree_log/hostile 等) |
+| `action` | 原子动作 (dig/attack/moveTo) |
+| `target` | 目标 ID |
+| `posterior` | 贝叶斯后验概率 |
+| `severity` | 失败级别 (RETRY/PROBABILISTIC/WATCH/IMPOSSIBLE_ATOM/DORMANT) |
+
+### PatternSummary 动态降权
+
+```
+PatternSummary(reflexId, totalAttempts, successes, failures, successRate,
+               dominantFailureCategory, deterministicSkip, consecutiveFailures)
+
+shouldDegrade(): consecutiveFailures >= 5 || (totalAttempts >= 10 && successRate < 0.3)
+```
+
+降权：`shortTermWeight -= min(0.3, consecutiveFailures × 0.05)`，写入 reflex JSON。
+
+### 集成进故障分类
+
+`classifyAndApplyFailure()` 在更新贝叶斯后调用 `reflectionEngine.record()` + `adjustWeights()`，形成闭环：
+
+```
+executeReflex → fail → classifyAndApplyFailure → record reflection → adjustWeights
+    ↑                                                                      ↓
+    └──────────── 下⼀次 scanAndTrigger 权重更低, 倾向其他反射 ←─────────────┘
+```
+
 ## 6. 观察学习系统
 
 ### 6.1 学习流程
@@ -595,16 +650,16 @@ public class TemplateManager {
 
 ### 7.3 入口压缩 (InputDigester)
 
-在路由之前，所有用户输入经过 `InputDigester.digest()` 压缩：正则抽取 `intent/entities/count`，原文截断至 80 字符为 `rawPreview` 后丢弃。LLM 只看到结构化槽位，原始长文本不会进入上下文。
+在路由之前，所有用户输入经过 `InputDigester.digest()` 压缩：正则抽取 `intent/entities/count`（模式从 `config/intent_map.json` 加载），原文截断至 80 字符为 `rawPreview` 后丢弃。LLM 只看到结构化槽位，原始长文本不会进入上下文。
 
-成本 = 0（纯本地正则）。
+成本 = 0（纯本地正则 + JSON 模式匹配）。
 
 ### 7.4 TemplateMatcher 路由
 
-`TemplateMatcher.match(message, botCtx, worldCtx)` 按以下顺序路由用户输入：
+`TemplateMatcher.match(message, botCtx, worldCtx)` 按以下顺序路由用户输入（模式从 `config/template_patterns.json` 加载，首次运行自动从 `/defaults/` 生成）：
 
 1. **LocalChatHandler** 正则匹配 → `null` (0 成本)
-2. **关键词分类**:
+2. **关键词分类**（基于 `template_patterns.json` 中的意图模板 → templateType 映射）：
    - 明确任务请求 (挖/打/建+N) → `TASK_PLAN`
    - 明确学习请求 (学/记住/如果...就) → `REFLEX_CREATE`
    - 纯社交 (你好/谢谢/喵~) → `CHAT_RESPONSE`
@@ -787,7 +842,7 @@ BotInstance.applyPlaystylePack(pack)
 | L0 | Kernel | ✅ 永久 | ❌ | ❌ | ❌ | 代码 |
 | L1 | Config | ❌ | ✅ | ✅ | ✅ | `config.json` + `BotParams` |
 | L2 | Scheduler | ⚠️ 临时 | ❌ | ✅ | ❌ | `DispatchReflex` 权重 |
-| L3 | Knowledge | ❌ | ✅ (人工) | ✅ (LLM) | ❌ (共享) | `knowledge_base.json` |
+| L3 | Knowledge | ❌ | ✅ (人工) | ✅ (LLM) | ❌ (共享) | `knowledge_base.json` + `category_display.json` (CategoryMapper 已外部化) |
 | L4 | Reflexes | ❌ | ❌ | ✅ | ✅ | `conditioned/*.json` |
 
 ---
@@ -889,6 +944,7 @@ copyReflexesFromMentor()
 | KnowledgeBase | L3 | `knowledge_base.json` |
 | ThresholdConfig | L1 | `thresholds.json` |
 | BayesianModule | 骨架 | `bayesian/shared_prior.json` + per-bot posterior |
+| TagResolver | L3 (util) | `config/entity_aliases.json` + Minecraft Tag 系统 |
 | TemplateManager | 骨架 (cortex/api) | 模板定义 |
 | SocialObserver | 骨架 | 内存 |
 | BehaviorStats | 骨架 | 内存 |
@@ -917,7 +973,7 @@ copyReflexesFromMentor()
 | HighlightStorage | L4 (hippocampus/storage) | `memory/highlights/` |
 | BehaviorEventHandler | L2 (amygdala/character) | 内存 |
 | EvaluationCycle | L2 (amygdala/character) | 内存 |
-| CategoryMapper | L3 (amygdala/learning) | 硬编码 |
+| CategoryMapper | L3 (amygdala/learning) | `config/category_display.json` (委托 TagResolver) |
 | NaiveBayesClassifier | L3 (amygdala) | 内存 |
 | PlanManager | L5 (cortex/planner) | `active_plan.json` |
 | Plan | L5 (cortex/planner) | `active_plan.json` |
@@ -943,11 +999,17 @@ copyReflexesFromMentor()
 | DomainRouter | 待定 (brainstem/domain) | 内存 — 命令分发路由 |
 | DigExecutor | 待定 (brainstem/domain) | 内存 — Break 域挖掘 |
 | MotionExecutor | 待定 (brainstem/domain) | 内存 — Motion 域移动 |
-| CombatExecutor | ⏳ Stage 4 (brainstem/domain) | 内存 — Combat 域攻击 |
+| CombatExecutor | ✅ Phase A (brainstem/domain) | 内存 — Combat 域攻击 (stateful per-bot, weapon selection) |
+| SurvivalEquipmentManager | L0 (brainstem/equipment) | 静态工具 — equipBestWeapon/equipBestArmor/equipTotem |
+| DegradedExecutor | P4 兜底 (brainstem/scheduler) | 内存 — 硬编码安全优先级行动 |
+| ReflectionEngine | L2 (amygdala) | `reflections/<reflexId>.json` — 结构化失败历史 |
+| ReflexSimilarityScorer | 骨架 (brainstem/reflex) | 内存 — 13 维特征向量 cosine similarity |
 | CraftExecutor | ⏳ Stage 4 (brainstem/domain) | 内存 — Craft 域合成 |
 | PlaceExecutor | ⏳ Stage 4 (brainstem/domain) | 内存 — Place 域放置 |
 | InventoryExecutor | ⏳ Stage 4 (brainstem/domain) | 内存 — Inventory 域物品操作 |
-| InnateReflex | L0 (brainstem/innate) | 硬编码 + `innate_reflex_weights.json` |
+| InnateReflex | L0 (brainstem/innate) | `innate_reflexes.json` (含 Phase A 新增: equip_armor/equip_totem/ranged_attack) + `innate_reflex_weights.json` |
+| TriggerType | L0 (brainstem/innate) | 内存 — 12 枚举值 (含 5 Phase A 新增: ARMOR_SLOT_EMPTY/OFFHAND_EMPTY/HAS_TOTEM/BOW_IN_HOTBAR/ARROW_IN_INVENTORY) |
+| ReflexTrigger | L0 (brainstem/innate) | 内存 — 12 种 TriggerType |
 
 ---
 
@@ -1019,6 +1081,24 @@ class ReflexNode {
 
 - 多任务均成功 → 增加共享权重
 - 仅一任务成功、其他失败 → 降低该节点在失败任务中的置信度，保留基础权重
+
+### 16.3 Alternative 选择
+
+`selectAlternative(failedNodeId)` 在节点失败时查询 ReflexGraph 的 **ALTERNATIVE** 边：
+
+```java
+public String selectAlternative(String failedNodeId) {
+    // 查询 ReflexGraph 中失败节点的 ALTERNATIVE 后继
+    // 动态权重 >= 0.5 → 创建替代节点, 桥接前后依赖
+    // 返回替代节点 ID
+}
+```
+
+无需 LLM，纯本地图查询。
+
+### 16.4 Skip 传播
+
+`getSkippableNodes(completedNodeId)` 检测已完成节点的后继中哪些有 ALTERNATIVE 边，支持调度层跳过。
 
 ---
 

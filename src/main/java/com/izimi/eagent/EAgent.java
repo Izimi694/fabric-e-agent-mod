@@ -53,6 +53,8 @@ import com.izimi.eagent.bayesian.BayesianModule;
 import com.izimi.eagent.brainstem.innate.InnateReflexRegistry;
 import com.izimi.eagent.brainstem.innate.MinecraftReflexEvaluator;
 import com.izimi.eagent.util.FileUtil;
+import com.izimi.eagent.util.JsonUtil;
+import com.izimi.eagent.util.TagResolver;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
@@ -126,7 +128,8 @@ public class EAgent implements ModInitializer {
             FileUtil.ensureDirectories();
             FileUtil.cleanupTempFiles();
             copyBuiltinPacks();
-            LOGGER.info("[E-Agent] 目录结构已创建, 已清理残留tmp文件");
+            copyDefaultConfigs();
+            LOGGER.info("[E-Agent] 目录结构已创建, 已清理残留tmp文件, 默认配置就绪");
         } catch (Exception e) {
             LOGGER.error("[E-Agent] 目录创建/清理失败", e);
         }
@@ -183,6 +186,7 @@ public class EAgent implements ModInitializer {
         domainRouter.register(new CraftExecutor());
         domainRouter.register(new PlaceExecutor());
         domainRouter.register(new InventoryExecutor());
+        adapter.setDomainRouter(domainRouter);
         taskExecutor = new TaskExecutor(taskManager, skillManager, executionLogger);
         behaviorStats = new BehaviorStats();
         behaviorEventHandler = new BehaviorEventHandler(behaviorStats);
@@ -258,6 +262,7 @@ public class EAgent implements ModInitializer {
             if (evaluationCycle != null && botManager != null && !botManager.isEmpty()) {
                 evaluationCycle.onTick();
             }
+            domainRouter.tickAll();
             updateNearbyPlayers(server);
         });
 
@@ -452,7 +457,7 @@ public class EAgent implements ModInitializer {
     }
 
     private static void copyBuiltinPacks() {
-        String[] builtinPacks = {"aggressive", "builder", "cautious", "explorer", "social"};
+        String[] builtinPacks = loadBuiltinPackManifest();
         Path packsDir = FileUtil.getReflexPacksDir();
         for (String name : builtinPacks) {
             Path target = packsDir.resolve(name + ".json");
@@ -469,5 +474,51 @@ public class EAgent implements ModInitializer {
                 LOGGER.warn("[E-Agent] 复制内置玩法包失败: {} — {}", name, e.getMessage());
             }
         }
+    }
+
+    private static void copyDefaultConfigs() {
+        String[] configDefaults = {
+            "entity_aliases.json", "intent_map.json", "stop_words.json",
+            "chat_templates.json", "idle_words.json", "memory_triggers.json",
+            "template_patterns.json", "category_display.json", "challenge_items.json",
+            "challenge_days.json", "knowledge_base.json"
+        };
+        Path configDir = FileUtil.getConfigDir();
+        for (String name : configDefaults) {
+            Path target = configDir.resolve(name);
+            if (Files.exists(target)) continue;
+            try (InputStream is = EAgent.class.getResourceAsStream("/defaults/" + name)) {
+                if (is == null) {
+                    LOGGER.warn("[E-Agent] 默认配置文件资源不存在: {}", name);
+                    continue;
+                }
+                Files.createDirectories(configDir);
+                Files.copy(is, target, StandardCopyOption.REPLACE_EXISTING);
+                LOGGER.info("[E-Agent] 已创建默认配置文件: {}", name);
+            } catch (IOException e) {
+                LOGGER.warn("[E-Agent] 复制默认配置文件失败: {} — {}", name, e.getMessage());
+            }
+        }
+        TagResolver.reload();
+    }
+
+    private static String[] loadBuiltinPackManifest() {
+        try (InputStream is = EAgent.class.getResourceAsStream("/defaults/builtin_packs.json")) {
+            if (is != null) {
+                String json = new String(is.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+                Map<String, Object> data = JsonUtil.fromJson(json, Map.class);
+                if (data != null) {
+                    Object packs = data.get("packs");
+                    if (packs instanceof List) {
+                        @SuppressWarnings("unchecked")
+                        List<String> list = (List<String>) packs;
+                        return list.toArray(new String[0]);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            LOGGER.warn("[E-Agent] 加载玩法包清单失败", e);
+        }
+        return new String[]{"aggressive", "builder", "cautious", "explorer", "social"};
     }
 }

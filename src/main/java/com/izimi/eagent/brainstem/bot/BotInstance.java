@@ -24,6 +24,7 @@ import com.izimi.eagent.brainstem.scheduler.MetaScheduler;
 import com.izimi.eagent.brainstem.scheduler.MotivationEngine;
 import com.izimi.eagent.brainstem.scheduler.Perspective;
 import com.izimi.eagent.brainstem.scheduler.SurvivalChallengeMonitor;
+import com.izimi.eagent.brainstem.scheduler.ChallengeTaskOrchestrator;
 import com.izimi.eagent.cortex.api.AITaskPlanner;
 import com.izimi.eagent.cortex.chat.ChatSessionManager;
 import com.izimi.eagent.cortex.planner.KnowledgeBase;
@@ -188,6 +189,12 @@ public class BotInstance {
         }
 
         tickCounter++;
+
+        // ── Challenge orchestrator tick (every tick, before metaScheduler) ──
+        ChallengeTaskOrchestrator orch = SurvivalChallengeMonitor.getTaskOrchestrator();
+        if (orch != null && SurvivalChallengeMonitor.isActive()) {
+            orch.tick(this, tickCounter / 24000 + 1);
+        }
 
         MetaState state = new MetaState();
         String pendingChat = consumePendingChat();

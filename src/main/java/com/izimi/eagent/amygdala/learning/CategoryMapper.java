@@ -1,50 +1,53 @@
 package com.izimi.eagent.amygdala.learning;
 
+import com.izimi.eagent.util.FileUtil;
+import com.izimi.eagent.util.JsonUtil;
+import com.izimi.eagent.util.TagResolver;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.nio.file.Path;
 import java.util.*;
 
 public class CategoryMapper {
 
-    private static final Map<String, List<String>> CATEGORY_RULES = new LinkedHashMap<>();
+    private static final Logger LOGGER = LoggerFactory.getLogger("e-agent");
 
-    static {
-        CATEGORY_RULES.put("tree_log",
-                List.of("_log", "_wood", "stem", "hyphae", "bamboo_block"));
-        CATEGORY_RULES.put("ore",
-                List.of("_ore", "ancient_debris", "nether_gold"));
-        CATEGORY_RULES.put("crop",
-                List.of("wheat", "carrot", "potato", "beetroot", "melon", "pumpkin",
-                        "sugar_cane", "cocoa", "nether_wart", "kelp"));
-        CATEGORY_RULES.put("common_block",
-                List.of("_planks", "stone", "cobblestone", "dirt", "sand", "gravel",
-                        "netherrack", "end_stone", "granite", "diorite", "andesite",
-                        "deepslate", "tuff", "calcite"));
-        CATEGORY_RULES.put("hostile",
-                List.of("zombie", "skeleton", "creeper", "spider", "enderman",
-                        "witch", "blaze", "ghast", "wither", "slime", "magma_cube",
-                        "piglin", "hoglin", "pillager", "vindicator", "drowned"));
-        CATEGORY_RULES.put("passive",
-                List.of("villager", "sheep", "cow", "pig", "chicken", "horse",
-                        "donkey", "llama", "rabbit", "fox", "wolf", "cat",
-                        "panda", "turtle", "dolphin"));
+    private static Map<String, String> displayNameCache = null;
+
+    private static void reloadDisplayNames() {
+        try {
+            Path p = FileUtil.getConfigDir().resolve("category_display.json");
+            Map<String, Object> data = JsonUtil.readMapFromFileSafe(p);
+            if (data != null) {
+                Object names = data.get("display_names");
+                if (names instanceof Map) {
+                    @SuppressWarnings("unchecked")
+                    Map<String, String> map = (Map<String, String>) names;
+                    displayNameCache = new HashMap<>(map);
+                    return;
+                }
+            }
+        } catch (Exception e) {
+            // 测试环境可能无 Fabric
+        }
+        displayNameCache = new HashMap<>();
     }
 
     public static String getCategory(String action, String target) {
         if (target == null) return action;
-        String lower = target.toLowerCase();
-
-        for (var entry : CATEGORY_RULES.entrySet()) {
-            String category = entry.getKey();
-            for (String pattern : entry.getValue()) {
-                if (lower.contains(pattern.toLowerCase())) {
-                    return action + "_" + category;
-                }
-            }
+        String category = TagResolver.findCategory(target.toLowerCase());
+        if (category != null) {
+            return action + "_" + category;
         }
-
         return action;
     }
 
     public static String getCategoryDisplayName(String categoryId) {
+        if (displayNameCache == null) reloadDisplayNames();
+        String name = displayNameCache.get(categoryId);
+        if (name != null) return name;
+
         return switch (categoryId) {
             case "dig_tree_log" -> "砍树";
             case "dig_ore" -> "挖矿";
@@ -66,6 +69,6 @@ public class CategoryMapper {
     }
 
     public static Map<String, List<String>> getCategoryRules() {
-        return Collections.unmodifiableMap(CATEGORY_RULES);
+        return TagResolver.getCategoryPatterns();
     }
 }

@@ -86,7 +86,7 @@ public class JsonUtil {
 
         String written = Files.readString(tmpPath);
         try {
-            GSON.fromJson(written, Map.class);
+            GSON.fromJson(written, Object.class);
         } catch (JsonSyntaxException e) {
             Files.deleteIfExists(tmpPath);
             throw new IOException("原子写入校验失败: JSON格式不合法 " + path.getFileName(), e);

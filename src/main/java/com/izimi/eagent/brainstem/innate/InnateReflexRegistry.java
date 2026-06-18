@@ -91,6 +91,18 @@ public class InnateReflexRegistry {
         register(InnateReflex.create("vocal_response", 5, false,
                 List.of(new ReflexTrigger(ReflexTrigger.TriggerType.CHAT_PRESENCE, 0.0, 30)),
                 new ReflexAction("invokeLLM", Map.of())));
+        register(InnateReflex.create("equip_armor", 1, false,
+                List.of(new ReflexTrigger(ReflexTrigger.TriggerType.ARMOR_SLOT_EMPTY, 0.0, 3)),
+                new ReflexAction("equipArmor", Map.of())));
+        register(InnateReflex.create("equip_totem", 1, false,
+                List.of(new ReflexTrigger(ReflexTrigger.TriggerType.OFFHAND_EMPTY, 0.0, 0),
+                        new ReflexTrigger(ReflexTrigger.TriggerType.HAS_TOTEM, 0.0, 0)),
+                new ReflexAction("equipTotem", Map.of())));
+        register(InnateReflex.create("ranged_attack", 1, false,
+                List.of(new ReflexTrigger(ReflexTrigger.TriggerType.BOW_IN_HOTBAR, 0.0, 0),
+                        new ReflexTrigger(ReflexTrigger.TriggerType.ARROW_IN_INVENTORY, 0.0, 0),
+                        new ReflexTrigger(ReflexTrigger.TriggerType.MONSTER_NEARBY, 0.0, 15)),
+                new ReflexAction("rangedAttack", Map.of())));
         saveWeights();
     }
 

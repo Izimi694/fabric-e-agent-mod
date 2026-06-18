@@ -10,6 +10,7 @@ import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
 
+import com.izimi.eagent.brainstem.equipment.SurvivalEquipmentManager;
 import java.util.List;
 import java.util.function.BiPredicate;
 
@@ -39,6 +40,11 @@ public class MinecraftReflexEvaluator {
             case TIME_OF_DAY -> checkTimeOfDay(bot, trigger.range());
             case ITEM_NEARBY -> checkItemNearby(bot, trigger.range());
             case CHAT_PRESENCE -> checkChatPending(bot, trigger.value());
+            case ARMOR_SLOT_EMPTY -> checkArmorSlotEmpty(bot, trigger.range());
+            case OFFHAND_EMPTY -> checkOffhandEmpty(bot);
+            case HAS_TOTEM -> SurvivalEquipmentManager.hasTotemInInventory(bot);
+            case BOW_IN_HOTBAR -> SurvivalEquipmentManager.hasBowInHotbar(bot);
+            case ARROW_IN_INVENTORY -> SurvivalEquipmentManager.hasArrows(bot);
         };
     }
 
@@ -102,6 +108,14 @@ public class MinecraftReflexEvaluator {
     public boolean hasSolidRoof(ServerWorld world, BlockPos pos) {
         BlockPos above = pos.up();
         return !world.getBlockState(above).isAir() && world.getBlockState(above).isOpaque();
+    }
+
+    private boolean checkArmorSlotEmpty(ServerPlayerEntity bot, int slotIndex) {
+        return bot.getInventory().armor.get(slotIndex).isEmpty();
+    }
+
+    private boolean checkOffhandEmpty(ServerPlayerEntity bot) {
+        return bot.getInventory().offHand.get(0).isEmpty();
     }
 
     private boolean checkChatPending(ServerPlayerEntity bot, double timeoutSecs) {
