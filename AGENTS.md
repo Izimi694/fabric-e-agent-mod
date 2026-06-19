@@ -31,6 +31,7 @@
 | 参数传递 | 参数绑定 (ParameterBinder) |
 | 进程门控 | 边界条件检查 (precondition guard) |
 | 认知网图/记忆关系 | 记忆关系图 (MemoryGraph) |
+| 认知地图 | 图式压缩 (Schema Compression) — WorkingMemoryPool 轨迹聚类 |
 | 抑制控制 | 抑制控制 (InhibitoryControl + CognitiveControl) |
 | 调质调谐 | 4 维状态向量 (NE/DA/5-HT/ACh + 导出 GABA/Glu) |
 
@@ -45,9 +46,10 @@
 | 贝叶斯 = 被动先验编码 | P(s\|f) ∝ P(f\|s)×P(s) ([事后统计，非实时门控](#2-核心抽象-os-内核视角)) | BayesianModule |
 | 激素 = 相对优先级 | 竞争性调度 | MotivationEngine boltzmann |
 | 神经递质 = 组合调制 | 情境开关 + 合取条件 + 余弦匹配 (NE/DA/5-HT/ACh) | HormonalSystem → CognitiveControl |
+| 图式压缩 = 离线抽象 | 连续轨迹 → 离散聚类 → 持久图式 | WorkingMemoryPool 网格聚类 + MemoryGraph 持久化 |
 | e = 自然切割 | 37% 探索 / 63% 利用 | 探索阈值/切换缓冲/收敛阈值 |
 
-**统一表述**：并发不是并行，是极速串行。复杂不是高维，是压扁后用 e 切割。
+**统一表述**：并发不是并行，是极速串行。复杂不是高维，是压扁后用 e 切割。轨迹不是记忆，是压缩后才有意义。
 
 ---
 
@@ -150,6 +152,7 @@
 | 置信度方差 < ? | 标记为 deterministic | curiosity 高时↓ |
 | 探索进度 > ? | 停止探索 | curiosity 调低阈值 |
 | 环境可控性 > ? | L1/L3 需验证 | stress 高时阈值↓ |
+| 轨迹热力 > ? | 压缩为图式 | buffer 满/心跳自动触发 |
 
 ---
 
@@ -178,6 +181,7 @@
 | 认知控制 | MATE (2026) / EvoEmo (2025) | InhibitoryControl 硬门 + CognitiveControl 连续调制 |
 | 客户端 Bot 架构 | [Mineflayer](https://github.com/PrismarineJS/mineflayer) (MIT) | 服务端 mod，controlState 意图分离、挖掘协议三态、复活延迟 1500ms |
 | 上下文预算 + 结构化失败 | [AutoSci](https://github.com/skyllwt/AutoSci) (北京大学 DAIR Lab, MIT) | ContextBudget token 预算 + failure_reasons JSON 链 |
+| 离线重放 + 图式形成 | 海马体 SWR 20x 快放 (Wilson & McNaughton 1994) | WorkingMemoryPool 轨迹缓冲 → 网格聚类 → MemoryGraph 持久化 → LLM 读取产出 LandscapePatch |
 
 ---
 
@@ -191,3 +195,68 @@
 | [INTERNALIZATION.md](./INTERNALIZATION.md) | 抽象概念内化检查清单 |
 
 PS：记得提前边界条件和前卫语句，不会擅自修改不符合条件的参数，快速失败，快速报错。
+
+---
+
+## 14. 高管-下属协议 (E-Agent 2.0)
+
+> LLM 是「景观雕塑家」，不是「司令官」。ActionSorter 是「最终决策者」，不是「指令执行器」。
+
+### 通信边界
+
+| 方向 | 内容 | 格式 | 举例 |
+|------|------|------|------|
+| 下属→高管 | 统计量 + 异常标志 | `PerformanceReport` (数字/布尔) | `{"oreVeinsNearby": 2, "isUnderAttack": true}` |
+| 高管→下属 | 标量乘数 | `LandscapePatch` (targetType + salienceBoost, no coords) | `{"attractor": {"type": "IRON_ORE", "boost": 0.3}}` |
+| 下属↔下属 | 物理信号 | `DomainRouter` 局部总线 (scalar only) | `movementIntensity=0.8, isInCombatRange=true` |
+
+### 绝对禁止的操作
+
+| 禁止事项 | 谁禁止 | 为什么 |
+|----------|--------|--------|
+| LLM 输出坐标或 `moveTo(x,z)` | LLM | 坐标属 Executor 的能力圈，LLM 不该知道 |
+| LLM 指定动作序列 `["dig","move","look"]` | LLM | ActionSorter 和 Executor CPG 负责节奏 |
+| Executor 调用 LLM | Executor | Executor 不该知道 LLM 存在 |
+| Executor 绕过 ActionSorter 自行决定优先级 | Executor | 优先级是 AffordanceRouter 的职责 |
+| ActionSorter 输出精确速度/方向值 | ActionSorter | 精确值是 Executor CPG 内部细节 |
+| PerformanceReport 包含行动记录日志 | 感知层 | 报告只含统计量和标志，不含历史动作 |
+
+### 错误追溯模式
+
+当出现异常行为时，按以下顺序检查数据契约边界：
+
+```
+1. PerformanceReport → ActionSorter    : 感知层是否输出了错误 flag？
+2. ActionSorter → BlendedAction        : softmax 权重是否正确？
+3. AffordanceRouter → 排序             : 优先级的 offset 是否正确？
+4. DomainRouter 总线 → Executor        : 域间信号是否被错误路由？
+5. Executor CPG → 动作输出             : 节奏/相位是否正确？
+```
+
+### 成本层级 (越低越快，越快越优先)
+
+| 层级 | 组件 | 每 tick 成本 | 触发频率 |
+|------|------|:----------:|:--------:|
+| L0 | DomainRouter 局部总线 | 纳秒级 | 每 tick |
+| L1 | Executor CPG (Motion/Dig/Combat) | 微秒级 | 每 tick |
+| L2 | ActionSorter + SalienceMap | 微秒级 | 每 tick |
+| L3 | WorkingMemoryPool (惯性 + 图式压缩) | 微秒级 | 每 tick |
+| L4 | AffordanceRouter 门控 | 微秒级 | 按需 |
+| L5 | 旧 L0-L5 反射层 | 毫秒级 | 按需 |
+| L6 | LLM | ~秒级 | ~10 分钟/次 |
+
+### 14a. 数值-标识 物理隔离铁律
+
+> E-Agent = 微积分（连续流）+ 标识（离散锚点）
+> 当前动作 = ∫[ 物理惯性 C + 激素梯度 f(t) + 标识激励 g(label) ] dt
+
+| 组件 | 只能处理 | 绝对不能处理 |
+|------|---------|-------------|
+| ActionSorter / 激素系统 / WorkingMemoryPool (轨迹寄存器) / DomainRouter / Executor CPG | 连续数值 (float 权重, double 坐标偏移, int Tick) | 不能解析 String 标签, 不能判断 category 含义 |
+| LLM / SalienceMap / MemoryGraph / Schema / PersonaProfile / ConditionEvaluator | 离散标识 (String 标签, Enum 类别, JSON Schema, int 优先级等级) | 不能输出 float 动作权重, 不能生成 BlockPos |
+
+违反后果：
+- `ActionSorter` 中出现 `if (label.equals("DIAMOND"))` → 中层读标识，越界
+- `LLM` 输出 `{"moveTo": [x,y,z]}` → 高管写微积分边界值，越界
+- `SalienceMap` 直接修改 `float` 动作权重 → 标识层写连续值，越界
+- **`WorkingMemoryPool` 解析 Schema.label → 标识层写连续值，越界** (trajectory buffer 属于微积分层, Schema 标签属于标识层, 两者交通过 MemoryGraph 间接传递)

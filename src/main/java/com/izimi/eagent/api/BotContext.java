@@ -12,6 +12,7 @@ import com.izimi.eagent.cortex.chat.ChatSessionManager;
 import com.izimi.eagent.cortex.planner.PlanManager;
 import com.izimi.eagent.cortex.task.TaskExecutor;
 import com.izimi.eagent.cortex.task.TaskManager;
+import com.izimi.eagent.brainstem.perception.ValueRegistry;
 import com.izimi.eagent.hippocampus.MemoryManager;
 import com.izimi.eagent.hormonal.HormonalSystem;
 import com.izimi.eagent.state.StateManager;
@@ -40,4 +41,6 @@ public interface BotContext {
     CorrelationDetector correlationDetector();
     LearningSystem learningSystem();
     ChatSessionManager chatSessionManager();
+
+    ValueRegistry valueRegistry();
 }

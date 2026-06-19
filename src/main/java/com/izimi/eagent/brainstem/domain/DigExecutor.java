@@ -1,6 +1,7 @@
 package com.izimi.eagent.brainstem.domain;
 
 import com.izimi.eagent.brainstem.adapter.ActionResult;
+import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.minecraft.item.ItemStack;
@@ -25,6 +26,7 @@ public class DigExecutor implements DomainExecutor<BreakCommand, ActionResult> {
     private static final int MIN_BREAK_TICKS = 15;
     private static final int SWING_INTERVAL = 7;
     private static final int SCAN_RANGE = 8;
+    private static final double DEFAULT_DIG_DISTANCE_SQ = 4.0;
 
     private BlockPos currentDigTarget;
     private int digBreakingTicks;
@@ -62,6 +64,7 @@ public class DigExecutor implements DomainExecutor<BreakCommand, ActionResult> {
 
         if (target != null) {
             currentDigTarget = target;
+            LOGGER.info("[DIG] received target: {}", target);
         }
 
         if (currentDigTarget == null) {
@@ -74,22 +77,29 @@ public class DigExecutor implements DomainExecutor<BreakCommand, ActionResult> {
                 diag.put("inventory", mainHandItem);
                 diag.put("position", bot.getBlockPos());
                 lastFailure = FailureContext.of("dig", "\u9644\u8fd1\u6ca1\u6709\u53ef\u6316\u6398\u7684\u65b9\u5757", diag);
+                LOGGER.info("[DIG] no reachable block, nearby={}", nearbyIds);
                 return ActionResult.unable("\u9644\u8fd1\u6ca1\u6709\u53ef\u6316\u6398\u7684\u65b9\u5757");
             }
+            LOGGER.info("[DIG] self-selected target: {} at {}", Registries.BLOCK.getId(world.getBlockState(currentDigTarget).getBlock()).getPath(), currentDigTarget);
         }
 
         BlockState currentState = world.getBlockState(currentDigTarget);
+        String blockName = Registries.BLOCK.getId(currentState.getBlock()).getPath();
 
         if (currentState.isAir() || currentState.isOf(Blocks.BEDROCK)) {
             resetDigState();
+            LOGGER.info("[DIG] target gone (air/bedrock)");
             lastFailure = FailureContext.of("dig", "\u76ee\u6807\u65b9\u5757\u5df2\u4e0d\u5b58\u5728");
             return ActionResult.unable("\u76ee\u6807\u65b9\u5757\u5df2\u4e0d\u5b58\u5728");
         }
 
+        double maxDistSq = DEFAULT_DIG_DISTANCE_SQ;
         double distance = bot.getPos().squaredDistanceTo(
                 currentDigTarget.getX() + 0.5, currentDigTarget.getY(), currentDigTarget.getZ() + 0.5);
-        if (distance > 25.0) {
+        if (distance > maxDistSq) {
             resetDigState();
+            LOGGER.info("[DIG] too far: dist={} > max={}",
+                String.format("%.1f", Math.sqrt(distance)), String.format("%.1f", Math.sqrt(maxDistSq)));
             lastFailure = FailureContext.of("dig", "\u8ddd\u79bb\u592a\u8fdc\uff0c\u53d6\u6d88\u6316\u6398",
                     Map.of("distance", String.format("%.1f", Math.sqrt(distance)), "position", bot.getBlockPos()));
             return ActionResult.unable("\u8ddd\u79bb\u592a\u8fdc\uff0c\u53d6\u6d88\u6316\u6398");
@@ -98,11 +108,12 @@ public class DigExecutor implements DomainExecutor<BreakCommand, ActionResult> {
         if (digBreakingTicks == 0) {
             equipBestTool(bot, currentState);
             digBreakTimeTicks = calculateBreakTime(currentState, bot);
+            LOGGER.info("[DIG] start breaking {} (ticks={})", blockName, digBreakTimeTicks);
         }
 
         digBreakingTicks++;
-
         digSwingTicks++;
+
         if (digSwingTicks >= SWING_INTERVAL) {
             digSwingTicks = 0;
             bot.swingHand(Hand.MAIN_HAND);
@@ -116,9 +127,13 @@ public class DigExecutor implements DomainExecutor<BreakCommand, ActionResult> {
             resetDigState();
             world.breakBlock(completed, true, bot);
             lastFailure = null;
+            LOGGER.info("[DIG] completed! broke {}", blockName);
             return ActionResult.success("\u6316\u6398\u5b8c\u6210");
         }
 
+        if (digBreakingTicks % 20 == 0) {
+            LOGGER.info("[DIG] breaking {} progress={}/{}", blockName, digBreakingTicks, digBreakTimeTicks);
+        }
         return ActionResult.partial(0.6, "\u6316\u6398\u4e2d");
     }
 

@@ -108,6 +108,12 @@ public class TagResolver {
         return null;
     }
 
+    public static List<String> expandCategory(String categoryName) {
+        if (categoryName == null) return List.of();
+        List<String> patterns = CATEGORY_PATTERNS.get(categoryName.toLowerCase());
+        return patterns != null ? List.copyOf(patterns) : List.of();
+    }
+
     public static boolean sharesCategory(String idA, String idB) {
         if (idA == null || idB == null) return false;
         String catA = findCategory(idA);

@@ -825,6 +825,9 @@ public class ConditionedReflex {
         }
         reinforceMemoryGraph(skillId, result.success());
 
+        double posterior = bayesianModule != null
+                ? bayesianModule.predictSuccess(skillId, extractContextFeatures(bot)) : 0.5;
+
         ReflectionEngine re = getOrCreateReflectionEngine();
         if (re != null) {
             Map<String, Object> atom = atoms != null && atomIdx >= 0 && atomIdx < atoms.size()
@@ -832,8 +835,6 @@ public class ConditionedReflex {
             String cat = getReflexCategoryPublic(skillId);
             String action = atom != null ? (String) atom.get("action") : null;
             String target = atom != null ? (String) atom.get("target") : null;
-            double posterior = bayesianModule != null
-                    ? bayesianModule.predictSuccess(skillId, extractContextFeatures(bot)) : 0.5;
             boolean converged = bayesianModule != null && bayesianModule.isConverged(skillId);
             re.record(result.success(), skillId, cat, action, target,
                     posterior, converged, null, result.effectiveness());
@@ -844,9 +845,21 @@ public class ConditionedReflex {
             if (botInstance != null) {
                 String category = getReflexCategoryPublic(skillId);
                 if (category != null) botInstance.getBotContext().world().botManager().notifyReflexSuccess(bot, category);
+                learnBlockFromReflex(skillId, atoms, atomIdx, posterior);
             }
         } else {
             handleReflexFailure(skillId, bot, atoms, atomIdx);
+        }
+    }
+
+    private void learnBlockFromReflex(String skillId, List<Map<String, Object>> atoms, int atomIdx, double posterior) {
+        if (botInstance == null || atoms == null || atomIdx < 0 || atomIdx >= atoms.size()) return;
+        var valueRegistry = botInstance.getBotContext().valueRegistry();
+        if (valueRegistry == null) return;
+        Map<String, Object> atom = atoms.get(atomIdx);
+        String target = atom != null ? (String) atom.get("target") : null;
+        if (target != null && posterior > 0.6) {
+            valueRegistry.learnBlockIfUnknown(target, posterior);
         }
     }
 

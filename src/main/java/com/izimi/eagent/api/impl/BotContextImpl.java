@@ -10,6 +10,7 @@ import com.izimi.eagent.amygdala.learning.CorrelationDetector;
 import com.izimi.eagent.amygdala.learning.LearningSystem;
 import com.izimi.eagent.bayesian.BayesianModule;
 import com.izimi.eagent.brainstem.IdleBrain;
+import com.izimi.eagent.brainstem.perception.ValueRegistry;
 import com.izimi.eagent.cortex.chat.ChatSessionManager;
 import com.izimi.eagent.cortex.planner.PlanManager;
 import com.izimi.eagent.cortex.task.TaskExecutor;
@@ -40,6 +41,7 @@ public class BotContextImpl implements BotContext {
     private final CorrelationDetector correlationDetector;
     private final LearningSystem learningSystem;
     private final ChatSessionManager chatSessionManager;
+    private final ValueRegistry valueRegistry;
 
     public BotContextImpl(
             UUID botId, String botName, WorldContext world,
@@ -50,7 +52,8 @@ public class BotContextImpl implements BotContext {
             StateManager stateManager, MemoryManager memoryManager,
             PlanManager planManager, IdleBrain idleBrain,
             CorrelationDetector correlationDetector, LearningSystem learningSystem,
-            ChatSessionManager chatSessionManager
+            ChatSessionManager chatSessionManager,
+            ValueRegistry valueRegistry
     ) {
         this.botId = botId;
         this.botName = botName;
@@ -70,6 +73,7 @@ public class BotContextImpl implements BotContext {
         this.correlationDetector = correlationDetector;
         this.learningSystem = learningSystem;
         this.chatSessionManager = chatSessionManager;
+        this.valueRegistry = valueRegistry;
     }
 
     @Override public UUID botId() { return botId; }
@@ -90,4 +94,5 @@ public class BotContextImpl implements BotContext {
     @Override public CorrelationDetector correlationDetector() { return correlationDetector; }
     @Override public LearningSystem learningSystem() { return learningSystem; }
     @Override public ChatSessionManager chatSessionManager() { return chatSessionManager; }
+    @Override public ValueRegistry valueRegistry() { return valueRegistry; }
 }

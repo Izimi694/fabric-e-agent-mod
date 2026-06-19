@@ -598,3 +598,63 @@ minecraft/eagent/
 | 3 | `CognitiveControlTest.java` | 10 | 余弦匹配/候选调制/5-HT情境分支/require合取/阈值参数化 |
 | 3 | `MetaSchedulerCognitiveControlTest.java` | 7 | setCognitiveControl 安全性/checkReflex 全路径 (无配方/通过/否决/余弦过低/精确匹配) |
 | | **合计** | **407** | **全部通过** |
+
+---
+
+### 本轮新增: E-Agent 2.0 — 竞争归一化架构
+
+目标：从 L0-L5 硬拦截器架构迁移到 ActionSorter softmax 竞争架构，LLM 从"指挥官"降级为"景观雕塑家"。
+
+| Phase | 内容 | 文件 | 旧测试 | 新测试 |
+|:-----:|------|------|:-----:|:------:|
+| 0 | 文档迁移 (README/AGENTS/ARCHITECTURE §27/DEVELOPMENT) | 4 md | — | — |
+| 1 | 数据类: PerceptionSnapshot, TaskBoost, LandscapePatch, PerformanceReport | 4 Java | 407 | 8 |
+|   | **铁律: 所有字段要么全连续要么全离散, 不允许混合; ActionSorter 不读 String label** | — | — | — |
+| 2 | WorldScanner + SalienceMap + 早期预警触发器 (delta<-3 && elapsed>120s → wake LLM) | 2 Java | 407 | 15 |
+| 3 | AffordanceRouter + ActionSorter + WorkingMemoryPool | 3 Java | 407 | 20 |
+| 4 | MetaScheduler.tick() 重构 + 旧层改候选源 | 2 Java | 407 | 5 |
+| 5 | DomainRouter executeBlended + Executor CPG + 坐标阈值统一 + 懒加载预设 | 3 Java | 407 | 10 |
+| 5+ | LANDSCAPE_PATCH 缓存 (.cache/landscapes/ → 永不过期) | 1 Java | 407 | 5 |
+| 6 | LLM LandscapePatch 注入 + TASK_PLAN → LANDSCAPE_PATCH 模板迁移 | 2 Java | 407 | 5 |
+| 6+ | Deprecate: LowLevelDispatcher, DispatchReflex, BotController P0-P5 | — | 407 | — |
+
+**迁移原则：所有 Phase 均保持 407 测试通过（Phase 6 允许临时退化到 400+）。**
+
+**文件清单 (新增)**:
+
+| 文件 | Phase | 职责 |
+|------|:-----:|------|
+| `brainstem/perception/WorldScanner.java` | 2 | 多速率采样世界状态 |
+| `brainstem/perception/PerceptionSnapshot.java` | 1 | DenseView + CompactView 不可变记录 |
+| `brainstem/perception/SalienceMap.java` | 2 | 4 类基础显著性 + TaskBoost 叠加 |
+| `brainstem/perception/TaskBoost.java` | 1 | 指数衰减 boost (半衰期 ~138 ticks) |
+| `brainstem/perception/AffordanceRouter.java` | 3 | 4 级门控 + commitLock |
+| `brainstem/action/ActionSorter.java` | 3 | lateralInhibition + gain + temperature → softmax |
+| `brainstem/action/BlendedAction.java` | 3 | ActionSorter 输出 record |
+| `brainstem/action/WorkingMemoryPool.java` | 3 | 0.7 衰减 + 0.6 惯性上限 |
+| `brainstem/action/LandscapePatch.java` | 1 | LLM 输出格式 (attractor/repulsor) |
+| `brainstem/action/PerformanceReport.java` | 1 | 感知→LLM 输入格式 (统计+标志) |
+| `brainstem/domain/DomainSignal.java` | 5 | Executor↔Executor 局部信号 |
+| `brainstem/domain/ExecutorCPG.java` | 5 | Motion/Dig/Combat CPG 基类 |
+
+**文件清单 (修改)**:
+
+| 文件 | Phase | 修改 |
+|------|:-----:|------|
+| `MetaScheduler.java` | 4 | tick() 加入 ActionSorter 调用链 |
+| `DomainRouter.java` | 5 | +executeBlended(), +DomainSignal 局部总线 |
+| `DigExecutor.java` | 5 | 接收外部 target (代替自选) |
+| `MotionExecutor.java` | 5 | 统一到达阈值 |
+| `ConditionedReflex.java` | 4 | +getCandidates() 输出→ActionSorter |
+| `MinecraftActionAdapter.java` | 5 | +委派 Executor CPG |
+| `BotContextImpl.java` | 4 | +DI 新组件 |
+| `TemplateManager.java` | 6 | +LANDSCAPE_PATCH 模板, -TASK_PLAN 逐步弃用 |
+| `InnateReflexRegistry.java` | 4 | +getCandidates() 输出→ActionSorter |
+
+**文件清单 (废弃)** — 仅添加 @Deprecated 注解, 不删除实现:
+
+| 文件 | Phase | 原因 |
+|------|:-----:|------|
+| `BotController.java` | 6+ | P0-P5 双路 dispatch 被 ActionSorter 取代 |
+| `LowLevelDispatcher.java` | 6+ | L 层路由被 AffordanceRouter 取代 |
+| `DispatchReflex.java` | 6+ | 递归 dispatch 被单层排序取代 |

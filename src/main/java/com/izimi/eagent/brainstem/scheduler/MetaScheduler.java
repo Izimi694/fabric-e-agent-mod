@@ -15,11 +15,18 @@ import com.izimi.eagent.amygdala.DispatchReflex;
 import com.izimi.eagent.amygdala.OneShotAlarmSystem;
 import com.izimi.eagent.amygdala.learning.CorrelationDetector;
 import com.izimi.eagent.bayesian.BayesianModule;
+import com.izimi.eagent.brainstem.action.ActionSorter;
+import com.izimi.eagent.brainstem.action.BlendedAction;
+import com.izimi.eagent.brainstem.action.WorkingMemoryPool;
 import com.izimi.eagent.brainstem.adapter.TemporalScaler;
 import com.izimi.eagent.brainstem.domain.DomainRouter;
 import com.izimi.eagent.brainstem.domain.FailureContext;
 import com.izimi.eagent.brainstem.innate.InnateReflex;
 import com.izimi.eagent.brainstem.innate.InnateReflexRegistry;
+import com.izimi.eagent.brainstem.perception.AffordanceRouter;
+import com.izimi.eagent.brainstem.perception.PerceptionSnapshot;
+import com.izimi.eagent.brainstem.perception.SalienceMap;
+import com.izimi.eagent.brainstem.perception.WorldScanner;
 import com.izimi.eagent.cortex.api.TemplateManager;
 import com.izimi.eagent.cortex.api.TemplateMatcher;
 import com.izimi.eagent.cortex.planner.TaskDAG;
@@ -95,6 +102,13 @@ public class MetaScheduler {
     private ReflectionCycle reflectionCycle;
     private LandmarkCalibrator landmarkCalibrator;
     private final InputDigester inputDigester = new InputDigester();
+    private final LayerCandidateCollector layerCandidateCollector = new LayerCandidateCollector();
+
+    private WorldScanner worldScanner;
+    private SalienceMap salienceMap;
+    private AffordanceRouter affordanceRouter;
+    private WorkingMemoryPool workingMemoryPool;
+    private ActionSorter actionSorter;
 
     private boolean pendingTaskFailure = false;
     private int dormantCheckTick = 0;
@@ -134,6 +148,86 @@ public class MetaScheduler {
     }
 
     public ReflexGraph getReflexGraph() { return reflexGraph; }
+
+    public void setWorldScanner(WorldScanner ws) { this.worldScanner = ws; }
+    public void setSalienceMap(SalienceMap sm) { this.salienceMap = sm; }
+    public void setAffordanceRouter(AffordanceRouter ar) { this.affordanceRouter = ar; }
+    public void setWorkingMemoryPool(WorkingMemoryPool wmp) { this.workingMemoryPool = wmp; }
+    public void setActionSorter(ActionSorter as) { this.actionSorter = as; }
+
+    public boolean isActionSorterPipelineBound() {
+        return worldScanner != null && salienceMap != null && affordanceRouter != null
+            && workingMemoryPool != null && actionSorter != null;
+    }
+
+    private boolean executeActionSorterPipeline(BotContext botCtx, WorldContext worldCtx, ServerPlayerEntity bot) {
+        if (!isActionSorterPipelineBound()) {
+            LOGGER.debug("[MS] pipeline not bound");
+            return false;
+        }
+
+        LOGGER.info("[MS] pipeline start");
+        PerceptionSnapshot snap = worldScanner.scan(bot, 0, 20.0);
+        if (snap == null) return false;
+
+        Map<String, Float> visibleBlocks = worldScanner.getVisibleBlocksWithDistance(bot);
+        salienceMap.tick(visibleBlocks != null ? visibleBlocks : Map.of());
+
+        List<SalienceMap.Candidate> salienceCandidates = salienceMap.getCandidates(
+            visibleBlocks != null ? visibleBlocks : Map.of());
+
+        List<SalienceMap.Candidate> layerCandidates = layerCandidateCollector.collect(
+            worldCtx != null && worldCtx.brainstem() != null ? worldCtx.brainstem().innateReflexes() : null,
+            botCtx != null ? botCtx.alarmSystem() : null,
+            botCtx != null ? botCtx.conditionedReflex() : null,
+            worldCtx != null && worldCtx.amygdala() != null ? worldCtx.amygdala().socialObserver() : null,
+            snap, bot);
+
+        List<SalienceMap.Candidate> allCandidates = new ArrayList<>();
+        if (salienceCandidates != null) allCandidates.addAll(salienceCandidates);
+        if (layerCandidates != null) allCandidates.addAll(layerCandidates);
+        allCandidates.sort((a, b) -> Float.compare(b.salience(), a.salience()));
+
+        LOGGER.info("[MS] total candidates: {} (SM={}, L0-L4={})",
+            allCandidates.size(),
+            salienceCandidates != null ? salienceCandidates.size() : 0,
+            layerCandidates != null ? layerCandidates.size() : 0);
+
+        List<AffordanceRouter.SortedCandidate> sorted = affordanceRouter.route(
+            allCandidates, snap.dense(), Map.of(), snap.dense().hasShelterNearby());
+
+        if (sorted == null || sorted.isEmpty()) {
+            LOGGER.info("[MS] no candidates survived routing");
+            return false;
+        }
+
+        double serotoninRatio = 0;
+        double dopamine = 0.5;
+        double pressure = 0;
+        if (botCtx.hormonalSystem() != null) {
+            serotoninRatio = botCtx.hormonalSystem().getSerotonin();
+            dopamine = botCtx.hormonalSystem().getDA();
+            pressure = motivationEngine.computeDrives(botCtx, worldCtx, bot).pressure();
+        }
+
+        BlendedAction blended = actionSorter.select(sorted, serotoninRatio, dopamine, pressure);
+        if (blended == null || blended == BlendedAction.NONE) {
+            LOGGER.info("[MS] ActionSorter returned NONE");
+            return false;
+        }
+
+        String bestTier = sorted.isEmpty() ? "NORMAL" : sorted.get(0).tier();
+        LOGGER.info("[MS] pipeline result: {} (tier={}, weight={})", blended.targetType(), bestTier, String.format("%.3f", blended.weight()));
+        var router = worldCtx != null && worldCtx.brainstem() != null
+            ? worldCtx.brainstem().domainRouter() : null;
+        if (router != null) {
+            router.executeBlended(blended, bestTier);
+        }
+        if (workingMemoryPool != null) {
+            workingMemoryPool.recordPosition(bot.getX(), bot.getZ(), (float) blended.weight());
+        }
+        return true;
+    }
 
     private ProblemLabel labelProblem(BotContext botCtx, WorldContext worldCtx, ServerPlayerEntity bot, Perspective perspective) {
         InnateReflexRegistry reflex = worldCtx.brainstem().innateReflexes();
@@ -214,6 +308,10 @@ public class MetaScheduler {
             reflexGraph.lazyPrune(ns);
         }
 
+        if (workingMemoryPool != null) {
+            workingMemoryPool.heartbeatCompress();
+        }
+
         if (tickPhaseEscalation(worldCtx, state, botCtx, bot)) return;
         tickPhaseTemplate(state, botCtx, worldCtx, bot);
         tickPhaseRoutine(botCtx, worldCtx, bot, state, server);
@@ -252,6 +350,11 @@ public class MetaScheduler {
     }
 
     private void tickPhaseRoutine(BotContext botCtx, WorldContext worldCtx, ServerPlayerEntity bot, MetaState state, MinecraftServer server) {
+        if (executeActionSorterPipeline(botCtx, worldCtx, bot)) {
+            botCtx.hormonalSystem().tick();
+            return;
+        }
+
         DriveState drives = motivationEngine.computeDrives(botCtx, worldCtx, bot);
         Perspective perspective = motivationEngine.select(botCtx, drives);
 

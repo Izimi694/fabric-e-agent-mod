@@ -358,7 +358,9 @@ public class MemoryGraph {
             String summary = (String) map.get("summary");
             long ts = map.containsKey("timestamp") ? ((Number) map.get("timestamp")).longValue() : 0;
             int gd = map.containsKey("gameDay") ? ((Number) map.get("gameDay")).intValue() : 0;
-            nodes.put(id, new MemoryNode(id, summary, ts, gd));
+            Map<String, Object> meta = map.containsKey("metadata")
+                ? (Map<String, Object>) map.get("metadata") : Map.of();
+            nodes.put(id, new MemoryNode(id, summary, ts, gd, meta));
         }
     }
 
@@ -406,6 +408,9 @@ public class MemoryGraph {
             nm.put("summary", node.summary());
             nm.put("timestamp", node.timestamp());
             nm.put("gameDay", node.gameDay());
+            if (node.metadata() != null && !node.metadata().isEmpty()) {
+                nm.put("metadata", new LinkedHashMap<>(node.metadata()));
+            }
             nodeList.add(nm);
         }
         data.put("nodes", nodeList);
@@ -441,6 +446,35 @@ public class MemoryGraph {
             intervalCount++;
         }
         lastMemoryTimestamp = timestamp;
+    }
+
+    // ── Schema (Phase 1) ──
+
+    public void addSchema(com.izimi.eagent.brainstem.action.Schema schema) {
+        if (schema == null) return;
+        String nodeId = schema.id();
+        if (nodes.containsKey(nodeId)) {
+            MemoryNode existing = nodes.get(nodeId);
+            if (!schema.permanent()) return;
+            Map<String, Object> meta = new LinkedHashMap<>(existing.metadata());
+            meta.put("permanent", true);
+            meta.put("avgSatisfaction", schema.avgSatisfaction());
+            nodes.put(nodeId, new MemoryNode(nodeId, existing.summary(),
+                existing.timestamp(), existing.gameDay(), meta));
+            return;
+        }
+        String summary = "Region at (" + String.format("%.1f", schema.centerX())
+            + ", " + String.format("%.1f", schema.centerZ()) + ")"
+            + " satisfaction=" + String.format("%.2f", schema.avgSatisfaction());
+        long now = System.currentTimeMillis();
+        Map<String, Object> meta = new LinkedHashMap<>();
+        meta.put("gridX", schema.gridX());
+        meta.put("gridZ", schema.gridZ());
+        meta.put("avgSatisfaction", schema.avgSatisfaction());
+        meta.put("permanent", schema.permanent());
+        if (schema.consecutiveHiCount() > 0) meta.put("consecutiveHi", schema.consecutiveHiCount());
+        nodes.put(nodeId, new MemoryNode(nodeId, summary, now, 0, meta));
+        LOGGER.info("[MemoryGraph] added schema: {} at ({},{})", nodeId, schema.centerX(), schema.centerZ());
     }
 
     // ── Reflex-Memory Index (Phase 1) ──

@@ -20,6 +20,7 @@ import com.izimi.eagent.cortex.api.PlaystylePack;
 import com.izimi.eagent.hormonal.HormonalSystem;
 import com.izimi.eagent.brainstem.IdleBrain;
 import com.izimi.eagent.brainstem.adapter.TemporalScaler;
+import com.izimi.eagent.brainstem.perception.ValueRegistry;
 import com.izimi.eagent.brainstem.scheduler.MetaScheduler;
 import com.izimi.eagent.brainstem.scheduler.MotivationEngine;
 import com.izimi.eagent.brainstem.scheduler.Perspective;
@@ -128,6 +129,8 @@ public class BotInstance {
         this.metaScheduler.setCorrelationDetector(correlationDetector);
 
         if (worldContext != null) {
+            var valueRegistry = new ValueRegistry(FileUtil.getBotDir(botId));
+            valueRegistry.load();
             this.botContext = new BotContextImpl(
                     botId, botName, worldContext,
                     botParams, hormonalSystem,
@@ -137,7 +140,8 @@ public class BotInstance {
                     stateManager, memoryManager,
                     planManager, idleBrain,
                     correlationDetector, learningSystem,
-                    new ChatSessionManager(bayesianModule, botId)
+                    new ChatSessionManager(bayesianModule, botId),
+                    valueRegistry
             );
         }
     }

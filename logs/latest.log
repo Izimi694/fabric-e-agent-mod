@@ -1,6 +1,18 @@
-[00:17:43] [Test worker/ERROR]: [DomainRouter] No executor registered for command type: craft
-[00:17:43] [Test worker/WARN]: [DeepSeekClient] 响应无choices
-[00:17:43] [Test worker/WARN]: [DeepSeekClient] 响应无choices
-[00:17:43] [Test worker/ERROR]: [DeepSeekClient] 解析响应失败: Expected a com.google.gson.JsonObject but was com.google.gson.JsonPrimitive; at path $ -- body: not json
-[00:17:43] [Test worker/WARN]: [TemplateManager] 填空解析失败: EVALUATION_BATCH - Expected a com.google.gson.JsonObject but was com.google.gson.JsonArray; at path $
-[00:17:43] [Test worker/WARN]: [TemplateManager] 填空解析失败: REFLEX_CREATE - com.google.gson.stream.MalformedJsonException: Expected ':' at line 1 column 7 path $.not
+[15:21:23] [Test worker/INFO]: [AS] selected iron_ore (p=0.572, gain=1.00, temp=0.50) dist=[dirt=0.190, iron_ore=0.572, coal_ore=0.237]
+[15:21:23] [Test worker/INFO]: [AS] selected coal_ore (p=0.527, gain=1.00, temp=0.50) dist=[dirt=0.473, coal_ore=0.527]
+[15:21:23] [Test worker/ERROR]: [DomainRouter] No executor registered for command type: craft
+[15:21:23] [Test worker/ERROR]: [DomainRouter] No executor registered for command type: break
+[15:21:23] [Test worker/ERROR]: [DomainRouter] No executor registered for command type: break
+[15:21:23] [Test worker/INFO]: [AR] sorted 1 candidates: iron_ore[NORMAL]=0.600
+[15:21:23] [Test worker/INFO]: [AR] sorted 1 candidates: iron_ore[LOW]=0.300
+[15:21:23] [Test worker/INFO]: [SM] 1 candidates: iron_ore=1.000
+[15:21:23] [Test worker/INFO]: [AR] sorted 1 candidates: iron_ore[LOW]=0.700
+[15:21:23] [Test worker/INFO]: [AR] sorted 2 candidates: diamond_ore[LOW]=0.700, iron_ore[LOW]=0.300
+[15:21:23] [Test worker/INFO]: [AR] sorted 2 candidates: iron_ore[NORMAL]=0.600, apple[NORMAL]=0.400
+[15:21:23] [Test worker/INFO]: [SM] 2 candidates: diamond_ore=1.000, dirt=0.050
+[15:21:23] [Test worker/INFO]: [SM] 1 candidates: iron_ore=1.000
+[15:21:23] [Test worker/WARN]: [DeepSeekClient] 响应无choices
+[15:21:23] [Test worker/WARN]: [DeepSeekClient] 响应无choices
+[15:21:23] [Test worker/ERROR]: [DeepSeekClient] 解析响应失败: Expected a com.google.gson.JsonObject but was com.google.gson.JsonPrimitive; at path $ -- body: not json
+[15:21:23] [Test worker/WARN]: [TemplateManager] 填空解析失败: EVALUATION_BATCH - Expected a com.google.gson.JsonObject but was com.google.gson.JsonArray; at path $
+[15:21:23] [Test worker/WARN]: [TemplateManager] 填空解析失败: REFLEX_CREATE - com.google.gson.stream.MalformedJsonException: Expected ':' at line 1 column 7 path $.not

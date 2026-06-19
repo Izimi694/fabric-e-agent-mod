@@ -18,6 +18,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public class MotionExecutor implements DomainExecutor<MotionCommand, ActionResult> {
 
     private static final Logger LOGGER = LoggerFactory.getLogger("e-agent");
+    public static final double ARRIVAL_THRESHOLD_DEFAULT_SQ = 4.0;
 
     private final Map<UUID, NavigationController> navigationControllers = new ConcurrentHashMap<>();
     private final Map<UUID, BlockPos> currentMotionTargets = new ConcurrentHashMap<>();
@@ -70,18 +71,26 @@ public class MotionExecutor implements DomainExecutor<MotionCommand, ActionResul
         Vec3d botPos = bot.getPos();
         double dist = botPos.squaredDistanceTo(target.toCenterPos());
 
-        if (dist < 4.0) {
+        LOGGER.info("[MOVE] target={} bot={} dist={} threshold={}",
+            target, bot.getBlockPos(),
+            String.format("%.1f", Math.sqrt(dist)),
+            String.format("%.1f", Math.sqrt(ARRIVAL_THRESHOLD_DEFAULT_SQ)));
+
+        if (dist < ARRIVAL_THRESHOLD_DEFAULT_SQ) {
             nav.stopNavigation(bot);
             currentMotionTargets.remove(bot.getUuid());
+            LOGGER.info("[MOVE] arrived at {}", target);
             return ActionResult.success("已到达");
         }
 
         boolean navigating = nav.navigateTo(bot, target);
         if (navigating) {
             currentMotionTargets.put(bot.getUuid(), target);
+            LOGGER.info("[MOVE] navigating to {} (dist={})", target, String.format("%.1f", Math.sqrt(dist)));
             return ActionResult.success("已到达");
         } else {
             currentMotionTargets.put(bot.getUuid(), target);
+            LOGGER.info("[MOVE] in progress toward {} (dist={})", target, String.format("%.1f", Math.sqrt(dist)));
             return ActionResult.partial(Math.max(0, 1.0 - dist / 100.0), "移动中");
         }
     }

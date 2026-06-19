@@ -46,11 +46,17 @@ public class MotivationEngine {
      * 探索倾向额外受 DA 驱动.
      */
     public static double wheatEarExplore(double confidence, HormonalSystem hormones) {
+        return wheatEarExplore(confidence, hormones, null, null);
+    }
+
+    public static double wheatEarExplore(double confidence, HormonalSystem hormones,
+                                          String dimensionBias, Integer yLevelTarget) {
         double base = Math.max(0, (1.0 / Math.E) - confidence);
         if (hormones != null) {
             double daMod = hormones.getDA() * 0.3;
             base = Math.max(0, base + daMod);
         }
+        if (dimensionBias != null) base = Math.min(1.0, base + 0.2);
         return Math.min(1.0, base);
     }
 

@@ -1603,3 +1603,279 @@ Winner: NewBot
 | 钻石 | +50 | 高价值资源，反映高阶能力 |
 | 死亡 | -100 | 严重扣分，反映生存能力 |
 | 其他 | 0 | 不计分，仅展示 |
+
+---
+
+## 27. E-Agent 2.0 — 竞争归一化架构 (Evolving)
+
+> ActionSorter 是最终决策者，LLM 是景观雕塑家，Executor 是自律执行者。
+> 每个组件只做自己最便宜的能做的事，通过数据契约而非层级调用来协调。
+
+### 27.0 数学底座：微积分 + 标识
+
+**E-Agent = 微积分（连续流）+ 标识（离散锚点）**
+
+```
+当前动作 = ∫[ 物理惯性 C + 激素梯度 f(t) + 标识激励 g(label) ] dt
+```
+
+| 概念 | 微积分类比 | E-Agent 对应 | 例子 |
+|------|-----------|-------------|------|
+| 微分 | 满意度变化率 | `SalienceMap.tick()` 每帧 delta | 资源枯竭速率 `Δiron=-3/300tick` |
+| 积分 | 惯性累积 | `WorkingMemoryPool` 0.7 衰减 | 动作不每 tick 从零开始 |
+| 链式法则 | 时间缩放 | `TemporalScaler.computeTimeScale(DA, 5-HT)` | 枯燥任务主观加速 |
+| 梯度下降 | 软最大竞争 | `ActionSorter.softmax` | 永远朝兴奋度最高方向流动 |
+| 被积函数 | 标识激励 | `LandscapePatch.salienceBoost` | LLM 给 "IRON_ORE" 标签加权重 |
+| 积分常数 | 初始性格 | `PersonaProfile` | 固定的 System Prompt 锚点 |
+| 分段边界 | 安全气囊 | `AffordanceRouter` 紧急旁路 | `if health < 6 → EAT` |
+| 高光标注 | 离散标记 | `MemoryHighlight` | "FIRST_DIAMOND" 语义标签 |
+
+**物理隔离铁律**：连续层与离散层不互相污染。
+
+| 层 | 只能处理 | 绝对不能处理 |
+|----|---------|-------------|
+| **连续层** (ActionSorter, HormonalSystem, WorkingMemoryPool, DomainRouter, Executor CPG) | `float` 权重, `double` 坐标, `int` tick | `String` 标签, `Enum` 类别, JSON Schema |
+| **离散层** (LLM, SalienceMap, MemoryGraph, PersonaProfile, ConditionEvaluator) | `String` 标签, `Enum`, JSON, `int` 优先级 | `float` 动作权重, `BlockPos` 坐标 |
+
+### 27.1 核心变化
+
+| 旧架构 (1.x) | 新架构 (2.0) |
+|---|---|
+| L0-L5 硬编码拦截器 + 硬路由 | 所有候选来源 → ActionSorter softmax 竞争 |
+| DispatchReflex → LowLevelDispatcher 递归调用 | AffordanceRouter 单层排序 + 紧急旁路 |
+| LLM → 输出动作序列/坐标 | LLM → LandscapePatch (仅目标类型 + salienceBoost) |
+| L 层互相调用 (L2→L3→L4) | 数据契约隔离 (各层只关心自己的输入/输出) |
+| ConditionedReflex 自我扫描全身 | WorldScanner 统一感知 → PerceptionSnapshot |
+
+### 27.2 五大新组件
+
+```
+WorldScanner (感知)
+  ↓ PerceptionSnapshot (DenseView + CompactView)
+SalienceMap (显著性地图)
+  ↓
+AffordanceRouter (门控/紧急旁路)
+  ↓
+ActionSorter (softmax 竞争 → BlendedAction)
+  ↓
+DomainRouter (局部信号总线) → Executor CPG (Motion/Dig/Combat)
+  ↑
+LLM (异步 LandscapePatch) ─── PerformanceReport ──┘
+```
+
+#### WorldScanner (com.izimi.eagent.brainstem.perception)
+
+| 字段 | 采样率 | 默认值 |
+|------|:------:|:------:|
+| 精确扫描 | 2 tick | nearbyEntities, blockCollisions |
+| 核心扫描 | 6 tick | OreVeinsNearby, MobCount, IncomingProjectiles |
+| 宽泛扫描 | 300 tick | CaveAmbientLight, BiomeAvgTemp |
+| TPS 自适应降频 | <18 TPS | 核心→12 tick, 宽泛→600 tick |
+
+```
+《世界感知说明》：
+WorldScanner = 相机 + 雷达，非解释器。
+它输出原始物理量（几个骷髅？周围有什么方块？），不做意图判断。
+意图判断是 SalienceMap 和 AffordanceRouter 的事。
+```
+
+#### PerceptionSnapshot (不可变记录)
+
+| 视图 | 用途 | 最大信息量 |
+|------|------|:----------:|
+| `DenseView` | → ActionSorter (数值向量) | 无上限 |
+| `CompactView` | → LLM (自然语言摘要) | ≤200 tokens |
+
+DenseView 信号示例：`oreVeinsNearby=3, mobCount=2, health=0.75, hunger=0.6, isUnderAttack=false, hasShelterNearby=true`
+
+#### SalienceMap (显著性地图)
+
+四层基础显著性 + 任务叠加：
+
+| 类别 | BaseSalience | 范例 |
+|------|:-----------:|------|
+| ORE | 0.6 | iron_ore, diamond_ore |
+| WOOD | 0.2 | oak_log, birch_log |
+| STONE | 0.1 | stone, cobblestone |
+| OTHER | 0.05 | dirt, grass |
+
+距离衰减：`salience × (1 - distance / MAX_DISTANCE)` 其中 MAX_DISTANCE = 24 blocks。
+
+`TaskBoost` 自动指数衰减：`boost(t) = boost(0) × exp(-decayRate × t)`，半衰期 ≈ 138 ticks (7秒 at decayRate=0.005)。
+
+#### AffordanceRouter (门控路由器)
+
+| 门 | 行为 |
+|----|------|
+| 紧急旁路 (CRITICAL) | 直接提交 ActionSorter，不加 urgencyOffset |
+| 高点 (HIGH+5) | 比 NORMAL 高 0.5 优先级 offset |
+| 正常 (NORMAL+0) | 所有候选在此层排序 |
+| 低点 (LOW) | 仅当无更高层候选时输出 |
+
+`CommitLock`：NORMAL 层的约束锁，锁定期内同一类别不能二次提交。锁公式：`lockDuration = 10 + distance/2` ticks (max 60)。当新 candidate 的 urgency 超过当前锁的 1.3× 时，锁自动失效（打破循环）。
+
+#### ActionSorter (竞争筛选器)
+
+```
+输入: MultiCandidate (来自 WorldScanner, AffordanceRouter, WorkingMemoryPool, ConditionedReflex, L0-L5 旧层)
+处理: 1. lateralInhibition = 0.1 × others
+      2. gain = 1 / (1 + 5-HT_ratio)          // 5-HT 越高 → gain 越低 → 更谨慎
+      3. temperature = clamp(DA + pressure, 0.05, 0.8)
+      4. softmax → BlendedAction
+输出: 单一 BlendedAction { targetType, weight, direction }
+```
+
+每个候选有 `excitement` 分值，`softmax` 公式：
+```
+P(i) = exp(gain × excitement_i / temperature) / Σj exp(gain × excitement_j / temperature)
+```
+
+- 层间不互相调用：AffordanceRouter 输出排序列表，ActionSorter 做软 max，不递归
+- 抑制控制：InhibitoryControl 硬门仍在，但只在 L0-L5 旧层输出侧生效，不拦截 ActionSorter 结果
+
+#### WorkingMemoryPool (工作记忆池)
+
+| 属性 | 值 |
+|------|:----:|
+| 衰减率 | 0.7× per tick |
+| 最大惯性权重 | 0.6 |
+| 配方 | `output = max(0.6, inertia × 0.7)` |
+
+`Inertia`：上次选中 Action 的影响力保持。当新环境无明确信号时，惯性让 bot 继续当前行为，避免 flickering。
+
+### 27.3 通信协议
+
+```
+下属→高管 (Perception → LLM):
+  PerformanceRecord {
+    resourceTrends: [ { key: "iron_ore", count: 2, delta: -3, windowTicks: 300 } ],
+    failureTrends: [ { domain: "mining", rate: 0.4, deltaRate: 0.15 } ],
+    vitalSigns: { health: 0.75, hunger: 0.6, armor: 0.3 },
+    anomalies: [ "LOW_HEALTH", "THREAT_NEARBY" ],
+    environment: { controllable: 0.7, tps: 19.5 },
+    adoptions: [ { attractorType: "iron_ore", status: "ADOPTED" } ],
+    ticksSinceLastLLM: 360  // 上次调用已过 18s
+  }
+
+高管→下属 (LLM → Landscape):
+  LandscapePatch {
+    attractor: { type: "IRON_ORE", salienceBoost: 0.3, decayRate: 0.005, maxTicks: 600 },
+    diagnosis: "平原无铁, 需进洞穴",
+    recommendation: "寻找洞穴入口, 向下挖掘"
+  }
+
+下属↔下属 (Executor ↔ Executor via DomainRouter):
+  DomainSignal {
+    movementIntensity: 0.0~1.0,
+    isTurningSharp: bool,
+    isInCombatRange: bool,
+    bodyYaw: float,
+    combatTargetId: int (optional)
+  }
+```
+
+### 27.4 数据流时序
+
+LLM 调用触发有两种模式：
+
+| 模式 | 触发条件 | 间隔下限 | 说明 |
+|------|---------|:--------:|------|
+| 定期心跳 | 常规轮询 | 600 ticks (30s) | 战略评估 |
+| 早期预警 | `resourceDelta <= -3` 或 `failureRate >= 0.6` | 2400 ticks (120s) | 应急修正 |
+
+```
+Tick N:
+  1. WorldScanner.getDenseView()     // 同步采样
+  2. SalienceMap.tick(denseView)     // 更新显著性 (距离衰减 + 任务Boost衰减)
+  3. AffordanceRouter.route(salienceMap.candidates)
+     // 分类: CRITICAL→HIGH→NORMAL→LOW + urgencyOffset
+  4. ActionSorter.select(affordanceRouter.sorted + workingMemory.getInertia)
+     // lateralInhibition → gain → temperature → softmax
+  5. DomainRouter.executeBlended(blendedAction)
+     // dispatch to Executor CPG
+  6. Executor CPG.tick()             // 局部相位更新, 不返回 ActionSorter
+  7. WorldScanner.getCompactView()   // 每 20 tick 清一次 LLM 感知
+  8a. (定期心跳) MetaScheduler.checkHeartbeat()
+      if (ticksSinceLastLLM >= 1200) → wake LLM
+  8b. (早期预警) MetaScheduler.checkEarlyWarning()
+      if (report.requiresEarlyLLM()) → wake LLM (跳过后台心跳)
+  9. LLM 调用 → PerformanceReport → LLM → LandscapePatch → SalienceMap
+```
+
+### 27.5 紧急绕过
+
+紧急 (CRITICAL) 绕过AffordanceRouter门控锁和WorkingMemoryPool衰减，直接提交ActionSorter：
+
+```
+if candidate.urgency == CRITICAL:
+    submitDirectlyToActionSorter(candidate)
+    // 不加 urgencyOffset, 不检查 commitLock
+```
+
+### 27.6 旧层集成
+
+L0-L5 旧的拦截器层不删除，但改为 **候选来源** 而非 决策管道：
+
+```
+InnateReflexRegistry.getCandidates(denseView)     → submitToActionSorter(..., fromLayer=0)
+OneShotAlarmSystem.getCandidates(denseView)       → submitToActionSorter(..., fromLayer=1)
+ConditionedReflex.getCandidates(denseView)         → submitToActionSorter(..., fromLayer=2)
+SocialObserver.getCandidates(denseView)            → submitToActionSorter(..., fromLayer=3)
+LowLevelDispatcher.getCandidates(denseView)        → submitToActionSorter(..., fromLayer=4)
+// L5 模板规划器 → TASK_PLAN → 也作为候选
+```
+
+旧 InhibitoryControl 硬门作用于 L0-L5 的 `excitement` 输出，不作用于 ActionSorter 结果。
+
+### 27.7 与旧架构的差异总结
+
+| 旧架构 | 新架构 |
+|--------|--------|
+| L0-L5 硬拦截, 其中一层命中就返回 | 所有层同时评估 → softmax 竞争 |
+| LLM 输出动作序列 (executeTask) | LLM 只输出 LandscapePatch (激励规则) |
+| DispatchReflex 递归调用 | AffordanceRouter 单层排序 |
+| ConditionedReflex 自扫描全身 | WorldScanner 统一采样 |
+| DigExecutor 自选目标 | DigExecutor 接收外部 target |
+| BotController P0-P5 双路 dispatch | ActionSorter 唯一出口 |
+
+### 27.8 迁移策略
+
+准备阶段 (Phase 0 — 已完成):
+- 修改 ARCHITECTURE.md (本文)
+- 修改 AGENTS.md (§14 高管-下属协议)
+- 修改 README.md (快速开始)
+- 修改 DEVELOPMENT.md (路线图)
+
+数据类 (Phase 1):
+- PerceptionSnapshot.java, TaskBoost.java, LandscapePatch.java
+- PerformanceReport.java
+
+感知与显著性 (Phase 2):
+- WorldScanner.java → WorldScanner interface + impl
+- SalienceMap.java
+- 旧的 GameConceptDetector 不删除, 但被 WorldScanner 取代
+
+路由与决策 (Phase 3):
+- AffordanceRouter.java
+- ActionSorter.java
+- WorkingMemoryPool.java
+
+调度器集成 (Phase 4):
+- MetaScheduler.tick() 重构: 加入 ActionSorter 调用链
+- AffordanceRouter.bind() 注入
+- 5 条旧 L 层改为候选来源
+
+执行器自治 (Phase 5):
+- DomainRouter 扩展: executeBlended(), DomainSignal 局部总线
+- Executor CPG 局部相位管理  
+- 坐标阈值统一 (AffordanceRouter 决定精度)
+
+LLM 注入 (Phase 6):
+- PerformanceReport 构建
+- LandscapePatch 解析 → SalienceMap.applyPatch()
+- 废弃 TASK_PLAN 模板 → 新 LANDSCAPE_PATCH 模板
+
+清理 (Phase 6+):
+- LowLevelDispatcher @Deprecated
+- DispatchReflex @Deprecated
+- BotController P0-P5 @Deprecated
